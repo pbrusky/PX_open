@@ -368,6 +368,11 @@ void FrigateAPI::testRtsp(const QString& url)
 //
 QObject* FrigateAPI::getQueue(const QString& cameraName)
 {
+    if (cameraName.trimmed().isEmpty()) {
+        qWarning() << "[FrigateAPI] getQueue(): invalid/empty cameraName";
+        return nullptr;
+    }
+
     if (m_queues.contains(cameraName))
         return m_queues[cameraName];
 
@@ -598,6 +603,11 @@ qint64 FrigateAPI::currentPosition(const QString& cameraId)
 //
 void FrigateAPI::switchToLive(const QString& cameraId)
 {
+    if (cameraId.trimmed().isEmpty()) {
+        qWarning() << "[FrigateAPI] switchToLive(): cameraId is empty";
+        return;
+    }
+
     if (m_workers.contains(cameraId)) {
         FFmpegWorker* workerOld = m_workers.value(cameraId);
         if (workerOld)

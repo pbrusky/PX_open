@@ -60,6 +60,7 @@ Item {
                 height: 80
                 z: 9999
 
+                cameraId: root.mainWindow.selectedCameraId
                 cameraName: root.mainWindow.selectedCameraId
                 frigateRef: root.frigateRef
 

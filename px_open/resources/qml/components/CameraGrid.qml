@@ -72,6 +72,10 @@ Item {
 
         cameraNames.push(cameraName)
         updateGridSize()
+
+        if (mainWindow && mainWindow.selectedCameraId !== cameraName) {
+            mainWindow.selectedCameraId = cameraName
+        }
     }
 
     function removeCamera(cameraName) {
@@ -185,8 +189,8 @@ Item {
                 return
             }
 
-            item.cameraId = fullscreenCamera.id
-            item.cameraName = fullscreenCamera.name
+            item.cameraId = fullscreenCamera.id || fullscreenCamera.name
+            item.cameraName = fullscreenCamera.name || fullscreenCamera.id
             item.streamUrl = fullscreenCamera.streamUrl || fullscreenCamera.rtspUrl || fullscreenCamera.url
 
             item.isOnline = !!fullscreenCamera.isOnline

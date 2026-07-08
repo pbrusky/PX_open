@@ -32,8 +32,8 @@ Rectangle {
         id: liveVideo
         anchors.fill: parent
         visible: isOnline && !isPlayback
-        queue: (isOnline && frigateRef)
-               ? frigateRef.getQueue(cameraName)
+        queue: (isOnline && frigateRef && cameraId)
+               ? frigateRef.getQueue(cameraId)
                : null
     }
 
@@ -44,8 +44,8 @@ Rectangle {
         id: playbackVideo
         anchors.fill: parent
         visible: isPlayback
-        queue: (isPlayback && frigateRef)
-               ? frigateRef.getQueue(cameraName + "_playback")
+        queue: (isPlayback && frigateRef && cameraId)
+               ? frigateRef.getQueue(cameraId + "_playback")
                : null
     }
 
@@ -204,10 +204,13 @@ Rectangle {
         MouseArea {
             anchors.fill: parent
             onClicked: {
+                if (!cameraId || cameraId === "")
+                    return
+
                 isPlayback = false
                 playbackPositionMs = 0
                 if (frigateRef)
-                    frigateRef.switchToLive(cameraName)
+                    frigateRef.switchToLive(cameraId)
             }
         }
     }
@@ -228,16 +231,13 @@ Rectangle {
                 return
 
             item.frigateRef = frigateRef
-            item.cameraName = cameraName
+            item.cameraId = cameraId
+            item.cameraName = cameraName || cameraId
 
-            frigateRef.loadEvents(cameraName)
-            frigateRef.loadRecordings(cameraName)
-
-            item.onScrubbed.connect(function(ratio, timestampMs) {
-                isPlayback = true
-                playbackPositionMs = timestampMs
-                frigateRef.seek(cameraName, timestampMs)
-            })
+                if (cameraId && cameraId !== "") {
+                frigateRef.loadEvents(cameraId)
+                frigateRef.loadRecordings(cameraId)
+            }
         }
     }
 
@@ -248,8 +248,8 @@ Rectangle {
         target: frigateRef
         ignoreUnknownSignals: true
 
-        function onPlaybackPositionChanged(cameraId, positionMs) {
-            if (cameraId !== cameraName)
+        function onPlaybackPositionChanged(receivedCameraId, positionMs) {
+            if (receivedCameraId !== cameraId)
                 return
 
             playbackPositionMs = positionMs
@@ -262,12 +262,12 @@ Rectangle {
         }
 
         function onCameraOnline(id) {
-            if (id === cameraName)
+            if (id === cameraId)
                 isOnline = true
         }
 
         function onCameraOffline(id) {
-            if (id === cameraName)
+            if (id === cameraId)
                 isOnline = false
         }
 
@@ -275,9 +275,9 @@ Rectangle {
             if (!ok) return
 
             if (isPlayback)
-                playbackVideo.queue = frigateRef.getQueue(cameraName + "_playback")
+                playbackVideo.queue = frigateRef.getQueue(cameraId + "_playback")
             else
-                liveVideo.queue = frigateRef.getQueue(cameraName)
+                liveVideo.queue = frigateRef.getQueue(cameraId)
         }
     }
 
@@ -291,9 +291,9 @@ Rectangle {
         topOverlay.opacity = 1.0
         exitButton.opacity = 1.0
 
-        if (frigateRef) {
-            frigateRef.loadEvents(cameraName)
-            frigateRef.loadRecordings(cameraName)
+        if (frigateRef && cameraId && cameraId !== "") {
+            frigateRef.loadEvents(cameraId)
+            frigateRef.loadRecordings(cameraId)
         }
     }
 
