@@ -1,0 +1,88 @@
+<RCC>
+    <qresource prefix="/app/">
+
+        <!-- Main UI -->
+        <file>resources/qml/MainWindow.qml</file>
+        <file>resources/qml/FullscreenCamera.qml</file>
+        <file>resources/qml/FullscreenTimeline.qml</file>
+        <file>resources/qml/EventList.qml</file>
+
+        <!-- Settings / Pages -->
+        <file>resources/qml/aboutSettings.qml</file>
+        <file>resources/qml/camerasSettings.qml</file>
+        <file>resources/qml/generalSettings.qml</file>
+        <file>resources/qml/ManualAddDialog.qml</file>
+        <file>resources/qml/SettingsPage.qml</file>
+        <file>resources/qml/Sidebar.qml</file>
+        <file>resources/qml/StartupPage.qml</file>
+        <file>resources/qml/TopBar.qml</file>
+        <file>resources/qml/EventPlayback.qml</file>
+
+        <!-- Components -->
+        <file>resources/qml/components/CameraGrid.qml</file>
+        <file>resources/qml/components/CameraTile.qml</file>
+        <file>resources/qml/components/CameraView.qml</file>
+        <file>resources/qml/components/IconButton.qml</file>
+        <file>resources/qml/components/Panel.qml</file>
+        <file>resources/qml/components/ServerItem.qml</file>
+        <file>resources/qml/components/Timeline.qml</file>
+        <file>resources/qml/components/CameraTileOverlay.qml</file>
+        <file>resources/qml/components/ServerView.qml</file>
+        <file>resources/qml/components/AddCameraPopup.qml</file>
+        <file>resources/qml/components/EditCameraPopup.qml</file>
+        <file>resources/qml/components/RemoveCameraPopup.qml</file>
+        <file>resources/qml/components/OnvifDiscoveryPopup.qml</file>
+        <file>resources/qml/components/FullscreenToolbar.qml</file>
+
+        <!-- html -->
+        <file>resources/html/mp4player.html</file>
+
+        <!-- Test Page -->
+        <file>resources/qml/TestIcons.qml</file>
+
+        <!-- Assets -->
+        <file>assets/icon.png</file>
+
+        <!-- Icon Assets -->
+        <file>assets/icons/play.svg</file>
+        <file>assets/icons/pause.svg</file>
+        <file>assets/icons/camera.svg</file>
+        <file>assets/icons/events.svg</file>
+        <file>assets/icons/exit_fullscreen.svg</file>
+        <file>assets/icons/fastforward.svg</file>
+        <file>assets/icons/fullscreen.svg</file>
+        <file>assets/icons/home.svg</file>
+        <file>assets/icons/rewind.svg</file>
+        <file>assets/icons/search.svg</file>
+        <file>assets/icons/server.svg</file>
+        <file>assets/icons/settings.svg</file>
+        <file>assets/icons/stop.svg</file>
+        <file>assets/icons/timeline.svg</file>
+        <file>assets/icons/user.svg</file>
+
+        <!-- NX Style Icons -->
+        <file>assets/icons/nx/home.svg</file>
+        <file>assets/icons/nx/cameras.svg</file>
+        <file>assets/icons/nx/events.svg</file>
+        <file>assets/icons/nx/timeline.svg</file>
+        <file>assets/icons/nx/settings.svg</file>
+        <file>assets/icons/nx/server.svg</file>
+        <file>assets/icons/nx/search.svg</file>
+        <file>assets/icons/nx/fullscreen.svg</file>
+        <file>assets/icons/nx/exit_fullscreen.svg</file>
+        <file>assets/icons/nx/stop.svg</file>
+        <file>assets/icons/nx/fastforward.svg</file>
+        <file>assets/icons/nx/rewind.svg</file>
+        <file>assets/icons/nx/arrow-left.svg</file>
+        <file>assets/icons/nx/arrow-right.svg</file>
+        <file>assets/icons/nx/arrow-up.svg</file>
+        <file>assets/icons/nx/arrow-down.svg</file>
+        <file>assets/icons/nx/close.svg</file>
+        <file>assets/icons/nx/audio-on.svg</file>
+        <file>assets/icons/nx/audio-off.svg</file>
+        <file>assets/icons/nx/play.svg</file>
+        <file>assets/icons/nx/pause.svg</file>
+
+
+    </qresource>
+</RCC>
