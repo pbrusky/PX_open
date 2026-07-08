@@ -381,7 +381,7 @@ Rectangle {
 
     // Backend signals
     Connections {
-        target: frigateRef ? frigateRef : null
+        target: frigate
         ignoreUnknownSignals: true
 
         function onRecordingsLoaded(receivedCameraId, segments) {

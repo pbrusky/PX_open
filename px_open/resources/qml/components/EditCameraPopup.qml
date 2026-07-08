@@ -226,7 +226,7 @@ Popup {
 
     // ⭐ RTSP test results
     Connections {
-        target: popup.frigateRef
+        target: frigate
 
         function onRtspTestResult(ok, message) {
             popup.rtspValid = ok

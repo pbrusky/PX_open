@@ -161,9 +161,20 @@ void FrigateAPI::addCamera(QString id, QString url)
         reply->deleteLater();
 
         QJsonDocument doc = QJsonDocument::fromJson(data);
-        bool ok = doc.object()["status"].toString() == "ok";
+        QJsonObject root = doc.object();
 
-        emit cameraAddResult(ok, ok ? "Camera added" : "Failed to add camera");
+        bool ok = root.value("status").toString() == "ok";
+        bool go2 = root.value("go2rtc").toBool(false);
+        bool frig = root.value("frigate_reload").toBool(false);
+
+        QString msg;
+        if (ok)
+            msg = QString("Camera added (go2rtc=%1, frigate_reload=%2)").arg(go2).arg(frig);
+        else
+            msg = QString("Failed to add camera (go2rtc=%1, frigate_reload=%2)").arg(go2).arg(frig);
+
+        qDebug() << "[FrigateAPI] addCamera response:" << msg;
+        emit cameraAddResult(ok, msg);
 
         if (ok) {
             loadCameras();

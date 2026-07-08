@@ -171,7 +171,7 @@ Popup {
     // ⭐ Backend ONVIF results
     //
     Connections {
-        target: frigateRef
+        target: frigate
         function onOnvifDevicesDiscovered(devList) {
             devices = devList
         }

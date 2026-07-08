@@ -30,6 +30,23 @@ Item {
     signal minimizeRequested()
     signal restoreRequested()
     signal maximizeRequested()
+    signal addCameraRequested()
+
+    Menu {
+        id: serverNameContextMenu
+        x: serverNameContainer.x
+        y: serverNameContainer.height
+
+        MenuItem {
+            text: "Add Camera"
+            onTriggered: topbarWrapper.addCameraRequested()
+        }
+
+        MenuItem {
+            text: "Disconnect"
+            onTriggered: topbarWrapper.disconnectRequested()
+        }
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -64,85 +81,21 @@ Item {
         }
     }
 
-    Popup {
+    Menu {
         id: menuPopup
-        modal: false
-        focus: true
         x: menuButton.x
         y: menuButton.y + menuButton.height + 4
-        width: 180
 
-        background: Rectangle {
-            color: "#2A2A2A"
-            radius: 6
+        MenuItem {
+            text: "Disconnect"
+            onTriggered: topbarWrapper.disconnectRequested()
         }
 
-        Column {
-            anchors.fill: parent
-            anchors.margins: 10
-            spacing: 6
+        MenuSeparator {}
 
-            Rectangle {
-                width: parent.width
-                height: 40
-                radius: 4
-                color: hovered ? "#454545" : "#2A2A2A"
-                property bool hovered: false
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: 12
-                    text: "Disconnect"
-                    color: "#E0E0E0"
-                    font.pixelSize: 16
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onEntered: parent.hovered = true
-                    onExited: parent.hovered = false
-                    onClicked: {
-                        menuPopup.close()
-                        topbarWrapper.disconnectRequested()
-                    }
-                }
-            }
-
-            Rectangle {
-                width: parent.width
-                height: 1
-                color: "#555555"
-            }
-
-            Rectangle {
-                width: parent.width
-                height: 40
-                radius: 4
-                color: hovered ? "#454545" : "#2A2A2A"
-                property bool hovered: false
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: 12
-                    text: "Exit"
-                    color: "#E0E0E0"
-                    font.pixelSize: 16
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onEntered: parent.hovered = true
-                    onExited: parent.hovered = false
-                    onClicked: {
-                        menuPopup.close()
-                        topbarWrapper.exitRequested()
-                    }
-                }
-            }
+        MenuItem {
+            text: "Exit"
+            onTriggered: topbarWrapper.exitRequested()
         }
     }
 
@@ -152,17 +105,32 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 16
 
-        Text {
-            id: serverNameText
-            text: "Frigate System"
-            color: "white"
-            font.pixelSize: 18
-        }
+            Rectangle {
+                id: serverNameContainer
+                width: serverNameText.paintedWidth + 24
+                height: parent.height
+                color: "transparent"
 
-        Image {
-            source: "qrc:/app/assets/icons/user.svg"
-            width: 24
-            height: 24
+                Text {
+                    id: serverNameText
+                    anchors.centerIn: parent
+                    text: topbarWrapper.serverName !== "" ? topbarWrapper.serverName : "Frigate System"
+                    color: "white"
+                    font.pixelSize: 18
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.RightButton | Qt.LeftButton
+                    preventStealing: true
+
+                    onPressed: function(mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            serverNameContextMenu.open()
+                        }
+                    }
+                }
         }
 
         Rectangle {

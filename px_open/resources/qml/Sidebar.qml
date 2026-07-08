@@ -57,10 +57,49 @@ Item {
         anchors.top: parent.top
         anchors.margins: 8
 
-        Text {
-            text: serverName !== "" ? serverName : "No server"
-            color: "white"
-            font.pixelSize: 16
+        Item {
+            width: parent.width
+            height: 28
+
+            Menu {
+                id: serverNameContextMenu
+                x: serverNameContainer.x
+                y: serverNameContainer.height
+
+                MenuItem {
+                    text: "Add Camera"
+                    onTriggered: sidebar.navigate("addCamera")
+                }
+                MenuItem {
+                    text: "Disconnect"
+                    onTriggered: sidebar.navigate("disconnect")
+                }
+            }
+
+            Rectangle {
+                id: serverNameContainer
+                anchors.fill: parent
+                color: "transparent"
+
+                Text {
+                    id: sidebarServerNameText
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: serverName !== "" ? serverName : "No server"
+                    color: "white"
+                    font.pixelSize: 16
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.RightButton
+                    hoverEnabled: true
+                    onPressed: function(mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            serverNameContextMenu.open()
+                        }
+                    }
+                }
+            }
         }
 
         ListView {
@@ -105,9 +144,38 @@ Item {
                     }
                 }
 
+                Menu {
+                    id: sidebarContextMenu
+                    title: cameraName !== "" ? cameraName : "Camera"
+
+                    MenuItem {
+                        text: "Select"
+                        enabled: cameraName !== ""
+                        onTriggered: {
+                            sidebar.selectedCameraId = cameraId
+                            sidebar.cameraSelected(cameraId)
+                        }
+                    }
+                    MenuItem {
+                        text: "Add Camera"
+                        onTriggered: {
+                            sidebar.navigate("addCamera")
+                        }
+                    }
+                    MenuItem {
+                        text: "Fullscreen"
+                        enabled: cameraName !== "" && sidebar.selectedCameraId === cameraId
+                        onTriggered: {
+                            sidebar.cameraSelected(cameraId)
+                            sidebar.navigate("CameraGrid.qml")
+                        }
+                    }
+                }
+
                 MouseArea {
                     anchors.fill: parent
                     hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     pressAndHoldInterval: 200
 
                     onPressed: {
@@ -115,7 +183,11 @@ Item {
                         sidebar.pressCameraName = cameraName
                     }
 
-                    onClicked: {
+                    onClicked: function(mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            sidebarContextMenu.open()
+                            return
+                        }
                         sidebar.selectedCameraId = cameraId
                         sidebar.cameraSelected(cameraId)
                     }

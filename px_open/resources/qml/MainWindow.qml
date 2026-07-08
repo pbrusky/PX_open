@@ -156,8 +156,16 @@ ApplicationWindow {
         }
 
         onNavigate: function(page) {
-            if (page === "qrc:/app/resources/qml/StartupPage.qml")
+            if (page === "qrc:/app/resources/qml/StartupPage.qml") {
+                contentLoader.startupDone = false
+                contentLoader.source = page
                 return
+            }
+
+            if (page === "disconnect") {
+                topbar.disconnectRequested()
+                return
+            }
 
             if (page === "addCamera") {
                 if (contentLoader.item &&
@@ -334,6 +342,14 @@ ApplicationWindow {
             mainWindow.y = (mainWindow.screen.height - mainWindow.height) / 2
 
             topbar.isMaximized = false
+        }
+
+        function onAddCameraRequested() {
+            if (contentLoader.item &&
+                contentLoader.item.objectName === "ServerView" &&
+                contentLoader.item.openAddCameraPopup) {
+                contentLoader.item.openAddCameraPopup()
+            }
         }
 
         function onExitRequested() {

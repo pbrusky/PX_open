@@ -214,7 +214,7 @@ Popup {
     }
 
     Connections {
-        target: popup.frigateRef
+        target: frigate
 
         function onRtspTestResult(ok, message) {
             if (ok) {

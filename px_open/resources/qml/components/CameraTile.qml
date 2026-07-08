@@ -86,6 +86,29 @@ Item {
         muted: true
     }
 
+    Menu {
+        id: contextMenu
+        title: cameraName !== "" ? cameraName : "Camera"
+
+        MenuItem {
+            text: "Fullscreen"
+            enabled: cameraName !== ""
+            onTriggered: {
+                if (cameraName !== "" && gridRoot && gridRoot.enterFullscreen)
+                    gridRoot.enterFullscreen(cameraName)
+            }
+        }
+
+        MenuItem {
+            text: "Remove Camera"
+            enabled: cameraName !== ""
+            onTriggered: {
+                if (cameraName !== "" && gridRoot && gridRoot.removeCamera)
+                    gridRoot.removeCamera(cameraName)
+            }
+        }
+    }
+
     VideoOutput {
         id: videoItem
         anchors.fill: parent
@@ -221,7 +244,7 @@ Item {
         anchors.fill: parent
         z: 100
         hoverEnabled: true
-        acceptedButtons: Qt.LeftButton
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
         drag.target: tile
         drag.axis: Drag.XAndYAxis
 
@@ -248,6 +271,12 @@ Item {
             gridRoot.reorderTiles(tile.dragIndex, tile.x, tile.y)
             tile.x = 0
             tile.y = 0
+        }
+
+        onClicked: function(mouse) {
+            if (mouse.button === Qt.RightButton) {
+                contextMenu.open()
+            }
         }
     }
 }

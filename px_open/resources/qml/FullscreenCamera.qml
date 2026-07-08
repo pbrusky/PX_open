@@ -245,7 +245,7 @@ Rectangle {
     // BACKEND SIGNALS
     //
     Connections {
-        target: frigateRef
+        target: frigate
         ignoreUnknownSignals: true
 
         function onPlaybackPositionChanged(receivedCameraId, positionMs) {

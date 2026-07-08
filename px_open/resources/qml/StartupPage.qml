@@ -19,6 +19,11 @@ Rectangle {
     property var servers: []
     ListModel { id: serverModel }
 
+    property string manualServerIp: ""
+    property int manualModulePort: 7001
+    property string manualUsername: ""
+    property string manualPassword: ""
+
     //
     // Prevent double‑connect
     //
@@ -105,15 +110,28 @@ Rectangle {
     //
     // ⭐ CONNECT TO SERVER
     //
-    function connectToServer(address, modulePort) {
+    function connectToServer(address, modulePort, username, password) {
         console.log("StartupPage: connecting to server", address, modulePort)
+
+        if (!modulePort || modulePort === 0) {
+            modulePort = 7001
+            console.log("StartupPage: module port not provided, defaulting to", modulePort)
+        }
+
+        var auth = ""
+        if (username && username.length > 0) {
+            auth = encodeURIComponent(username)
+            if (password && password.length > 0)
+                auth += ":" + encodeURIComponent(password)
+            auth += "@"
+        }
 
         //
         // Frigate API is ALWAYS port 5000
         //
         var apiPort = 5000
-        var apiUrl = "http://" + address + ":" + apiPort
-        var moduleUrl = "http://" + address + ":" + modulePort
+        var apiUrl = "http://" + auth + address + ":" + apiPort
+        var moduleUrl = "http://" + auth + address + ":" + modulePort
 
         frigate.setServer(apiUrl)
         frigate.setModuleServer(moduleUrl)
@@ -142,10 +160,12 @@ Rectangle {
         anchors.centerIn: parent
 
         Text {
+            width: parent.width
             text: "Discovered Servers"
             font.pixelSize: 26
             color: "white"
             horizontalAlignment: Text.AlignHCenter
+            anchors.horizontalCenter: parent.horizontalCenter
         }
 
         ListView {
@@ -192,6 +212,114 @@ Rectangle {
                         root.connectToServer(address, port)
                     }
                 }
+            }
+        }
+
+        Button {
+            text: "Manual Add Server"
+            width: parent.width
+            onClicked: manualPopup.open()
+        }
+    }
+
+    Popup {
+        id: manualPopup
+        modal: true
+        focus: true
+        width: 520
+        height: 520
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            color: "#111"
+            radius: 8
+            border.color: "#444"
+            border.width: 1
+        }
+
+        anchors.centerIn: parent
+
+        Column {
+            spacing: 14
+            padding: 24
+            width: parent.width
+            height: parent.height
+
+            Text {
+                text: "Manual Add Server"
+                color: "white"
+                font.pixelSize: 24
+                font.bold: true
+            }
+
+            TextField {
+                id: manualIpField
+                placeholderText: "Server IP (e.g. 10.0.0.5)"
+                width: parent.width
+                text: root.manualServerIp
+                onTextChanged: root.manualServerIp = text
+            }
+
+            TextField {
+                id: manualPortField
+                placeholderText: "Module Port (e.g. 7001)"
+                width: parent.width
+                inputMethodHints: Qt.ImhDigitsOnly
+                text: root.manualModulePort > 0 ? root.manualModulePort.toString() : ""
+                onTextChanged: root.manualModulePort = parseInt(text) || 0
+            }
+
+            TextField {
+                id: manualUserField
+                placeholderText: "Username (optional)"
+                width: parent.width
+                text: root.manualUsername
+                onTextChanged: root.manualUsername = text
+            }
+
+            TextField {
+                id: manualPassField
+                placeholderText: "Password (optional)"
+                width: parent.width
+                echoMode: TextInput.Password
+                text: root.manualPassword
+                onTextChanged: root.manualPassword = text
+            }
+
+            Rectangle {
+                width: parent.width
+                height: 1
+                color: "#444"
+            }
+
+            Button {
+                text: "Connect"
+                width: parent.width
+                onClicked: {
+                    if (!manualIpField.text || manualIpField.text.length === 0) {
+                        console.log("Manual connect requires IP address")
+                        return
+                    }
+
+                    if (!manualPortField.text || manualPortField.text.length === 0) {
+                        console.log("Manual connect requires port")
+                        return
+                    }
+
+                    root.serverAssigned = true
+                    root.connectToServer(
+                        manualIpField.text,
+                        parseInt(manualPortField.text) || 7001,
+                        manualUserField.text,
+                        manualPassField.text
+                    )
+                    manualPopup.close()
+                }
+            }
+
+            Button {
+                text: "Cancel"
+                width: parent.width
+                onClicked: manualPopup.close()
             }
         }
     }

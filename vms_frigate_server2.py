@@ -8,6 +8,14 @@ import requests
 import subprocess
 import xml.etree.ElementTree as ET
 import uuid
+import os
+import shutil
+
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except Exception:
+    YAML_AVAILABLE = False
 
 # ----------------------------------------------------------------------
 # CONFIG
@@ -25,6 +33,8 @@ FRIGATE_BASE = f"http://{FRIGATE_HOST}:{FRIGATE_PORT}"
 GO2RTC_HOST = "127.0.0.1"
 GO2RTC_PORT = 1984
 GO2RTC_BASE = f"http://{GO2RTC_HOST}:{GO2RTC_PORT}"
+GO2RTC_CONFIG_PATH = r"C:\frigate\go2rtc.yaml"
+FRIGATE_CONFIG_PATH = r"C:\frigate\config\config.yml"
 
 SYSTEM_ID = "{11111111-2222-3333-4444-555555555555}"
 MODULE_ID = "{66666666-7777-8888-9999-000000000000}"
@@ -36,23 +46,213 @@ SYSTEM_NAME = "Frigate System"
 # ----------------------------------------------------------------------
 def frigate_reload():
     try:
-        r = requests.post(f"{FRIGATE_BASE}/api/reload", timeout=2)
-        return r.status_code == 200
+        url = f"{FRIGATE_BASE}/api/reload"
+        r = requests.post(url, timeout=2)
+        print(f"[MODULE] frigate_reload -> POST {url} status={r.status_code} text={r.text}")
+        if r.status_code == 200:
+            return True
+
+        # Some Frigate deployments expose reload as GET or a different endpoint.
+        if r.status_code == 405:
+            try:
+                r2 = requests.get(url, timeout=2)
+                print(f"[MODULE] frigate_reload -> GET {url} status={r2.status_code} text={r2.text}")
+                return r2.status_code == 200
+            except Exception:
+                import traceback
+                print("[MODULE] frigate_reload GET exception:\n" + traceback.format_exc())
+
+        return False
     except:
+        import traceback
+        print("[MODULE] frigate_reload exception:\n" + traceback.format_exc())
         return False
 
 def go2rtc_set_stream(name, rtsp_url):
+    if not is_valid_camera_name(name) or not is_valid_rtsp_url(rtsp_url):
+        print(f"[MODULE] go2rtc_set_stream invalid name or rtsp_url: {name!r}, {rtsp_url!r}")
+        return False
+
     try:
-        r = requests.post(f"{GO2RTC_BASE}/api/streams", json={name: rtsp_url}, timeout=2)
-        return r.status_code == 200
+        url = f"{GO2RTC_BASE}/api/streams"
+        payload1 = {name: rtsp_url}
+        print(f"[MODULE] go2rtc_set_stream -> POST {url} payload={payload1}")
+        r = requests.post(url, json=payload1, timeout=2)
+        print(f"[MODULE] go2rtc_set_stream response: status={r.status_code} text={r.text}")
+
+        if r.status_code == 200:
+            return True
+
+        # Retry with alternate payload format many go2rtc variants accept
+        payload2 = {"streams": {name: rtsp_url}}
+        try:
+            print(f"[MODULE] go2rtc_set_stream -> RETRY POST {url} payload={payload2}")
+            r2 = requests.post(url, json=payload2, timeout=2)
+            print(f"[MODULE] go2rtc_set_stream retry response: status={r2.status_code} text={r2.text}")
+            return r2.status_code == 200
+        except Exception:
+            import traceback
+            print("[MODULE] go2rtc_set_stream retry exception:\n" + traceback.format_exc())
+
+        return False
     except:
+        import traceback
+        print("[MODULE] go2rtc_set_stream exception:\n" + traceback.format_exc())
         return False
 
 def go2rtc_remove_stream(name):
+    if not is_valid_camera_name(name):
+        print(f"[MODULE] go2rtc_remove_stream invalid camera name: {name!r}")
+        return False
+
     try:
-        r = requests.delete(f"{GO2RTC_BASE}/api/streams/{name}", timeout=2)
+        url = f"{GO2RTC_BASE}/api/streams/{name}"
+        print(f"[MODULE] go2rtc_remove_stream -> DELETE {url}")
+        r = requests.delete(url, timeout=2)
+        print(f"[MODULE] go2rtc_remove_stream response: status={r.status_code} text={r.text}")
         return r.status_code == 200
     except:
+        import traceback
+        print("[MODULE] go2rtc_remove_stream exception:\n" + traceback.format_exc())
+        return False
+
+
+def is_valid_camera_name(name):
+    return isinstance(name, str) and name.strip() != ""
+
+
+def is_valid_rtsp_url(rtsp_url):
+    return isinstance(rtsp_url, str) and rtsp_url.strip() != ""
+
+
+def backup_file(path):
+    try:
+        if os.path.exists(path):
+            shutil.copy(path, path + ".backup")
+            print(f"[MODULE] backup created: {path}.backup")
+            return True
+    except Exception:
+        import traceback
+        print("[MODULE] backup_file exception:\n" + traceback.format_exc())
+    return False
+
+
+def add_camera_to_go2rtc_config(name, rtsp_url):
+    if not YAML_AVAILABLE:
+        print("[MODULE] PyYAML not available; cannot edit go2rtc config")
+        return False
+
+    path = GO2RTC_CONFIG_PATH
+    try:
+        if not os.path.exists(path):
+            data = {"streams": {name: rtsp_url}}
+        else:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            if 'streams' not in data:
+                data['streams'] = {}
+            data['streams'][name] = rtsp_url
+
+        backup_file(path)
+        with open(path, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(data, f)
+        print(f"[MODULE] go2rtc config updated: {path} -> added {name}")
+        return True
+    except Exception:
+        import traceback
+        print("[MODULE] add_camera_to_go2rtc_config exception:\n" + traceback.format_exc())
+        return False
+
+
+def remove_camera_from_go2rtc_config(name):
+    if not YAML_AVAILABLE:
+        print("[MODULE] PyYAML not available; cannot edit go2rtc config")
+        return False
+
+    path = GO2RTC_CONFIG_PATH
+    try:
+        if not os.path.exists(path):
+            return False
+        with open(path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+        if 'streams' in data and name in data['streams']:
+            del data['streams'][name]
+            backup_file(path)
+            with open(path, 'w', encoding='utf-8') as f:
+                yaml.safe_dump(data, f)
+            print(f"[MODULE] go2rtc config updated: {path} -> removed {name}")
+            return True
+        return False
+    except Exception:
+        import traceback
+        print("[MODULE] remove_camera_from_go2rtc_config exception:\n" + traceback.format_exc())
+        return False
+
+
+def add_camera_to_frigate_config(name, rtsp_url=None):
+    if not YAML_AVAILABLE:
+        print("[MODULE] PyYAML not available; cannot edit Frigate config")
+        return False
+
+    path = FRIGATE_CONFIG_PATH
+    try:
+        if not os.path.exists(path):
+            data = {}
+        else:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+
+        if 'cameras' not in data:
+            data['cameras'] = {}
+
+        # Prefer original RTSP if provided, otherwise use go2rtc local stream URL
+        if rtsp_url and isinstance(rtsp_url, str) and rtsp_url.strip() != "":
+            stream_url = rtsp_url
+        else:
+            stream_url = f"rtsp://{GO2RTC_HOST}:{GO2RTC_PORT}/{name}"
+
+        # Minimal camera entry using provided RTSP
+        data['cameras'][name] = {
+            'ffmpeg': {
+                'inputs': [
+                    {'path': stream_url, 'roles': ['detect', 'record']}
+                ]
+            }
+        }
+
+        backup_file(path)
+        with open(path, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(data, f)
+        print(f"[MODULE] Frigate config updated: {path} -> added camera {name}")
+        return True
+    except Exception:
+        import traceback
+        print("[MODULE] add_camera_to_frigate_config exception:\n" + traceback.format_exc())
+        return False
+
+
+def remove_camera_from_frigate_config(name):
+    if not YAML_AVAILABLE:
+        print("[MODULE] PyYAML not available; cannot edit Frigate config")
+        return False
+
+    path = FRIGATE_CONFIG_PATH
+    try:
+        if not os.path.exists(path):
+            return False
+        with open(path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+        if 'cameras' in data and name in data['cameras']:
+            del data['cameras'][name]
+            backup_file(path)
+            with open(path, 'w', encoding='utf-8') as f:
+                yaml.safe_dump(data, f)
+            print(f"[MODULE] Frigate config updated: {path} -> removed camera {name}")
+            return True
+        return False
+    except Exception:
+        import traceback
+        print("[MODULE] remove_camera_from_frigate_config exception:\n" + traceback.format_exc())
         return False
 
 def test_rtsp_stream(rtsp_url):
@@ -64,9 +264,13 @@ def test_rtsp_stream(rtsp_url):
             "-timeout", "5000000",
             "-i", rtsp_url
         ]
-        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        print(f"[MODULE] test_rtsp_stream -> running ffprobe for {rtsp_url}")
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        print(f"[MODULE] test_rtsp_stream output: {out[:200]}")
         return True
     except:
+        import traceback
+        print("[MODULE] test_rtsp_stream exception:\n" + traceback.format_exc())
         return False
 
 def get_onvif_profiles(address, username="", password=""):
@@ -219,22 +423,71 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/addCamera":
             cam_id = data.get("id")
             rtsp = data.get("rtsp")
-            ok1 = go2rtc_set_stream(cam_id, rtsp)
-            ok2 = frigate_reload()
-            return self.send_json({"status": "ok", "go2rtc": ok1, "frigate_reload": ok2})
+            if not is_valid_camera_name(cam_id) or not is_valid_rtsp_url(rtsp):
+                return self.send_json({"status": "error", "error": "invalid addCamera payload"}, 400)
+
+            # Try API first, fall back to editing go2rtc config file
+            ok_api = go2rtc_set_stream(cam_id, rtsp)
+            ok_config = False
+            if not ok_api:
+                ok_config = add_camera_to_go2rtc_config(cam_id, rtsp)
+
+            # Ensure Frigate config has the camera entry (pointing to go2rtc stream)
+            ok_frigate_config = add_camera_to_frigate_config(cam_id, rtsp)
+
+            # Reload Frigate
+            ok_reload = frigate_reload()
+
+            return self.send_json({
+                "status": "ok",
+                "go2rtc_api": ok_api,
+                "go2rtc_config": ok_config,
+                "frigate_config": ok_frigate_config,
+                "frigate_reload": ok_reload
+            })
 
         if self.path == "/api/editCamera":
             cam_id = data.get("id")
             rtsp = data.get("rtsp")
-            ok1 = go2rtc_set_stream(cam_id, rtsp)
-            ok2 = frigate_reload()
-            return self.send_json({"status": "ok", "go2rtc": ok1, "frigate_reload": ok2})
+            if not is_valid_camera_name(cam_id) or not is_valid_rtsp_url(rtsp):
+                return self.send_json({"status": "error", "error": "invalid editCamera payload"}, 400)
+
+            ok_api = go2rtc_set_stream(cam_id, rtsp)
+            ok_config = False
+            if not ok_api:
+                ok_config = add_camera_to_go2rtc_config(cam_id, rtsp)
+
+            ok_frigate_config = add_camera_to_frigate_config(cam_id, rtsp)
+            ok_reload = frigate_reload()
+
+            return self.send_json({
+                "status": "ok",
+                "go2rtc_api": ok_api,
+                "go2rtc_config": ok_config,
+                "frigate_config": ok_frigate_config,
+                "frigate_reload": ok_reload
+            })
 
         if self.path == "/api/removeCamera":
             cam_id = data.get("id")
-            ok1 = go2rtc_remove_stream(cam_id)
-            ok2 = frigate_reload()
-            return self.send_json({"status": "ok", "go2rtc": ok1, "frigate_reload": ok2})
+            if not is_valid_camera_name(cam_id):
+                return self.send_json({"status": "error", "error": "invalid removeCamera payload"}, 400)
+
+            ok_api = go2rtc_remove_stream(cam_id)
+            ok_config = False
+            if not ok_api:
+                ok_config = remove_camera_from_go2rtc_config(cam_id)
+
+            ok_frigate_config = remove_camera_from_frigate_config(cam_id)
+            ok_reload = frigate_reload()
+
+            return self.send_json({
+                "status": "ok",
+                "go2rtc_api": ok_api,
+                "go2rtc_config": ok_config,
+                "frigate_config": ok_frigate_config,
+                "frigate_reload": ok_reload
+            })
 
         if self.path == "/api/testRtsp":
             rtsp = data.get("rtsp")

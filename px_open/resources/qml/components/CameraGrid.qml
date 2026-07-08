@@ -11,6 +11,8 @@ Item {
     // Provided by ServerView
     property var mainWindow
     property var frigateRef: null
+    property var cameraList: []
+    property var serverViewRoot
 
     property var cameraNames: []
     property int cols: 0
@@ -81,6 +83,24 @@ Item {
     function removeCamera(cameraName) {
         cameraNames = cameraNames.filter(function(n) { return n !== cameraName })
         updateGridSize()
+    }
+
+    function requestRemoveCamera(cameraName) {
+        // Remove the confirmation popup: call backend and update UI directly
+        if (gridContainer.frigateRef && gridContainer.frigateRef.removeCamera) {
+            try {
+                gridContainer.frigateRef.removeCamera(cameraName)
+            } catch (e) {
+                console.log("CameraGrid: error calling removeCamera:", e)
+            }
+            // Optimistically remove the tile from the grid
+            removeCamera(cameraName)
+        } else if (serverViewRoot && serverViewRoot.openRemoveCameraPopup) {
+            // Fallback to previous behavior if frigateRef isn't available
+            serverViewRoot.openRemoveCameraPopup(cameraName)
+        } else {
+            removeCamera(cameraName)
+        }
     }
 
     function reorderTiles(oldIndex, x, y) {
@@ -167,7 +187,7 @@ Item {
                     tileIndex: index
 
                     onRemoveRequested: {
-                        gridContainer.removeCamera(tileWrapper.cameraName)
+                        gridContainer.requestRemoveCamera(tileWrapper.cameraName)
                     }
                 }
             }

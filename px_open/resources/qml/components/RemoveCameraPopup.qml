@@ -16,6 +16,7 @@ Popup {
     }
 
     // Set by ServerView before opening
+    property var frigateRef: null
     property string cameraId: ""
 
     signal cameraRemoved()
@@ -65,7 +66,12 @@ Popup {
                 onClicked: {
                     statusText.text = "Removing..."
                     statusText.color = "yellow"
-                    frigate.removeCamera(removePopup.cameraId)
+                    if (frigateRef)
+                        frigateRef.removeCamera(removePopup.cameraId)
+                    else {
+                        statusText.text = "Frigate not ready"
+                        statusText.color = "red"
+                    }
                 }
             }
 
@@ -90,7 +96,6 @@ Popup {
             if (ok) {
                 removePopup.close()
                 removePopup.cameraRemoved()
-                frigate.loadCameras()
             }
         }
     }

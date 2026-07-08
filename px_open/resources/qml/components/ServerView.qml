@@ -18,6 +18,29 @@ Item {
     signal camerasLoadedToMain(var list)
     signal gridReady()
 
+    AddCameraPopup {
+        id: addCameraPopup
+        frigateRef: root.frigateRef
+    }
+
+    RemoveCameraPopup {
+        id: removeCameraPopup
+        frigateRef: root.frigateRef
+        onCameraRemoved: {
+            if (root.cameraGrid && root.cameraGrid.removeCamera)
+                root.cameraGrid.removeCamera(removeCameraPopup.cameraId)
+        }
+    }
+
+    function openRemoveCameraPopup(cameraId) {
+        if (!removeCameraPopup) {
+            console.log("ServerView: removeCameraPopup is not available")
+            return
+        }
+        removeCameraPopup.cameraId = cameraId
+        removeCameraPopup.open()
+    }
+
     Loader {
         id: gridLoader
         anchors.fill: parent
@@ -42,6 +65,14 @@ Item {
         gridLoader.active = true
     }
 
+    function openAddCameraPopup() {
+        if (!addCameraPopup) {
+            console.log("ServerView: addCameraPopup is not available")
+            return
+        }
+        addCameraPopup.open()
+    }
+
     Component {
         id: gridComponent
 
@@ -50,6 +81,8 @@ Item {
             anchors.fill: parent
 
             mainWindow: root.mainWindow
+            cameraList: root.mainWindow.cameraList
+            serverViewRoot: root
             frigateRef: root.frigateRef
 
             FullscreenTimeline {
