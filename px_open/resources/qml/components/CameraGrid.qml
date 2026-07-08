@@ -7,7 +7,7 @@ Item {
     anchors.fill: parent
     clip: true
     z: 1
-
+    
     // Provided by ServerView
     property var mainWindow
     property var frigateRef: null
