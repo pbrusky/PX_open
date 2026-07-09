@@ -28,6 +28,7 @@ Item {
     property bool isCameraPage: false
 
     signal cameraSelected(string cameraId)
+    signal requestRemoveCamera(string cameraId)
     signal navigate(string page)
     signal cameraDropped(real x, real y, string cameraName)
 
@@ -157,6 +158,12 @@ Item {
                         }
                     }
                     MenuItem {
+                        text: "Remove Camera"
+                        onTriggered: {
+                            sidebar.requestRemoveCamera(cameraId)
+                        }
+                    }
+                    MenuItem {
                         text: "Add Camera"
                         onTriggered: {
                             sidebar.navigate("addCamera")
@@ -166,11 +173,11 @@ Item {
                         text: "Fullscreen"
                         enabled: cameraName !== "" && sidebar.selectedCameraId === cameraId
                         onTriggered: {
-                            sidebar.cameraSelected(cameraId)
+                        sidebar.cameraSelected(cameraId)
                             sidebar.navigate("CameraGrid.qml")
-                        }
                     }
                 }
+            }
 
                 MouseArea {
                     anchors.fill: parent
@@ -181,13 +188,13 @@ Item {
                     onPressed: {
                         sidebar.pressCameraId = cameraId
                         sidebar.pressCameraName = cameraName
-                    }
+        }
 
                     onClicked: function(mouse) {
                         if (mouse.button === Qt.RightButton) {
                             sidebarContextMenu.open()
                             return
-                        }
+    }
                         sidebar.selectedCameraId = cameraId
                         sidebar.cameraSelected(cameraId)
                     }
@@ -267,3 +274,4 @@ Item {
         }
     }
 }
+

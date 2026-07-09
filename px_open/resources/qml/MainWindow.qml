@@ -151,6 +151,14 @@ ApplicationWindow {
             mainWindow.selectedCameraId = cameraId
         }
 
+        onRequestRemoveCamera: function(id) {
+                if (contentLoader.item &&
+                    contentLoader.item.objectName === "ServerView" &&
+                contentLoader.item.openRemoveCameraPopup) {
+                contentLoader.item.openRemoveCameraPopup(id)
+                }
+            }
+
         onCameraDropped: function(x, y, cameraName) {
             mainWindow.handleCameraDrop(x, y, cameraName)
         }
@@ -165,19 +173,19 @@ ApplicationWindow {
             if (page === "disconnect") {
                 topbar.disconnectRequested()
                 return
-            }
+        }
 
             if (page === "addCamera") {
-                if (contentLoader.item &&
-                    contentLoader.item.objectName === "ServerView" &&
+            if (contentLoader.item &&
+                contentLoader.item.objectName === "ServerView" &&
                     contentLoader.item.openAddCameraPopup) {
                     contentLoader.item.openAddCameraPopup()
-                }
+        }
                 return
             }
 
             if (page === "reloadCameras") {
-                if (contentLoader.item &&
+            if (contentLoader.item &&
                     contentLoader.item.objectName === "ServerView") {
                     if (contentLoader.item.reloadCameras)
                         contentLoader.item.reloadCameras()
@@ -185,13 +193,13 @@ ApplicationWindow {
                         frigate.loadCameras()
                 } else if (frigate) {
                     frigate.loadCameras()
-                }
-                return
             }
+                return
+        }
 
             contentLoader.source = page
         }
-    }
+        }
 
     IconButton {
         id: sidebarReturnArrow
@@ -215,10 +223,9 @@ ApplicationWindow {
 
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
     }
-
-    //
+        //
     // Main Content Loader (StartupPage → ServerView)
-    //
+        //
     Loader {
         id: contentLoader
         anchors.fill: parent
@@ -298,7 +305,7 @@ ApplicationWindow {
 
             sidebarWrapper.cameraList = mainWindow.cameraList
             mainWindow.cameraOffline(name)
-        }
+    }
 
         function onCameraOnline(name) {
             for (var i = 0; i < mainWindow.cameraList.length; ++i)
@@ -307,7 +314,7 @@ ApplicationWindow {
 
             sidebarWrapper.cameraList = mainWindow.cameraList
             mainWindow.cameraOnline(name)
-        }
+}
 
         function onCameraEditResult(ok, message) {
             if (ok) frigate.loadCameras()
@@ -385,3 +392,4 @@ ApplicationWindow {
         }
     }
 }
+
