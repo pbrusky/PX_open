@@ -16,18 +16,22 @@ Popup {
         popup.focus = false
     }
 
-    property var frigateRef: null
+    //
+    // ⭐ Use the REAL backend instance exposed in main.cpp
+    //
+    property var frigateRef: frigate
 
     property string cameraId: ""
     property string streamUrl: ""
     property string username: ""
     property string password: ""
+    property bool enableRecording: true
 
     property alias ipField: ipInput
+    property alias rtspField: rtspInput
+    property alias userField: userInput
+    property alias passField: passInput
 
-    //
-    // ⭐ Smart RTSP builder
-    //
     function getFinalRtspUrl() {
         if (streamUrl.startsWith("rtsp://"))
             return streamUrl
@@ -48,6 +52,7 @@ Popup {
         streamUrl = ""
         username = ""
         password = ""
+        enableRecording = true
 
         idInput.text = ""
         ipInput.text = ""
@@ -121,6 +126,13 @@ Popup {
             }
         }
 
+        CheckBox {
+            id: recCheck
+            text: "Enable Recording"
+            checked: enableRecording
+            onCheckedChanged: enableRecording = checked
+        }
+
         Text {
             visible: rtspInput.text.startsWith("rtsp://")
             text: "Full RTSP URL detected — IP/username/password not required"
@@ -137,11 +149,6 @@ Popup {
                 Layout.fillWidth: true
                 enabled: !rtspInput.text.startsWith("rtsp://")
                 onClicked: {
-                    if (!frigateRef) {
-                        rtspStatus.text = "Frigate not ready"
-                        rtspStatus.color = "red"
-                        return
-                    }
                     onvifPopup.open()
                 }
             }
@@ -150,16 +157,9 @@ Popup {
                 text: "Test RTSP"
                 Layout.fillWidth: true
                 onClicked: {
-                    if (!frigateRef) {
-                        rtspStatus.text = "Frigate not ready"
-                        rtspStatus.color = "red"
-                        return
-                    }
-
                     let url = getFinalRtspUrl()
                     rtspStatus.text = "Testing: " + url
                     rtspStatus.color = "yellow"
-
                     frigateRef.testRtsp(url)
                 }
             }
@@ -181,12 +181,6 @@ Popup {
                 text: "Save"
                 Layout.fillWidth: true
                 onClicked: {
-                    if (!frigateRef) {
-                        rtspStatus.text = "Frigate not ready"
-                        rtspStatus.color = "red"
-                        return
-                    }
-
                     if (popup.cameraId.length === 0) {
                         rtspStatus.text = "Camera ID required"
                         rtspStatus.color = "red"
@@ -194,7 +188,7 @@ Popup {
                     }
 
                     let url = getFinalRtspUrl()
-                    frigateRef.addCamera(popup.cameraId, url)
+                    frigateRef.addCamera(popup.cameraId, url, enableRecording)
                     popup.close()
                 }
             }
@@ -207,12 +201,17 @@ Popup {
         }
     }
 
+    //
+    // ⭐ ONVIF popup now receives the REAL backend instance
+    //
     OnvifDiscoveryPopup {
         id: onvifPopup
-        frigateRef: popup.frigateRef
         addCameraPopupRef: popup
     }
 
+    //
+    // ⭐ RTSP test signal now connects to the REAL backend instance
+    //
     Connections {
         target: frigate
 

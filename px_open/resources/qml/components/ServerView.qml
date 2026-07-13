@@ -18,14 +18,18 @@ Item {
     signal camerasLoadedToMain(var list)
     signal gridReady()
 
+    //
+    // ⭐ FIXED: Do NOT assign frigateRef here
+    //
     AddCameraPopup {
         id: addCameraPopup
-        frigateRef: root.frigateRef
+        // ❌ REMOVED: frigateRef: root.frigateRef
     }
 
     RemoveCameraPopup {
         id: removeCameraPopup
-        frigateRef: root.frigateRef
+        // ❌ REMOVED: frigateRef: root.frigateRef
+
         onCameraRemoved: {
             if (root.cameraGrid && root.cameraGrid.removeCamera)
                 root.cameraGrid.removeCamera(removeCameraPopup.cameraId)
@@ -83,6 +87,8 @@ Item {
             mainWindow: root.mainWindow
             cameraList: root.mainWindow.cameraList
             serverViewRoot: root
+
+            // ⭐ CameraGrid still receives frigateRef (this is correct)
             frigateRef: root.frigateRef
 
             FullscreenTimeline {
@@ -95,6 +101,8 @@ Item {
 
                 cameraId: root.mainWindow.selectedCameraId
                 cameraName: root.mainWindow.selectedCameraId
+
+                // ⭐ Timeline also correctly uses frigateRef
                 frigateRef: root.frigateRef
 
                 recordings: root.frigateRef

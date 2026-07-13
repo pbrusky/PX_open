@@ -300,19 +300,22 @@ def discover_onvif():
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-    sock.settimeout(1.5)
+    sock.settimeout(5.0)
 
     try:
         sock.sendto(probe, (MULTICAST_ADDR, MULTICAST_PORT))
-    except:
+    except Exception as e:
+        print(f"[*] DEBUG: Failed to send probe: {e}")
         return []
 
     results = []
     start = time.time()
+    print("[*] DEBUG: Discovery started, listening for responses...")
 
-    while time.time() - start < 1.5:
+    while time.time() - start < 5.0:
         try:
             data, addr = sock.recvfrom(65535)
+            print(f"[*] DEBUG: Received {len(data)} bytes from {addr}")
             ip = addr[0]
 
             info = {"manufacturer": "", "model": ""}
@@ -337,7 +340,8 @@ def discover_onvif():
                     md = r.find(".//tds:Model", ns2)
                     info["manufacturer"] = m.text if m is not None else ""
                     info["model"] = md.text if md is not None else ""
-            except:
+            except Exception as e:
+                print(f"[*] DEBUG: Failed to get device info from {ip}: {e}")
                 pass
 
             profiles = get_onvif_profiles(ip)
@@ -359,8 +363,10 @@ def discover_onvif():
             })
 
         except socket.timeout:
+            print("[*] DEBUG: Discovery socket timed out")
             break
-        except:
+        except Exception as e:
+            print(f"[*] DEBUG: Error in discovery: {e}")
             break
 
     return results
@@ -583,11 +589,7 @@ def broadcast_discovery():
 if __name__ == "__main__":
     threading.Thread(target=broadcast_discovery, daemon=True).start()
 
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certfile="combined.pem")
-
     httpd = http.server.HTTPServer((HOST, PORT), VMSHandler)
-    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-    print(f"[*] Frigate discovery proxy active on https://0.0.0.0:{PORT}")
+    print(f"[*] Frigate discovery proxy active on http://0.0.0.0:{PORT}")
     httpd.serve_forever()

@@ -5,6 +5,7 @@
 #include <QSGRendererInterface>
 
 #include <QtWebEngineQuick>
+#include <QQuickStyle>
 
 #include "FrigateAPI.h"
 #include "DiscoveryListener.h"
@@ -17,6 +18,9 @@ int main(int argc, char *argv[])
 
     // QtWebEngine must be initialized BEFORE QGuiApplication
     QtWebEngineQuick::initialize();
+
+    // ENABLE FUSION STYLE (FIXES BACKGROUND CUSTOMIZATION WARNINGS)
+    QQuickStyle::setStyle("Fusion");
 
     QGuiApplication app(argc, argv);
 

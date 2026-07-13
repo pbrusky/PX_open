@@ -40,19 +40,23 @@ public:
     Q_INVOKABLE void loadModuleInformation();
     Q_INVOKABLE void loadCameras();
 
-    Q_INVOKABLE void addCamera(QString id, QString url);
+    Q_INVOKABLE void addCamera(QString id, QString url, bool record);
     Q_INVOKABLE void editCamera(QString id, QString url);
     Q_INVOKABLE void removeCamera(QString id);
 
-    Q_INVOKABLE void discoverOnvif();
+    //
+    // ⭐ ONVIF discovery now requires username + password
+    //
+    Q_INVOKABLE void discoverOnvif(const QString& username, const QString& password);
+
     Q_INVOKABLE void testRtsp(const QString& url);
 
     //
     // ⭐ Live streaming
     //
     Q_INVOKABLE QObject* getQueue(const QString& cameraName);
-    Q_INVOKABLE void stopStream(const QString& cameraName);   // stop one camera
-    Q_INVOKABLE void stopAllStreams();                        // global shutdown
+    Q_INVOKABLE void stopStream(const QString& cameraName);
+    Q_INVOKABLE void stopAllStreams();
 
     //
     // ⭐ Timeline backend
@@ -61,7 +65,6 @@ public:
     Q_INVOKABLE void loadEvents(const QString& cameraId);
     Q_INVOKABLE void seek(const QString& cameraId, qint64 timestampMs);
 
-    // NX-style timeline data accessors for QML
     Q_INVOKABLE QVariantList getRecordingsForCamera(const QString& cameraId);
     Q_INVOKABLE QVariantList getEventsForCamera(const QString& cameraId);
     Q_INVOKABLE qint64 currentPosition(const QString& cameraId);

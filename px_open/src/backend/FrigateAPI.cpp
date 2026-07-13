@@ -138,7 +138,7 @@ void FrigateAPI::loadCameras()
 //
 // ⭐ ADD CAMERA
 //
-void FrigateAPI::addCamera(QString id, QString url)
+void FrigateAPI::addCamera(QString id, QString url, bool record)
 {
     if (m_moduleServer.isEmpty()) {
         emit cameraAddResult(false, "Module server not set");
@@ -153,6 +153,7 @@ void FrigateAPI::addCamera(QString id, QString url)
     QJsonObject obj;
     obj["id"] = id;
     obj["rtsp"] = url;
+    obj["record"] = record;
 
     QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
 
@@ -181,6 +182,7 @@ void FrigateAPI::addCamera(QString id, QString url)
         }
     });
 }
+
 
 //
 // ⭐ EDIT CAMERA
@@ -295,34 +297,69 @@ void FrigateAPI::removeCamera(QString id)
 }
 
 //
-// ⭐ ONVIF DISCOVERY
+// ⭐ ONVIF DISCOVERY (with username + password)
 //
-void FrigateAPI::discoverOnvif()
+void FrigateAPI::discoverOnvif(const QString& username, const QString& password)
 {
     if (m_moduleServer.isEmpty()) {
+        qWarning() << "[FrigateAPI] discoverOnvif: moduleServer is empty";
+        emit onvifDevicesDiscovered(QVariantList());
         return;
     }
 
-    QUrl endpoint(m_moduleServer + "/api/onvifDiscover");
-    QNetworkRequest req(endpoint);
+    const QUrl url(m_moduleServer + "/api/onvifDiscover");
+    qDebug() << "[FrigateAPI] discoverOnvif: calling" << url.toString();
 
+    QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
-    QNetworkReply* reply = m_net->get(req);
+    // ⭐ Allow self-signed certificates
+    QSslConfiguration ssl = QSslConfiguration::defaultConfiguration();
+    ssl.setPeerVerifyMode(QSslSocket::VerifyNone);
+    ssl.setProtocol(QSsl::TlsV1_2OrLater);
+    req.setSslConfiguration(ssl);
+
+    // ⭐ Build JSON payload with credentials
+    QJsonObject obj;
+    obj["username"] = username;
+    obj["password"] = password;
+
+    QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
+
+    // ⭐ Explicitly ignore SSL errors
+    connect(reply, &QNetworkReply::sslErrors, reply,
+            [reply](const QList<QSslError>& errors) {
+                qDebug() << "[FrigateAPI] discoverOnvif: ignoring SSL errors:" << errors;
+                reply->ignoreSslErrors();
+            });
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "[FrigateAPI] discoverOnvif: network error:" << reply->errorString();
+            reply->deleteLater();
+            emit onvifDevicesDiscovered(QVariantList());
+            return;
+        }
+
         QByteArray data = reply->readAll();
         reply->deleteLater();
 
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        QJsonArray arr = doc.object()["devices"].toArray();
+        qDebug() << "[FrigateAPI] discoverOnvif: raw response:" << data;
 
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        if (!doc.isObject()) {
+            qWarning() << "[FrigateAPI] discoverOnvif: invalid JSON";
+            emit onvifDevicesDiscovered(QVariantList());
+            return;
+        }
+
+        QJsonArray arr = doc.object().value("devices").toArray();
         QVariantList list;
 
         for (const QJsonValue& v : arr) {
             QJsonObject o = v.toObject();
-
             QVariantMap entry;
+
             entry["address"]      = o.value("address").toString();
             entry["manufacturer"] = o.value("manufacturer").toString();
             entry["model"]        = o.value("model").toString();
@@ -333,6 +370,7 @@ void FrigateAPI::discoverOnvif()
             list.append(entry);
         }
 
+        qDebug() << "[FrigateAPI] discoverOnvif: received" << list.size() << "devices";
         emit onvifDevicesDiscovered(list);
     });
 }

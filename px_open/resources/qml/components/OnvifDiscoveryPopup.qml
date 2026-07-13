@@ -8,10 +8,13 @@ Popup {
     width: 720
     height: 520
     focus: true
-    background: Rectangle { color: "#0F0F0F"; radius: 8 }
 
-    property var frigateRef: null
-    property var addCameraPopupRef: null     // AddCameraPopup OR EditCameraPopup
+    background: Rectangle {
+        color: "#0F0F0F"
+        radius: 8
+    }
+
+    property var addCameraPopupRef: null
     property var devices: []
 
     ColumnLayout {
@@ -26,14 +29,43 @@ Popup {
             color: "white"
         }
 
+        TextField {
+            id: usernameField
+            placeholderText: "ONVIF Username"
+            Layout.fillWidth: true
+            font.pixelSize: 16
+            color: "white"
+            placeholderTextColor: "#888"
+            background: Rectangle {
+                color: "#1E1E1E"
+                radius: 6
+                border.color: "#444"
+            }
+        }
+
+        TextField {
+            id: passwordField
+            placeholderText: "ONVIF Password"
+            echoMode: TextInput.Password
+            Layout.fillWidth: true
+            font.pixelSize: 16
+            color: "white"
+            placeholderTextColor: "#888"
+            background: Rectangle {
+                color: "#1E1E1E"
+                radius: 6
+                border.color: "#444"
+            }
+        }
+
         Button {
             text: "Discover Cameras"
             Layout.fillWidth: true
             font.pixelSize: 16
             onClicked: {
                 devices = []
-                if (frigateRef)
-                    frigateRef.discoverOnvif()
+                console.log("OnvifDiscoveryPopup: calling discoverOnvif()")
+                frigate.discoverOnvif(usernameField.text, passwordField.text)
             }
         }
 
@@ -75,16 +107,22 @@ Popup {
                     anchors.margins: 14
                     spacing: 8
 
+                    // ------------------------------
+                    // Manufacturer + Model + IP
+                    // ------------------------------
                     Text {
-                        text: (modelData.manufacturer && modelData.model &&
-                               modelData.manufacturer !== "" && modelData.model !== "")
+                        text: (modelData.manufacturer && modelData.manufacturer !== "" &&
+                               modelData.model && modelData.model !== "")
                               ? modelData.manufacturer + " " + modelData.model
-                              : (modelData.address || "Unknown")
+                              : (modelData.address || "Unknown Device")
                         color: "white"
                         font.pixelSize: 20
                         font.bold: true
                     }
 
+                    // ------------------------------
+                    // RTSP URL
+                    // ------------------------------
                     Text {
                         text: modelData.rtsp || ""
                         color: "#ccc"
@@ -106,9 +144,6 @@ Popup {
 
                                 let popupRef = addCameraPopupRef
 
-                                //
-                                // ⭐ Auto-fill fields
-                                //
                                 if (popupRef.cameraId !== undefined)
                                     popupRef.cameraId = modelData.address || ""
 
@@ -121,12 +156,8 @@ Popup {
                                 if (popupRef.passField)
                                     popupRef.passField.text = modelData.password || ""
 
-                                //
-                                // ⭐ RTSP handling
-                                //
                                 let rtsp = modelData.rtsp || ""
 
-                                // If ONVIF RTSP is missing or incomplete, rebuild Hikvision-style RTSP
                                 if (!rtsp || !rtsp.startsWith("rtsp://")) {
                                     rtsp = "rtsp://" +
                                            (modelData.username || "") +
@@ -138,18 +169,7 @@ Popup {
                                 if (popupRef.rtspField)
                                     popupRef.rtspField.text = rtsp
 
-                                if (popupRef.streamUrl !== undefined)
-                                    popupRef.streamUrl = rtsp
-
-                                //
-                                // ⭐ Rebuild RTSP if popup has builder
-                                //
-                                if (popupRef.buildRtspUrl)
-                                    popupRef.rtspField.text = popupRef.buildRtspUrl()
-
-                                //
-                                // ⭐ Open popup and close ONVIF window
-                                //
+                                popupRef.streamUrl = rtsp
                                 popupRef.open()
                                 popup.close()
                             }
@@ -167,12 +187,11 @@ Popup {
         }
     }
 
-    //
-    // ⭐ Backend ONVIF results
-    //
     Connections {
         target: frigate
+
         function onOnvifDevicesDiscovered(devList) {
+            console.log("OnvifDiscoveryPopup: received devices:", devList.length)
             devices = devList
         }
     }
