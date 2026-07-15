@@ -6,18 +6,15 @@ import threading
 import time
 import requests
 import subprocess
-import xml.etree.ElementTree as ET
 import uuid
 import os
 import shutil
-import concurrent.futures
-import ipaddress
-import psutil
 import yaml
+import traceback
+from requests.auth import HTTPDigestAuth
+import xml.etree.ElementTree as ET
 
-# ----------------------------------------------------------------------
 # CONFIG
-# ----------------------------------------------------------------------
 HTTP_PORT = 8001
 HTTPS_PORT = 8002
 HOST = "0.0.0.0"
@@ -39,483 +36,219 @@ MODULE_ID = "{66666666-7777-8888-9999-000000000000}"
 SYSTEM_NAME = "Frigate System"
 LAN_IP = "10.36.24.104"
 
-COMMON_PORTS = [80, 554, 8080, 8000, 8899]   # Reordered for speed
+PROGRESS_FILE = r"C:\PX\onvif_progress.log"
 
-# ----------------------------------------------------------------------
-# WS-DISCOVERY (Primary & Fast Method)
-# ----------------------------------------------------------------------
-WSA_NS = "http://schemas.xmlsoap.org/ws/2004/08/addressing"
-DISCOVERY_NS = "http://schemas.xmlsoap.org/ws/2005/04/discovery"
-
-PROBE_MESSAGE = f"""<?xml version="1.0" encoding="utf-8"?>
-<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope"
-            xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing"
-            xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery">
-  <e:Header>
-    <w:MessageID>uuid:{uuid.uuid4()}</w:MessageID>
-    <w:To>urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>
-    <w:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action>
-  </e:Header>
-  <e:Body>
-    <d:Probe>
-      <d:Types>dn:NetworkVideoTransmitter</d:Types>
-    </d:Probe>
-  </e:Body>
-</e:Envelope>
-"""
-
-# ----------------------------------------------------------------------
-# WS-DISCOVERY
-# ----------------------------------------------------------------------
-def ws_discover(timeout=4):
-    print("[DISCOVERY] Starting WS-Discovery (multicast)...")
-    MULTICAST_ADDR = "239.255.255.250"
-    MULTICAST_PORT = 3702
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
-    sock.settimeout(timeout)
-
-    devices = []
-
-    try:
-        mreq = socket.inet_aton(MULTICAST_ADDR) + socket.inet_aton("0.0.0.0")
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-    except Exception as e:
-        print("[DISCOVERY] IGMP join failed:", e)
-
-    sock.sendto(PROBE_MESSAGE.encode("utf-8"), (MULTICAST_ADDR, MULTICAST_PORT))
-
-    start = time.time()
-    while time.time() - start < timeout:
+# UTILITIES
+def backup_file(path):
+    if os.path.exists(path):
         try:
-            data, addr = sock.recvfrom(65535)
-            ip = addr[0]
-            root = ET.fromstring(data)
-
-            manufacturer = model = ""
-            for elem in root.iter():
-                tag = elem.tag.lower()
-                if "manufacturer" in tag and elem.text:
-                    manufacturer = elem.text
-                if "model" in tag and elem.text:
-                    model = elem.text
-
-            devices.append({
-                "address": ip,
-                "manufacturer": manufacturer,
-                "model": model or "ONVIF Device",
-                "username": "",
-                "password": "",
-                "rtsp": f"rtsp://{ip}/Streaming/Channels/101"
-            })
-            print(f"[DISCOVERY] WS-Discovery found: {ip}")
-        except:
-            continue
-
-    print(f"[DISCOVERY] WS-Discovery found {len(devices)} devices")
-    return devices
-
-def ping_host(ip):
-    try:
-        # Faster timeout
-        ret = os.system(f"ping -n 1 -w 50 {ip} >nul 2>&1")
-        return ip if ret == 0 else None
-    except:
-        return None
-
-# ----------------------------------------------------------------------
-# Brand-specific probes (You were missing these)
-# ----------------------------------------------------------------------
-def probe_hikvision(ip, port):
-    urls = [
-        f"http://{ip}:{port}/ISAPI/System/deviceInfo",
-        f"http://{ip}:{port}/ISAPI/Security/userCheck",
-        f"http://{ip}:{port}/ISAPI/Streaming/Channels/101"
-    ]
-    for url in urls:
-        try:
-            r = requests.get(url, timeout=2.0, auth=("admin", "Azsxdcf2013"))
-            if r.status_code == 200:
-                manufacturer = "Hikvision"
-                model = "Hikvision Camera"
-                try:
-                    root = ET.fromstring(r.content)
-                    md = root.find(".//model")
-                    name = root.find(".//deviceName")
-                    if md is not None and md.text:
-                        model = md.text
-                    elif name is not None and name.text:
-                        model = name.text
-                except:
-                    pass
-                print(f"[DISCOVERY] ✓ Hikvision Hit → {ip} | {model}")
-                return manufacturer, model
-        except:
-            continue
-    return None, None
-
-
-def probe_dahua(ip, port):
-    try:
-        r = requests.get(f"http://{ip}:{port}/cgi-bin/magicBox.cgi?action=getSystemInfo", timeout=2)
-        if r.status_code == 200:
-            for line in r.text.splitlines():
-                if line.startswith("DeviceType="):
-                    model = line.split("=", 1)[1].strip()
-                    print(f"[DISCOVERY] ✓ Dahua Hit → {ip}")
-                    return "Dahua", model or "Dahua"
-    except:
-        pass
-    return None, None
-
-
-def probe_vivotek(ip, port):
-    try:
-        r = requests.get(f"http://{ip}:{port}/cgi-bin/viewer/getparam.cgi", timeout=2)
-        if r.status_code == 200 and "model" in r.text.lower():
-            model = "Vivotek"
-            print(f"[DISCOVERY] ✓ Vivotek Hit → {ip}")
-            return "Vivotek", model
-    except:
-        pass
-    return None, None
-
-# ----------------------------------------------------------------------
-# Improved Device Probe
-# ----------------------------------------------------------------------
-def probe_device(ip, username="", password=""):
-    # Ports in order of likelihood
-    ports_to_try = [80, 554, 8080, 8000, 8899]
-
-    for port in ports_to_try:
-        # === ONVIF Probe ===
-        try:
-            onvif_url = f"http://{ip}:{port}/onvif/device_service"
-            soap = """<?xml version="1.0"?>
-            <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
-                        xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
-              <s:Body><tds:GetDeviceInformation/></s:Body>
-            </s:Envelope>"""
-
-            resp = requests.post(onvif_url, data=soap,
-                                 headers={"Content-Type": "application/soap+xml"},
-                                 timeout=2.0, 
-                                 auth=(username, password) if username else None)
-
-            if resp.status_code == 200:
-                root = ET.fromstring(resp.content)
-                ns = {"tds": "http://www.onvif.org/ver10/device/wsdl"}
-                m = root.find(".//tds:Manufacturer", ns)
-                md = root.find(".//tds:Model", ns)
-
-                manufacturer = m.text if m is not None else "ONVIF"
-                model = md.text if md is not None else "Camera"
-
-                print(f"[DISCOVERY] ✓ ONVIF Hit → {ip} | {manufacturer} {model}")
-                return {
-                    "address": ip,
-                    "manufacturer": manufacturer,
-                    "model": model,        
-                    "username": username,
-                    "password": password,
-                    "rtsp": f"rtsp://{ip}/Streaming/Channels/101"
-                }
+            shutil.copy2(path, path + ".bak")
         except:
             pass
 
-        # === Brand Probes ===
-               # === Brand Probes ===
-        m, md = probe_hikvision(ip, port)
-        if m:
-            print(f"[DISCOVERY] ✓ Hikvision Hit → {ip} | {model}")
-            return {"address": ip, "manufacturer": m, "model": md or "Hikvision", 
-                    "username": username, "password": password, "rtsp": f"rtsp://{ip}/Streaming/Channels/101"}
-        
-        m, md = probe_dahua(ip, port)
-        if m:
-            print(f"[DISCOVERY] ✓ Dahua Hit → {ip}")
-            return {"address": ip, "manufacturer": m, "model": md or "Dahua", 
-                    "username": username, "password": password, 
-                    "rtsp": f"rtsp://{ip}/cam/realmonitor?channel=1&subtype=0"}
+def is_valid_camera_name(name):
+    return isinstance(name, str) and bool(name.strip())
 
-        m, md = probe_vivotek(ip, port)
-        if m:
-            print(f"[DISCOVERY] ✓ Vivotek Hit → {ip}")
-            return {"address": ip, "manufacturer": m, "model": md or "Vivotek", 
-                    "username": username, "password": password, "rtsp": f"rtsp://{ip}/Streaming/Channels/101"}
+def is_valid_rtsp_url(url):
+    return isinstance(url, str) and url.lower().startswith("rtsp://")
 
-    # === Aggressive RTSP DESCRIBE Fallback ===
-    print(f"[DISCOVERY] Trying RTSP fallback on {ip}...")
-    dev = probe_rtsp_only_enhanced(ip)   # We'll define this below
-    if dev:
-        dev["username"] = username
-        dev["password"] = password
-        print(f"[DISCOVERY] ✓ RTSP Fallback Hit → {ip}")
-        return dev
+def go2rtc_set_stream(name, rtsp_url):
+    try:
+        r = requests.post(f"{GO2RTC_BASE}/api/streams", json={name: rtsp_url}, timeout=5)
+        return r.status_code in (200, 201)
+    except:
+        return False
 
-    return None
+def go2rtc_remove_stream(name):
+    try:
+        r = requests.delete(f"{GO2RTC_BASE}/api/streams/{name}", timeout=5)
+        return r.status_code == 200
+    except:
+        return False
 
-def probe_rtsp_only_enhanced(ip):
-    common_paths = [
-        "Streaming/Channels/101", "Streaming/Channels/1", "Streaming/Channels/0",
-        "cam/realmonitor?channel=1&subtype=0", "live", "live1.sdp", "h264", "ch0",
-        "profile1", "profile0", "video1", "stream1", "onvif1", "media"
-    ]
+def frigate_reload():
+    try:
+        r = requests.post(f"{FRIGATE_BASE}/api/reload", timeout=10)
+        return r.status_code == 200
+    except:
+        return False
 
-    for path in common_paths:
-        rtsp_url = f"rtsp://{ip}:554/{path}"
+def get_subnet_from_lan_ip():
+    try:
+        parts = LAN_IP.split(".")
+        if len(parts) == 4:
+            return ".".join(parts[:3]) + "."
+    except:
+        pass
+    return "192.168.1."
+
+# ---------------------------------------------------------
+# ONVIF → RTSP RESOLVER
+# ---------------------------------------------------------
+def get_rtsp_url(ip, username="", password=""):
+    endpoint = f"http://{ip}/onvif/device_service"
+    auth = HTTPDigestAuth(username, password) if username else None
+
+    # 1. ONVIF GetStreamUri
+    try:
+        SOAP = f'''<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+  <s:Body>
+    <GetStreamUri xmlns="http://www.onvif.org/ver10/media/wsdl">
+      <StreamSetup>
+        <Stream xmlns="http://www.onvif.org/ver10/schema">RTP-Unicast</Stream>
+        <Transport xmlns="http://www.onvif.org/ver10/schema">
+          <Protocol>RTSP</Protocol>
+        </Transport>
+      </StreamSetup>
+      <ProfileToken>Profile_1</ProfileToken>
+    </GetStreamUri>
+  </s:Body>
+</s:Envelope>'''
+
+        r = requests.post(endpoint, data=SOAP, timeout=2, auth=auth)
+        if r.status_code == 200:
+            xml = ET.fromstring(r.text)
+            uri = xml.find(".//{*}Uri")
+            if uri is not None and uri.text:
+                rtsp = uri.text
+                # inject credentials if provided
+                if username:
+                    rtsp = rtsp.replace("rtsp://", f"rtsp://{username}:{password}@")
+                return rtsp
+    except:
+        pass
+
+    # 2. Hikvision fallback (with credentials if provided)
+    if username:
+        return f"rtsp://{username}:{password}@{ip}:554/Streaming/Channels/101"
+
+    # 3. Dahua fallback (no auth)
+    return f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
+
+# ---------------------------------------------------------
+# CALL EXTERNAL ONVIF SCANNER
+# ---------------------------------------------------------
+def run_external_onvif_scan(username="", password=""):
+    try:
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1.2)
-            sock.connect((ip, 554))
-
-            msg = f"DESCRIBE {rtsp_url} RTSP/1.0\r\nCSeq: 2\r\nAccept: application/sdp\r\n\r\n".encode()
-            sock.send(msg)
-            resp = sock.recv(2048)
-            sock.close()
-
-            if b"RTSP/1.0 200" in resp or b"v=0" in resp:
-                print(f"[DISCOVERY] RTSP DESCRIBE success: {rtsp_url}")
-                return {
-                    "address": ip,
-                    "manufacturer": "",
-                    "model": "",
-                    "username": "",
-                    "password": "",
-                    "rtsp": rtsp_url
-                }
+            open(PROGRESS_FILE, "w").close()
         except:
-            continue
-    return None
+            pass
 
-# ----------------------------------------------------------------------
-# Fast Discovery - Closer to NX Witness style
-# ----------------------------------------------------------------------
+        subnet = get_subnet_from_lan_ip()
+        print(f"[SCAN] Starting ONVIF scan on subnet {subnet} with user='{username}'")
+
+        result = subprocess.run(
+            ["python", "onvif_scan.py", subnet, username, password],
+            capture_output=True,
+            text=True
+        )
+
+        if result.stderr.strip():
+            print("[SCAN] Scanner stderr:", result.stderr.strip())
+
+        output = result.stdout.strip()
+
+        try:
+            devices = json.loads(output)
+            print(f"[SCAN] Parsed {len(devices)} devices from scanner output.")
+            return devices
+        except Exception as e:
+            print("[SCAN] JSON parse error:", e)
+            print("[SCAN] Raw output:", output)
+            return []
+
+    except Exception as e:
+        print("[SCAN] Error running external ONVIF scanner:", e)
+        return []
+
+# ---------------------------------------------------------
+# DISCOVERY WRAPPER
+# ---------------------------------------------------------
 def discover_onvif(username="", password=""):
-    print("[MODULE] Enhanced discovery starting (Fast NX-style)...")
-    start_time = time.time()
-
-    devices = ws_discover(timeout=3)
-
-    if len(devices) < 8:
-        print("[DISCOVERY] Starting fast targeted probe...")
-        candidates = get_probe_candidates()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=120) as ex:
-            futures = [ex.submit(probe_device, ip, username, password) for ip in candidates]
-            
-            for f in concurrent.futures.as_completed(futures):
-                try:
-                    dev = f.result()
-                    if dev and not any(d["address"] == dev["address"] for d in devices):
-                        devices.append(dev)
-                except:
-                    pass
-
-    total_time = time.time() - start_time
-    print(f"[MODULE] Discovery complete. Found {len(devices)} devices in {total_time:.1f} seconds.")
-
-    for d in devices:
-        print(f"   → {d['address']:15} | {d.get('manufacturer','')} {d.get('model','')}")
-
+    print(f"[MODULE] Calling external ONVIF scanner (user={username})...")
+    devices = run_external_onvif_scan(username, password)
+    print(f"[MODULE] External scanner found {len(devices)} devices.")
     return devices
 
-
-# Smarter candidate generation - much fewer IPs
-def get_probe_candidates():
-    candidates = set()
-    for iface, addrs in psutil.net_if_addrs().items():
-        for addr in addrs:
-            if addr.family == socket.AF_INET:
-                ip_str = addr.address
-                if not ip_str.startswith("127.") and not ip_str.startswith("169.254."):
-                    base = ".".join(ip_str.split(".")[:3])
-                    # Probe a reasonable range around the current IP
-                    last_octet = int(ip_str.split(".")[-1])
-                    for i in range(max(1, last_octet - 60), min(255, last_octet + 60)):
-                        candidates.add(f"{base}.{i}")
-    
-    candidates = list(candidates)
-    print(f"[DISCOVERY] Probing {len(candidates)} likely IPs...")
-    return candidates
-
-# Faster & lighter active IP scan
-def get_active_ips_fast():
-    print("[DISCOVERY] Fast active scan...")
-    subnets = []
-    for iface, addrs in psutil.net_if_addrs().items():
-        for addr in addrs:
-            if addr.family == socket.AF_INET and addr.netmask:
-                try:
-                    net = ipaddress.IPv4Network(f"{addr.address}/{addr.netmask}", strict=False)
-                    if not net.is_loopback and not net.is_link_local and net.num_addresses <= 512:
-                        subnets.append(net)
-                except:
-                    continue
-
-    active_ips = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=200) as executor:
-        futures = []
-        for net in subnets:
-            for ip in list(net.hosts())[:100]:   # limit per subnet
-                futures.append(executor.submit(ping_host, str(ip)))
-        
-        for future in concurrent.futures.as_completed(futures):
-            if result := future.result():
-                active_ips.append(result)
-
-    print(f"[DISCOVERY] Found {len(active_ips)} active IPs")
-    return active_ips
-
-
-def ping_host(ip):
+# ---------------------------------------------------------
+# FRIGATE CONFIG HELPERS
+# ---------------------------------------------------------
+def load_frigate_config():
     try:
-        return ip if os.system(f"ping -n 1 -w 40 {ip} >nul 2>&1") == 0 else None
-    except:
-        return None
-    
-def add_camera_to_go2rtc_config(name, rtsp_url):
-    path = GO2RTC_CONFIG_PATH
-    try:
-        if not os.path.exists(path):
-            data = {"streams": {name: rtsp_url}}
-        else:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f) or {}
-            if 'streams' not in data:
-                data['streams'] = {}
-                data['streams'][name] = rtsp_url
+        with open(FRIGATE_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        print("[FRIGATE] Failed to load config:", e)
+        return {}
 
-        backup_file(path)
-        with open(path, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(data, f)
-        print(f"[MODULE] go2rtc config updated: {path} -> added {name}")
+def save_frigate_config(cfg):
+    try:
+        backup_file(FRIGATE_CONFIG_PATH)
+        with open(FRIGATE_CONFIG_PATH, "w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f, default_flow_style=False)
         return True
-    except Exception:
-        import traceback
-        print("[MODULE] add_camera_to_go2rtc_config exception:\n" + traceback.format_exc())
+    except Exception as e:
+        print("[FRIGATE] Failed to save config:", e)
         return False
 
+def ensure_camera_in_frigate(name, rtsp_url, record=True):
+    cfg = load_frigate_config()
+    if "cameras" not in cfg or cfg["cameras"] is None:
+        cfg["cameras"] = {}
 
-def remove_camera_from_go2rtc_config(name):
-    path = GO2RTC_CONFIG_PATH
-    try:
-        if not os.path.exists(path):
-            return False
+    cam = cfg["cameras"].get(name, {})
 
-        with open(path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f) or {}
+    # minimal Frigate camera definition
+    cam.setdefault("ffmpeg", {})
+    cam["ffmpeg"].setdefault("inputs", [])
+    if cam["ffmpeg"]["inputs"]:
+        cam["ffmpeg"]["inputs"][0]["path"] = rtsp_url
+    else:
+        cam["ffmpeg"]["inputs"].append({
+            "path": rtsp_url,
+            "roles": ["detect", "record"]
+        })
 
-        if 'streams' in data and name in data['streams']:
-            del data['streams'][name]
+    cam.setdefault("detect", {})
+    cam["detect"]["enabled"] = True
 
-            backup_file(path)
-            with open(path, 'w', encoding='utf-8') as f:
-                yaml.safe_dump(data, f)
+    cam.setdefault("record", {})
+    cam["record"]["enabled"] = bool(record)
 
-            print(f"[MODULE] go2rtc config updated: {path} -> removed {name}")
-            return True
+    cfg["cameras"][name] = cam
 
-        return False
-    except Exception:
-        import traceback
-        print("[MODULE] remove_camera_from_go2rtc_config exception:\n" + traceback.format_exc())
-        return False
+    ok = save_frigate_config(cfg)
+    return ok
 
+def remove_camera_from_frigate(name):
+    cfg = load_frigate_config()
+    cams = cfg.get("cameras", {})
+    if name in cams:
+        del cams[name]
+        cfg["cameras"] = cams
+        return save_frigate_config(cfg)
+    return False
 
-# ----------------------------------------------------------------------
-# Frigate config add/remove
-# ----------------------------------------------------------------------
-def add_camera_to_frigate_config(name, rtsp_url=None):
-    path = FRIGATE_CONFIG_PATH
-    try:
-        if not os.path.exists(path):
-            data = {}
-        else:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f) or {}
-
-        if 'cameras' not in data:
-            data['cameras'] = {}
-
-        if rtsp_url and isinstance(rtsp_url, str) and rtsp_url.strip() != "":
-            stream_url = rtsp_url
-        else:
-            stream_url = f"rtsp://{GO2RTC_HOST}:{GO2RTC_PORT}/{name}"
-
-        data['cameras'][name] = {
-            'ffmpeg': {
-                'inputs': [
-                    {'path': stream_url, 'roles': ['detect', 'record']}
-                ]
-            }
-        }
-
-        backup_file(path)
-        with open(path, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(data, f)
-
-        print(f"[MODULE] Frigate config updated: {path} -> added camera {name}")
-        return True
-
-    except Exception:
-        import traceback
-        print("[MODULE] add_camera_to_frigate_config exception:\n" + traceback.format_exc())
-        return False
-
-
-def remove_camera_from_frigate_config(name):
-    path = FRIGATE_CONFIG_PATH
-    try:
-        if not os.path.exists(path):
-            return False
-
-        with open(path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f) or {}
-
-        if 'cameras' in data and name in data['cameras']:
-            del data['cameras'][name]
-
-            backup_file(path)
-            with open(path, 'w', encoding='utf-8') as f:
-                yaml.safe_dump(data, f)
-
-            print(f"[MODULE] Frigate config updated: {path} -> removed camera {name}")
-            return True
-
-        return False
-
-    except Exception:
-        import traceback
-        print("[MODULE] remove_camera_from_frigate_config exception:\n" + traceback.format_exc())
-        return False
-    
-    # ----------------------------------------------------------------------
+# ---------------------------------------------------------
 # HTTP HANDLER
-# ----------------------------------------------------------------------
+# ---------------------------------------------------------
 class VMSHandler(http.server.BaseHTTPRequestHandler):
-
     def log_message(self, format, *args):
         return
 
     def send_json(self, data, code=200):
         payload = json.dumps(data).encode("utf-8")
-
         try:
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("Connection", "close")
             self.end_headers()
-
-            try:
-                self.wfile.write(payload)
-            except ConnectionAbortedError:
-                pass
-
-        except Exception as e:
-            print(f"[SERVER] send_json error: {e}")
+            self.wfile.write(payload)
+        except:
+            pass
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -525,131 +258,96 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
         except:
             data = {}
 
-        if not self.path.startswith("/api/moduleInformation"):
-            print(f"[CLIENT POST] {self.path} -> {data}")
+        # ONVIF DISCOVERY
+        if self.path == "/api/onvifDiscover":
+            username = data.get("username", "")
+            password = data.get("password", "")
+            devices = discover_onvif(username, password)
+            return self.send_json({"devices": devices})
 
-        # --------------------------------------------------------------
-        # ADD CAMERA
-        # --------------------------------------------------------------
+        # RTSP RESOLUTION
+        if self.path == "/api/getRtsp":
+            ip = data.get("ip")
+            username = data.get("username", "")
+            password = data.get("password", "")
+            rtsp = get_rtsp_url(ip, username, password)
+            return self.send_json({"rtsp": rtsp})
+
+        # ADD CAMERA (from FrigateAPI::addCamera)
         if self.path == "/api/addCamera":
             cam_id = data.get("id")
             rtsp = data.get("rtsp")
+            record = bool(data.get("record", True))
 
-            if not is_valid_camera_name(cam_id) or not is_valid_rtsp_url(rtsp):
-                return self.send_json({"status": "error", "error": "invalid addCamera payload"}, 400)
+            if not (is_valid_camera_name(cam_id) and is_valid_rtsp_url(rtsp)):
+                return self.send_json({
+                    "status": "error",
+                    "message": "Invalid camera id or RTSP URL",
+                    "go2rtc": False,
+                    "frigate_reload": False
+                }, code=400)
 
-            ok_api = go2rtc_set_stream(cam_id, rtsp)
-            ok_config = False
-            if not ok_api:
-                ok_config = add_camera_to_go2rtc_config(cam_id, rtsp)
+            go2_ok = go2rtc_set_stream(cam_id, rtsp)
+            fr_cfg_ok = ensure_camera_in_frigate(cam_id, rtsp, record)
+            frig_ok = frigate_reload() if fr_cfg_ok else False
 
-            ok_frigate_config = add_camera_to_frigate_config(cam_id, rtsp)
-            ok_reload = frigate_reload()
-
+            status = "ok" if (go2_ok and fr_cfg_ok and frig_ok) else "error"
             return self.send_json({
-                "status": "ok",
-                "go2rtc_api": ok_api,
-                "go2rtc_config": ok_config,
-                "frigate_config": ok_frigate_config,
-                "frigate_reload": ok_reload
+                "status": status,
+                "go2rtc": go2_ok,
+                "frigate_reload": frig_ok
             })
 
-        # --------------------------------------------------------------
-        # EDIT CAMERA
-        # --------------------------------------------------------------
+        # EDIT CAMERA (from FrigateAPI::editCamera / applyNewCameraRtsp)
         if self.path == "/api/editCamera":
             cam_id = data.get("id")
             rtsp = data.get("rtsp")
 
-            if not is_valid_camera_name(cam_id) or not is_valid_rtsp_url(rtsp):
-                return self.send_json({"status": "error", "error": "invalid editCamera payload"}, 400)
+            if not (is_valid_camera_name(cam_id) and is_valid_rtsp_url(rtsp)):
+                return self.send_json({
+                    "status": "error",
+                    "message": "Invalid camera id or RTSP URL",
+                    "go2rtc": False,
+                    "frigate_reload": False
+                }, code=400)
 
-            ok_api = go2rtc_set_stream(cam_id, rtsp)
-            ok_config = False
-            if not ok_api:
-                ok_config = add_camera_to_go2rtc_config(cam_id, rtsp)
+            go2_ok = go2rtc_set_stream(cam_id, rtsp)
+            fr_cfg_ok = ensure_camera_in_frigate(cam_id, rtsp, record=True)
+            frig_ok = frigate_reload() if fr_cfg_ok else False
 
-            ok_frigate_config = add_camera_to_frigate_config(cam_id, rtsp)
-            ok_reload = frigate_reload()
-
+            status = "ok" if (go2_ok and fr_cfg_ok and frig_ok) else "error"
             return self.send_json({
-                "status": "ok",
-                "go2rtc_api": ok_api,
-                "go2rtc_config": ok_config,
-                "frigate_config": ok_frigate_config,
-                "frigate_reload": ok_reload
+                "status": status,
+                "go2rtc": go2_ok,
+                "frigate_reload": frig_ok
             })
 
-        # --------------------------------------------------------------
         # REMOVE CAMERA
-        # --------------------------------------------------------------
         if self.path == "/api/removeCamera":
             cam_id = data.get("id")
 
             if not is_valid_camera_name(cam_id):
-                return self.send_json({"status": "error", "error": "invalid removeCamera payload"}, 400)
+                return self.send_json({
+                    "status": "error",
+                    "message": "Invalid camera id",
+                    "go2rtc": False,
+                    "frigate_reload": False
+                }, code=400)
 
-            ok_api = go2rtc_remove_stream(cam_id)
-            ok_config = False
-            if not ok_api:
-                ok_config = remove_camera_from_go2rtc_config(cam_id)
+            go2_ok = go2rtc_remove_stream(cam_id)
+            fr_cfg_ok = remove_camera_from_frigate(cam_id)
+            frig_ok = frigate_reload() if fr_cfg_ok else False
 
-            ok_frigate_config = remove_camera_from_frigate_config(cam_id)
-            ok_reload = frigate_reload()
-
+            status = "ok" if (go2_ok and fr_cfg_ok and frig_ok) else "error"
             return self.send_json({
-                "status": "ok",
-                "go2rtc_api": ok_api,
-                "go2rtc_config": ok_config,
-                "frigate_config": ok_frigate_config,
-                "frigate_reload": ok_reload
+                "status": status,
+                "go2rtc": go2_ok,
+                "frigate_reload": frig_ok
             })
 
-        # --------------------------------------------------------------
-        # TEST RTSP
-        # --------------------------------------------------------------
-        if self.path == "/api/testRtsp":
-            rtsp = data.get("rtsp")
-            ok = test_rtsp_stream(rtsp)
-            return self.send_json({"ok": ok})
+        return self.send_json({"status": "ok"})
 
-        # --------------------------------------------------------------
-        # ONVIF DISCOVERY (NX-style)
-        # --------------------------------------------------------------
-        if self.path == "/api/onvifDiscover":
-            try:
-                username = data.get("username", "")
-                password = data.get("password", "")
-                print("[MODULE] ONVIF credentials:", username, password)
-
-                devices = discover_onvif(username, password)
-                return self.send_json({"devices": devices})
-
-            except Exception as e:
-                print("[MODULE] ERROR in ONVIF discovery:", e)
-                return self.send_json({"error": str(e)}, 500)
-
-        # --------------------------------------------------------------
-        # ONVIF PROFILES
-        # --------------------------------------------------------------
-        if self.path == "/api/onvifProfiles":
-            address = data.get("address")
-            username = data.get("username", "")
-            password = data.get("password", "")
-
-            profiles = get_onvif_profiles(address, username, password)
-            return self.send_json({"profiles": profiles})
-
-        return self.send_json({"error": "unknown endpoint"}, 404)
-
-    # ------------------------------------------------------------------
-    # GET HANDLER
-    # ------------------------------------------------------------------
     def do_GET(self):
-
-        if not self.path.startswith("/api/moduleInformation"):
-            print(f"[CLIENT GET] {self.path}")
-
         if self.path.startswith("/api/moduleInformation"):
             return self.send_json({
                 "reply": {
@@ -663,13 +361,17 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                 }
             })
 
-        if self.path == "/api/onvifDiscover":
-            return self.send_json({"error": "onvifDiscover only supports POST"}, 400)
+        if self.path.startswith("/api/onvifProgress"):
+            try:
+                with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+                    lines = [line.strip() for line in f.readlines() if line.strip()]
+            except:
+                lines = []
+            return self.send_json({"progress": lines})
 
-
-# ----------------------------------------------------------------------
-# BROADCAST DISCOVERY (NX-style)
-# ----------------------------------------------------------------------
+# ---------------------------------------------------------
+# BROADCAST
+# ---------------------------------------------------------
 def broadcast_discovery():
     while True:
         packet = json.dumps({
@@ -686,10 +388,9 @@ def broadcast_discovery():
         sock.sendto(packet, (BROADCAST_IP, DISCOVERY_PORT))
         time.sleep(2)
 
-
-# ----------------------------------------------------------------------
-# MAIN SERVER LOOP
-# ----------------------------------------------------------------------
+# ---------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------
 if __name__ == "__main__":
     threading.Thread(target=broadcast_discovery, daemon=True).start()
 
@@ -697,13 +398,19 @@ if __name__ == "__main__":
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(f"[*] HTTP server active on http://0.0.0.0:{HTTP_PORT}")
 
-    httpsd = http.server.HTTPServer((HOST, HTTPS_PORT), VMSHandler)
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certfile="combined.pem")
-    httpsd.socket = context.wrap_socket(httpsd.socket, server_side=True)
-    threading.Thread(target=httpsd.serve_forever, daemon=True).start()
-    print(f"[*] HTTPS server active on https://0.0.0.0:{HTTPS_PORT}")
+    try:
+        httpsd = http.server.HTTPServer((HOST, HTTPS_PORT), VMSHandler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile="combined.pem")
+        httpsd.socket = context.wrap_socket(httpsd.socket, server_side=True)
+        threading.Thread(target=httpsd.serve_forever, daemon=True).start()
+        print(f"[*] HTTPS server active on https://0.0.0.0:{HTTPS_PORT}")
+    except Exception as e:
+        print(f"[HTTPS] Failed: {e}")
 
-    while True:
-        time.sleep(1)
-
+    print("[MAIN] All services started.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Shutdown.")

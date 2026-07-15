@@ -49,6 +49,9 @@ public:
     //
     Q_INVOKABLE void discoverOnvif(const QString& username, const QString& password);
 
+    // ⭐ ONVIF progress polling (for live discovery popup)
+    Q_INVOKABLE QVariantList getOnvifProgress();
+
     Q_INVOKABLE void testRtsp(const QString& url);
 
     //
@@ -79,6 +82,11 @@ public:
     // ⭐ Add Camera Popup “Use” button support
     //
     Q_INVOKABLE void applyNewCameraRtsp(const QString& id, const QString& url);
+
+    //
+    // ⭐ ONVIF RTSP resolver for “Use” button
+    //
+    Q_INVOKABLE void getRtsp(const QString& ip, const QString& username, const QString& password);
 
 signals:
     //
@@ -114,10 +122,18 @@ signals:
     //
     void onvifDevicesDiscovered(QVariantList devices);
 
+    // ⭐ ONVIF progress (live updates for discovery popup)
+    void onvifProgress(QVariantList devices);
+
     //
     // ⭐ RTSP test
     //
     void rtspTestResult(bool ok, QString message);
+
+    //
+    // ⭐ RTSP resolved for “Use” button
+    //
+    void rtspResolved(QString rtsp);
 
     //
     // ⭐ Camera online/offline
@@ -159,6 +175,9 @@ private:
     QHash<QString, QVariantList> m_recordingsByCamera;
     QHash<QString, QVariantList> m_eventsByCamera;
     QHash<QString, qint64>       m_playbackPositionByCamera;
+
+    // ⭐ ONVIF live progress cache
+    QVariantList m_onvifProgress;
 };
 
 #endif // FRIGATEAPI_H

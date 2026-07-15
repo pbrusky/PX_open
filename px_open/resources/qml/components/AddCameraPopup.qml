@@ -9,29 +9,34 @@ Popup {
     height: 480
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    background: Rectangle { color: "#111"; radius: 6 }
+
+    background: Rectangle {
+        color: "#111"
+        radius: 6
+    }
 
     onClosed: {
         popup.visible = false
         popup.focus = false
     }
 
-    //
-    // ⭐ Use the REAL backend instance exposed in main.cpp
-    //
+    // Backend reference
     property var frigateRef: frigate
 
+    // Camera properties
     property string cameraId: ""
     property string streamUrl: ""
     property string username: ""
     property string password: ""
     property bool enableRecording: true
 
+    // Field aliases
     property alias ipField: ipInput
     property alias rtspField: rtspInput
     property alias userField: userInput
     property alias passField: passInput
 
+    // Build final RTSP URL
     function getFinalRtspUrl() {
         if (streamUrl.startsWith("rtsp://"))
             return streamUrl
@@ -201,17 +206,13 @@ Popup {
         }
     }
 
-    //
-    // ⭐ ONVIF popup now receives the REAL backend instance
-    //
+    // ONVIF popup
     OnvifDiscoveryPopup {
         id: onvifPopup
         addCameraPopupRef: popup
     }
 
-    //
-    // ⭐ RTSP test signal now connects to the REAL backend instance
-    //
+    // RTSP test callback
     Connections {
         target: frigate
 

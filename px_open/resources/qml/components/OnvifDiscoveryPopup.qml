@@ -5,77 +5,85 @@ import QtQuick.Layouts 1.15
 Popup {
     id: popup
     modal: true
-    width: 720
-    height: 520
+    width: 900
+    height: 700
     focus: true
 
     background: Rectangle {
-        color: "#0F0F0F"
-        radius: 8
+        color: "#121212"
+        radius: 10
     }
 
     property var addCameraPopupRef: null
     property var devices: []
+    property bool discoveryRunning: false
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 24
-        spacing: 18
+        anchors.margins: 28
+        spacing: 16
 
         Text {
             text: "ONVIF Discovery"
-            font.pixelSize: 28
+            font.pixelSize: 32
             font.bold: true
             color: "white"
         }
 
-        TextField {
-            id: usernameField
-            placeholderText: "ONVIF Username"
+        GridLayout {
             Layout.fillWidth: true
-            font.pixelSize: 16
-            color: "white"
-            placeholderTextColor: "#888"
-            background: Rectangle {
-                color: "#1E1E1E"
-                radius: 6
-                border.color: "#444"
-            }
-        }
+            columns: 2
+            columnSpacing: 12
+            rowSpacing: 8
 
-        TextField {
-            id: passwordField
-            placeholderText: "ONVIF Password"
-            echoMode: TextInput.Password
-            Layout.fillWidth: true
-            font.pixelSize: 16
-            color: "white"
-            placeholderTextColor: "#888"
-            background: Rectangle {
-                color: "#1E1E1E"
-                radius: 6
-                border.color: "#444"
+            Text { text: "Username"; color: "#ccc"; font.pixelSize: 16 }
+            TextField {
+                id: userField
+                placeholderText: "Optional"
+                color: "white"
+                font.pixelSize: 16
+                background: Rectangle { color: "#1E1E1E"; radius: 6; border.color: "#444" }
+            }
+
+            Text { text: "Password"; color: "#ccc"; font.pixelSize: 16 }
+            TextField {
+                id: passField
+                placeholderText: "Optional"
+                echoMode: TextInput.Password
+                color: "white"
+                font.pixelSize: 16
+                background: Rectangle { color: "#1E1E1E"; radius: 6; border.color: "#444" }
             }
         }
 
         Button {
-            text: "Discover Cameras"
+            text: discoveryRunning ? "Scanning..." : "Start Scan"
             Layout.fillWidth: true
-            font.pixelSize: 16
+            font.pixelSize: 20
+            enabled: !discoveryRunning
+
             onClicked: {
                 devices = []
-                console.log("OnvifDiscoveryPopup: calling discoverOnvif()")
-                frigate.discoverOnvif(usernameField.text, passwordField.text)
+                discoveryRunning = true
+                frigate.discoverOnvif(userField.text, passField.text)
             }
         }
 
-        Text {
-            visible: devices.length === 0
-            text: "No ONVIF cameras found"
-            color: "#bbb"
-            font.pixelSize: 18
-            horizontalAlignment: Text.AlignHCenter
+        Rectangle {
             Layout.fillWidth: true
+            Layout.preferredHeight: 50
+            radius: 6
+            color: "#1A1A1A"
+            border.color: "#333"
+
+            Text {
+                anchors.centerIn: parent
+                text: discoveryRunning
+                      ? "Scanning for ONVIF cameras..."
+                      : (devices.length > 0 ? "Scan complete" : "Ready to scan")
+                color: "#ccc"
+                font.pixelSize: 18
+            }
         }
 
         ListView {
@@ -84,12 +92,12 @@ Popup {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            spacing: 10
+            spacing: 16
 
             delegate: Rectangle {
                 width: list.width
-                height: 120
-                radius: 6
+                height: 160
+                radius: 10
                 color: hovered ? "#2A2A2A" : "#1E1E1E"
                 border.color: "#444"
 
@@ -104,74 +112,39 @@ Popup {
 
                 Column {
                     anchors.fill: parent
-                    anchors.margins: 14
-                    spacing: 8
+                    anchors.margins: 16
+                    spacing: 6
 
-                    // ------------------------------
-                    // Manufacturer + Model + IP
-                    // ------------------------------
                     Text {
-                        text: (modelData.manufacturer && modelData.manufacturer !== "" &&
-                               modelData.model && modelData.model !== "")
+                        text: (modelData.manufacturer && modelData.model)
                               ? modelData.manufacturer + " " + modelData.model
-                              : (modelData.address || "Unknown Device")
+                              : modelData.address
                         color: "white"
                         font.pixelSize: 20
                         font.bold: true
                     }
 
-                    // ------------------------------
-                    // RTSP URL
-                    // ------------------------------
-                    Text {
-                        text: modelData.rtsp || ""
-                        color: "#ccc"
-                        font.pixelSize: 16
-                        elide: Text.ElideRight
-                    }
+                    Text { text: "IP: " + modelData.address; color: "#bbb"; font.pixelSize: 15 }
+                    Text { text: "Protocol: " + modelData.protocol; color: "#bbb"; font.pixelSize: 15 }
+                    Text { text: "Firmware: " + modelData.firmware; color: "#bbb"; font.pixelSize: 15 }
+                    Text { text: "Serial #: " + modelData.serial; color: "#bbb"; font.pixelSize: 15 }
 
                     Row {
                         spacing: 12
 
                         Button {
                             text: "Use"
-                            font.pixelSize: 14
+                            font.pixelSize: 15
+
                             onClicked: {
-                                if (!addCameraPopupRef) {
-                                    console.log("OnvifDiscoveryPopup: addCameraPopupRef is null")
-                                    return
-                                }
+                                if (!addCameraPopupRef) return
 
-                                let popupRef = addCameraPopupRef
+                                let ip = modelData.address
+                                let user = userField.text
+                                let pass = passField.text
 
-                                if (popupRef.cameraId !== undefined)
-                                    popupRef.cameraId = modelData.address || ""
-
-                                if (popupRef.ipField)
-                                    popupRef.ipField.text = modelData.address || ""
-
-                                if (popupRef.userField)
-                                    popupRef.userField.text = modelData.username || ""
-
-                                if (popupRef.passField)
-                                    popupRef.passField.text = modelData.password || ""
-
-                                let rtsp = modelData.rtsp || ""
-
-                                if (!rtsp || !rtsp.startsWith("rtsp://")) {
-                                    rtsp = "rtsp://" +
-                                           (modelData.username || "") +
-                                           (modelData.password ? ":" + modelData.password : "") +
-                                           "@" + (modelData.address || "") +
-                                           ":554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
-                                }
-
-                                if (popupRef.rtspField)
-                                    popupRef.rtspField.text = rtsp
-
-                                popupRef.streamUrl = rtsp
-                                popupRef.open()
-                                popup.close()
+                                // Call C++ (NO callback allowed)
+                                frigate.getRtsp(ip, user, pass)
                             }
                         }
                     }
@@ -182,7 +155,7 @@ Popup {
         Button {
             text: "Close"
             Layout.fillWidth: true
-            font.pixelSize: 16
+            font.pixelSize: 18
             onClicked: popup.close()
         }
     }
@@ -191,8 +164,21 @@ Popup {
         target: frigate
 
         function onOnvifDevicesDiscovered(devList) {
-            console.log("OnvifDiscoveryPopup: received devices:", devList.length)
+            discoveryRunning = false
             devices = devList
+        }
+
+        // ⭐ RTSP result from C++
+        function onRtspResolved(rtsp) {
+            if (!addCameraPopupRef) return
+
+            let popupRef = addCameraPopupRef
+
+            popupRef.rtspField.text = rtsp
+            popupRef.streamUrl = rtsp
+
+            popupRef.open()
+            popup.close()
         }
     }
 }

@@ -5,6 +5,8 @@
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QSslConfiguration>
+#include <QSslSocket>
 #include <QDebug>
 #include <QThread>
 
@@ -17,6 +19,11 @@ FrigateAPI::FrigateAPI(QObject* parent)
     : QObject(parent),
       m_net(new QNetworkAccessManager(this))
 {
+}
+
+QVariantList FrigateAPI::getOnvifProgress()
+{
+    return m_onvifProgress;
 }
 
 //
@@ -183,7 +190,6 @@ void FrigateAPI::addCamera(QString id, QString url, bool record)
     });
 }
 
-
 //
 // ⭐ EDIT CAMERA
 //
@@ -297,7 +303,7 @@ void FrigateAPI::removeCamera(QString id)
 }
 
 //
-// ⭐ ONVIF DISCOVERY (with username + password)
+// ⭐ ONVIF DISCOVERY (calls Python backend)
 //
 void FrigateAPI::discoverOnvif(const QString& username, const QString& password)
 {
@@ -307,26 +313,25 @@ void FrigateAPI::discoverOnvif(const QString& username, const QString& password)
         return;
     }
 
+    m_onvifProgress.clear();
+
     const QUrl url(m_moduleServer + "/api/onvifDiscover");
     qDebug() << "[FrigateAPI] discoverOnvif: calling" << url.toString();
 
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
-    // ⭐ Allow self-signed certificates
     QSslConfiguration ssl = QSslConfiguration::defaultConfiguration();
     ssl.setPeerVerifyMode(QSslSocket::VerifyNone);
     ssl.setProtocol(QSsl::TlsV1_2OrLater);
     req.setSslConfiguration(ssl);
 
-    // ⭐ Build JSON payload with credentials
     QJsonObject obj;
     obj["username"] = username;
     obj["password"] = password;
 
     QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
 
-    // ⭐ Explicitly ignore SSL errors
     connect(reply, &QNetworkReply::sslErrors, reply,
             [reply](const QList<QSslError>& errors) {
                 qDebug() << "[FrigateAPI] discoverOnvif: ignoring SSL errors:" << errors;
@@ -354,24 +359,77 @@ void FrigateAPI::discoverOnvif(const QString& username, const QString& password)
         }
 
         QJsonArray arr = doc.object().value("devices").toArray();
-        QVariantList list;
+        QVariantList finalList;
 
         for (const QJsonValue& v : arr) {
             QJsonObject o = v.toObject();
-            QVariantMap entry;
+            QVariantMap dev;
 
-            entry["address"]      = o.value("address").toString();
-            entry["manufacturer"] = o.value("manufacturer").toString();
-            entry["model"]        = o.value("model").toString();
-            entry["username"]     = o.value("username").toString();
-            entry["password"]     = o.value("password").toString();
-            entry["rtsp"]         = o.value("rtsp").toString();
+            dev["address"]      = o.value("address").toString();
+            dev["manufacturer"] = o.value("manufacturer").toString();
+            dev["model"]        = o.value("model").toString();
+            dev["username"]     = o.value("username").toString();
+            dev["password"]     = o.value("password").toString();
+            dev["rtsp"]         = o.value("rtsp").toString();
 
-            list.append(entry);
+            finalList.append(dev);
         }
 
-        qDebug() << "[FrigateAPI] discoverOnvif: received" << list.size() << "devices";
-        emit onvifDevicesDiscovered(list);
+        qDebug() << "[FrigateAPI] discoverOnvif: received" << finalList.size() << "devices";
+        emit onvifDevicesDiscovered(finalList);
+    });
+}
+
+//
+// ⭐ GET RTSP URL (calls Python backend /api/getRtsp)
+//
+void FrigateAPI::getRtsp(const QString& ip, const QString& username, const QString& password)
+{
+    if (m_moduleServer.isEmpty()) {
+        qWarning() << "[FrigateAPI] getRtsp: moduleServer is empty";
+        emit rtspResolved("");
+        return;
+    }
+
+    const QUrl url(m_moduleServer + "/api/getRtsp");
+    qDebug() << "[FrigateAPI] getRtsp: calling" << url.toString();
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QSslConfiguration ssl = QSslConfiguration::defaultConfiguration();
+    ssl.setPeerVerifyMode(QSslSocket::VerifyNone);
+    ssl.setProtocol(QSsl::TlsV1_2OrLater);
+    req.setSslConfiguration(ssl);
+
+    QJsonObject obj;
+    obj["ip"] = ip;
+    obj["username"] = username;
+    obj["password"] = password;
+
+    QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
+
+    connect(reply, &QNetworkReply::sslErrors, reply,
+            [reply](const QList<QSslError>& errors) {
+                qDebug() << "[FrigateAPI] getRtsp: ignoring SSL errors:" << errors;
+                reply->ignoreSslErrors();
+            });
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        QByteArray data = reply->readAll();
+        reply->deleteLater();
+
+        qDebug() << "[FrigateAPI] getRtsp: raw response:" << data;
+
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        if (!doc.isObject()) {
+            qWarning() << "[FrigateAPI] getRtsp: invalid JSON";
+            emit rtspResolved("");
+            return;
+        }
+
+        QString rtsp = doc.object().value("rtsp").toString();
+        emit rtspResolved(rtsp);
     });
 }
 
@@ -477,7 +535,7 @@ QObject* FrigateAPI::getQueue(const QString& cameraName)
 }
 
 //
-// ⭐ STOP ONE STREAM (NEW — per camera)
+// ⭐ STOP ONE STREAM
 //
 void FrigateAPI::stopStream(const QString& cameraName)
 {
@@ -502,7 +560,7 @@ void FrigateAPI::stopStream(const QString& cameraName)
 }
 
 //
-// ⭐ STOP ALL STREAMS (global shutdown only)
+// ⭐ STOP ALL STREAMS
 //
 void FrigateAPI::stopAllStreams()
 {
@@ -537,7 +595,7 @@ void FrigateAPI::loadRecordings(const QString& cameraId)
         return;
     }
 
-    QUrl url(m_server + "/api/" + cameraId + "/recordings");
+      QUrl url(m_server + "/api/" + cameraId + "/recordings");
     QNetworkRequest req(url);
 
     QNetworkReply* reply = m_net->get(req);
@@ -712,5 +770,6 @@ void FrigateAPI::switchToLive(const QString& cameraId)
 
     s_playbackPositionByCamera[cameraId] = 0;
     emit playbackPositionChanged(cameraId, 0);
+
     qDebug() << "[FrigateAPI] Live mode resumed for" << cameraId;
 }

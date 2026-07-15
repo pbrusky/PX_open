@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
-// ⭐ Correct import for your QRC prefix
+// Correct QRC import
 import "qrc:/app/resources/qml"
 
 Item {
@@ -19,16 +19,14 @@ Item {
     signal gridReady()
 
     //
-    // ⭐ FIXED: Do NOT assign frigateRef here
+    // Popups (no frigateRef assigned here — correct)
     //
     AddCameraPopup {
         id: addCameraPopup
-        // ❌ REMOVED: frigateRef: root.frigateRef
     }
 
     RemoveCameraPopup {
         id: removeCameraPopup
-        // ❌ REMOVED: frigateRef: root.frigateRef
 
         onCameraRemoved: {
             if (root.cameraGrid && root.cameraGrid.removeCamera)
@@ -36,6 +34,9 @@ Item {
         }
     }
 
+    //
+    // Remove camera popup helper
+    //
     function openRemoveCameraPopup(cameraId) {
         if (!removeCameraPopup) {
             console.log("ServerView: removeCameraPopup is not available")
@@ -45,6 +46,9 @@ Item {
         removeCameraPopup.open()
     }
 
+    //
+    // Camera grid loader
+    //
     Loader {
         id: gridLoader
         anchors.fill: parent
@@ -57,6 +61,9 @@ Item {
         }
     }
 
+    //
+    // Initialize grid once mainWindow + frigateRef are valid
+    //
     function initializeGrid() {
         if (!mainWindow || !frigateRef) {
             console.log("ServerView: initializeGrid() called too early")
@@ -69,6 +76,9 @@ Item {
         gridLoader.active = true
     }
 
+    //
+    // Open Add Camera popup
+    //
     function openAddCameraPopup() {
         if (!addCameraPopup) {
             console.log("ServerView: addCameraPopup is not available")
@@ -77,6 +87,9 @@ Item {
         addCameraPopup.open()
     }
 
+    //
+    // Camera grid component
+    //
     Component {
         id: gridComponent
 
@@ -88,9 +101,12 @@ Item {
             cameraList: root.mainWindow.cameraList
             serverViewRoot: root
 
-            // ⭐ CameraGrid still receives frigateRef (this is correct)
+            // CameraGrid receives frigateRef — correct
             frigateRef: root.frigateRef
 
+            //
+            // Timeline dock
+            //
             FullscreenTimeline {
                 id: timeline
                 anchors.left: parent.left
@@ -102,7 +118,6 @@ Item {
                 cameraId: root.mainWindow.selectedCameraId
                 cameraName: root.mainWindow.selectedCameraId
 
-                // ⭐ Timeline also correctly uses frigateRef
                 frigateRef: root.frigateRef
 
                 recordings: root.frigateRef
@@ -120,6 +135,9 @@ Item {
         }
     }
 
+    //
+    // Camera update signal
+    //
     function updateCameras(list) {
         camerasLoadedToMain(list)
     }
