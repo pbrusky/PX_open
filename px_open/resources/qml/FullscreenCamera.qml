@@ -13,6 +13,8 @@ Rectangle {
     property string cameraId: ""
     property string cameraName: ""
     property var frigateRef: null
+    property var liveQueue: null        // queue passed from grid
+    property var playbackQueue: null    // queue passed from grid
     property bool isOnline: false
 
     //
@@ -25,27 +27,23 @@ Rectangle {
     Behavior on opacity { NumberAnimation { duration: 200 } }
 
     //
-    // LIVE VIDEO
+    // LIVE VIDEO (reuses existing queue)
     //
     CameraVideoItem {
         id: liveVideo
         anchors.fill: parent
         visible: isOnline && !isPlayback
-        queue: (isOnline && frigateRef && cameraId)
-               ? frigateRef.getQueue(cameraId)
-               : null
+        queue: liveQueue
     }
 
     //
-    // PLAYBACK VIDEO
+    // PLAYBACK VIDEO (reuses existing queue)
     //
     CameraVideoItem {
         id: playbackVideo
         anchors.fill: parent
         visible: isPlayback
-        queue: (isPlayback && frigateRef && cameraId)
-               ? frigateRef.getPlaybackQueue(cameraId)
-               : null
+        queue: playbackQueue
     }
 
     //
@@ -275,9 +273,9 @@ Rectangle {
             if (!ok) return
 
             if (isPlayback)
-                playbackVideo.queue = frigateRef.getPlaybackQueue(cameraId)
+                playbackVideo.queue = playbackQueue
             else
-                liveVideo.queue = frigateRef.getQueue(cameraId)
+                liveVideo.queue = liveQueue
         }
     }
 

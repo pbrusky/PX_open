@@ -5,10 +5,6 @@
 #include <QQueue>
 #include <QImage>
 
-extern "C" {
-#include <libavutil/frame.h>
-}
-
 class FrameQueue : public QObject
 {
     Q_OBJECT
@@ -17,8 +13,8 @@ public:
     explicit FrameQueue(QObject* parent = nullptr);
     ~FrameQueue() override;
 
-    void pushFrame(AVFrame* frame);
-    QImage popImage();
+    Q_INVOKABLE void pushImage(const QImage& img);
+    Q_INVOKABLE QImage popImage();
     void clear();
 
 signals:
@@ -27,7 +23,5 @@ signals:
 private:
     QMutex m_mutex;
     QQueue<QImage> m_queue;
-
-    // ⭐ Prevents runaway memory growth
     int m_maxSize = 3;
 };

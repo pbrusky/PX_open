@@ -103,6 +103,7 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     // Worker
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
+    worker->setFrameQueue(queue);   // ⭐ NEW: connect worker → queue
     m_playbackWorkers.insert(cameraId, worker);
 
     // Online/offline detection
@@ -116,10 +117,8 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         emit cameraOffline(cameraId);
     });
 
-    // Frame forwarding
-    connect(worker, &FFmpegWorker::frameReady,
-            queue, &FrameQueue::pushFrame,
-            Qt::QueuedConnection);
+    // ⭐ REMOVED: old frameReady(img) connection
+    // (worker no longer emits frameReady(img))
 
     // Thread
     QThread* thread = new QThread(this);

@@ -14,11 +14,13 @@ void CameraVideoItem::setQueue(QObject* q)
     if (m_queue)
         disconnect(m_queue, nullptr, this, nullptr);
 
-    m_queue = q ? dynamic_cast<FrameQueue*>(q) : nullptr;
+    m_queue = q ? qobject_cast<FrameQueue*>(q) : nullptr;
 
     if (m_queue) {
+        // ⭐ Ensure GUI-thread update
         connect(m_queue, &FrameQueue::frameReady,
-                this, &QQuickItem::update);
+                this, &QQuickItem::update,
+                Qt::QueuedConnection);
     }
 
     emit queueChanged();
@@ -30,6 +32,7 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
 {
     QSGSimpleTextureNode* node = static_cast<QSGSimpleTextureNode*>(oldNode);
 
+    // ⭐ Only popImage once per frame
     if (m_queue) {
         QImage img = m_queue->popImage();
         if (!img.isNull())
@@ -37,18 +40,17 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
     }
 
     if (!window() || m_lastImage.isNull()) {
-        delete node;
-        return nullptr;
+        return oldNode;   // ⭐ Do NOT delete node; keep stable
     }
 
-    QSGTexture* tex = window()->createTextureFromImage(m_lastImage);
-    if (!tex) {
-        delete node;
-        return nullptr;
-    }
-
+    // ⭐ Reuse node if possible
     if (!node)
         node = new QSGSimpleTextureNode();
+
+    // ⭐ Replace texture safely
+    QSGTexture* tex = window()->createTextureFromImage(m_lastImage);
+    if (!tex)
+        return node;
 
     node->setTexture(tex);
     node->setOwnsTexture(true);

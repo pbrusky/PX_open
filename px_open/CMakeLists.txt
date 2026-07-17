@@ -27,6 +27,7 @@ qt_standard_project_setup()
 #
 include_directories(
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/ui          # ⭐ REQUIRED for FrameItem.h
     ${CMAKE_SOURCE_DIR}/src/backend
     ${CMAKE_SOURCE_DIR}/src/backend/frigate
     C:/ffmpeg/include
@@ -63,6 +64,8 @@ qt_add_executable(px_open
     src/backend/FFmpegWorker.h
     src/backend/CameraVideoItem.cpp
     src/backend/CameraVideoItem.h
+    src/ui/FrameItem.cpp
+    src/ui/FrameItem.h
 
     ${APP_RESOURCES}
 )
@@ -96,9 +99,9 @@ add_library(frigate_backend
 target_link_libraries(frigate_backend
     PRIVATE
         Qt6::Core
-        Qt6::Gui            # ⭐ REQUIRED for QImage
+        Qt6::Gui
         Qt6::Network
-        Qt6::Multimedia     # ⭐ FFmpegWorker uses QVideoFrame
+        Qt6::Multimedia
 )
 
 #

@@ -1,24 +1,20 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import QtMultimedia 6.5
+import PxOpen 1.0
 
 Item {
     id: tile
     z: 5
 
-    // wired from CameraGrid
     property var mainWindow
     property var gridRoot
     property var frigateRef
 
     property string cameraName: ""
-
-    // Backend-driven online/offline state (not blocking stream anymore)
     property bool isOnline: frigateRef ? frigateRef.isCameraOnline(cameraName) : false
 
     property bool selected: false
     property bool isHovered: false
-
     property bool dragging: false
     property int dragIndex: -1
     property int tileIndex: -1
@@ -29,29 +25,28 @@ Item {
     property string codec: ""
     property string streamType: ""
 
+    property var frameQueue
+    property var currentFrame
+
     signal removeRequested()
 
-    //
-    // Camera lookup
-    //
     function cameraObject() {
         if (!mainWindow || !mainWindow.cameraList)
             return null
         return mainWindow.cameraList.find(c => c.name === cameraName)
     }
 
-    //
-    // Stream loading
-    //
     onCameraNameChanged: {
         if (!cameraName || cameraName === "") {
-            player.source = ""
+            frameQueue = null
+            currentFrame = null
             return
         }
 
         let cam = cameraObject()
         if (!cam) {
-            player.source = ""
+            frameQueue = null
+            currentFrame = null
             return
         }
 
@@ -61,12 +56,33 @@ Item {
         codec         = cam.codec         || ""
         streamType    = cam.streamType    || ""
 
-        // Use backend queue's URL, not the QObject itself
-        let queue = frigateRef ? frigateRef.getQueue(cameraName) : null
-        if (queue && queue.url) {
-            player.source = queue.url
-        } else {
-            player.source = ""
+        if (!frigateRef) {
+            frameQueue = null
+            currentFrame = null
+            return
+        }
+
+        frameQueue = frigateRef.getQueue(cameraName)
+        if (frameQueue)
+            console.log("CameraTile: using FrameQueue for", cameraName)
+        else
+            console.log("CameraTile: no FrameQueue for", cameraName)
+    }
+
+    Connections {
+        target: frameQueue
+        ignoreUnknownSignals: true
+
+        function onFrameReady() {
+            if (!frameQueue)
+                return
+
+            var img = frameQueue.popImage()
+            if (!img)
+                return
+
+            currentFrame = img
+            videoFrame.frame = img
         }
     }
 
@@ -74,49 +90,13 @@ Item {
         anchors.fill: parent
         color: "#101010"
         radius: 6
+        visible: currentFrame === null
     }
 
-    MediaPlayer {
-        id: player
-        videoOutput: videoItem
-        audioOutput: audioOut
-        loops: MediaPlayer.Infinite
-    }
-
-    AudioOutput {
-        id: audioOut
-        muted: true
-    }
-
-    Menu {
-        id: contextMenu
-        title: cameraName !== "" ? cameraName : "Camera"
-
-        MenuItem {
-            text: "Fullscreen"
-            enabled: cameraName !== ""
-            onTriggered: {
-                if (cameraName !== "" && gridRoot && gridRoot.enterFullscreen)
-                    gridRoot.enterFullscreen(cameraName)
-            }
-        }
-
-        MenuItem {
-            text: "Remove Camera"
-            enabled: cameraName !== ""
-            onTriggered: {
-                if (cameraName !== "" && gridRoot && gridRoot.removeCamera)
-                    gridRoot.removeCamera(cameraName)
-            }
-        }
-    }
-
-    VideoOutput {
-        id: videoItem
+    FrameItem {
+        id: videoFrame
         anchors.fill: parent
-        visible: cameraName !== ""
-        enabled: false
-        focus: false
+        visible: currentFrame !== null && isOnline
     }
 
     Rectangle {
@@ -166,79 +146,6 @@ Item {
         z: 20
     }
 
-    Row {
-        id: topRightCluster
-        spacing: 6
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: 6
-
-        visible: isHovered && cameraName !== ""
-        z: 200
-
-        Rectangle {
-            width: 20; height: 20; radius: 10
-            color: "#000000AA"
-            border.color: "#FFFFFF"
-            border.width: 1
-
-            Text { anchors.centerIn: parent; text: "i"; color: "white"; font.pixelSize: 12 }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: infoOverlay.visible = !infoOverlay.visible
-            }
-        }
-
-        Rectangle {
-            width: 20; height: 20; radius: 10
-            color: "#000000AA"
-            border.color: "#FFFFFF"
-            border.width: 1
-
-            Text { anchors.centerIn: parent; text: "✕"; color: "white"; font.pixelSize: 12 }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: removeRequested()
-            }
-        }
-    }
-
-    Rectangle {
-        id: infoOverlay
-        visible: false
-        width: 120
-        height: 80
-        radius: 3
-        anchors.top: topRightCluster.bottom
-        anchors.right: topRightCluster.right
-        anchors.margins: 4
-
-        color: "#2E2E2EEE"
-        border.color: "#FFFFFF22"
-        border.width: 1
-        z: 300
-
-        opacity: visible ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 150 } }
-
-        Column {
-            anchors.fill: parent
-            anchors.margins: 6
-            spacing: 1
-
-            Text { text: resolution; color: "white"; font.pixelSize: 11; horizontalAlignment: Text.AlignRight }
-            Text { text: fps.toFixed(2) + "fps"; color: "white"; font.pixelSize: 11; horizontalAlignment: Text.AlignRight }
-            Text { text: (bitrateKbps / 1000).toFixed(2) + "Mbps (" + streamType.charAt(0).toUpperCase() + ")"; color: "white"; font.pixelSize: 11; horizontalAlignment: Text.AlignRight }
-            Text { text: codec; color: "white"; font.pixelSize: 11; horizontalAlignment: Text.AlignRight }
-            Text { text: streamType === "main" ? "Hi‑Res" : "Lo‑Res"; color: "white"; font.pixelSize: 11; horizontalAlignment: Text.AlignRight }
-        }
-    }
-
-    //
-    // Unified interaction: hover + fullscreen + drag
-    //
     MouseArea {
         id: interactionArea
         anchors.fill: parent
@@ -252,13 +159,8 @@ Item {
         onExited: tile.isHovered = false
 
         onDoubleClicked: {
-            if (!gridRoot || !gridRoot.enterFullscreen)
-                return
-
-            if (!cameraName || cameraName === "")
-                return
-
-            gridRoot.enterFullscreen(cameraName)
+            if (gridRoot && gridRoot.enterFullscreen && cameraName !== "")
+                gridRoot.enterFullscreen(cameraName, frameQueue)
         }
 
         onPressed: {
@@ -268,15 +170,35 @@ Item {
 
         onReleased: {
             tile.dragging = false
-            gridRoot.reorderTiles(tile.dragIndex, tile.x, tile.y)
+            if (gridRoot && gridRoot.reorderTiles)
+                gridRoot.reorderTiles(tile.dragIndex, tile.x, tile.y)
             tile.x = 0
             tile.y = 0
         }
 
         onClicked: function(mouse) {
-            if (mouse.button === Qt.RightButton) {
+            if (mouse.button === Qt.RightButton)
                 contextMenu.open()
+        }
+    }
+
+    Menu {
+        id: contextMenu
+        title: cameraName !== "" ? cameraName : "Camera"
+
+        MenuItem {
+            text: "Fullscreen"
+            enabled: cameraName !== ""
+            onTriggered: {
+                if (gridRoot && gridRoot.enterFullscreen)
+                    gridRoot.enterFullscreen(cameraName, frameQueue)
             }
+        }
+
+        MenuItem {
+            text: "Remove Camera"
+            enabled: cameraName !== ""
+            onTriggered: removeRequested()
         }
     }
 }

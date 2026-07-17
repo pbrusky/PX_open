@@ -1,14 +1,16 @@
-#ifndef FFMPEGWORKER_H
-#define FFMPEGWORKER_H
+#pragma once
 
 #include <QObject>
 #include <QString>
+#include <QImage>
 
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
-#include <libavutil/frame.h>
+#include <libswscale/swscale.h>
 }
+
+class FrameQueue;
 
 class FFmpegWorker : public QObject
 {
@@ -19,31 +21,30 @@ public:
     ~FFmpegWorker() override;
 
     void setUrl(const QString& url);
+    void setTestMode(bool enabled);
 
-    // ⭐ FIXED — declaration only (no inline body)
-    void setTestMode(bool test);
+    // ⭐ NEW: connect worker → FrameQueue
+    void setFrameQueue(FrameQueue* queue);
 
+public slots:
     void startDecoding();
     void stopDecoding();
 
 signals:
-    // Streaming
-    void frameReady(AVFrame* frame);
+    void openInputOk();
+    void openInputFailed(const QString& reason);
     void streamStarted();
     void streamStopped();
-    void streamError(QString reason);
+    void streamError(const QString& reason);
     void finished();
-
-    // RTSP test
-    void openInputOk();
-    void openInputFailed(QString reason);
 
 private:
     void decodeLoop();
 
     QString m_url;
     bool m_abort = false;
-    bool m_testMode = false;   // ⭐ normal vs test
-};
+    bool m_testMode = false;
 
-#endif // FFMPEGWORKER_H
+    // ⭐ NEW: where decoded frames go
+    FrameQueue* m_queue = nullptr;
+};

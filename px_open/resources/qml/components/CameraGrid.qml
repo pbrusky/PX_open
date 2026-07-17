@@ -20,6 +20,8 @@ Item {
 
     // Camera selected for fullscreen
     property var fullscreenCamera: null
+    property var fullscreenLiveQueue: null
+    property var fullscreenPlaybackQueue: null
 
     //
     // Safe camera lookup
@@ -121,12 +123,17 @@ Item {
     //
     // Fullscreen
     //
-    function enterFullscreen(cameraName) {
+    function enterFullscreen(cameraName, liveQueue) {
         let cam = getCamera(cameraName)
         if (!cam)
             return
 
         fullscreenCamera = cam
+        fullscreenLiveQueue = liveQueue
+        fullscreenPlaybackQueue = frigateRef
+                                  ? frigateRef.getPlaybackQueue(cameraName)
+                                  : null
+
         fullscreenLoader.source = "qrc:/app/resources/qml/FullscreenCamera.qml"
         fullscreenLoader.visible = true
     }
@@ -135,6 +142,8 @@ Item {
         fullscreenLoader.visible = false
         fullscreenLoader.source = ""
         fullscreenCamera = null
+        fullscreenLiveQueue = null
+        fullscreenPlaybackQueue = null
     }
 
     //
@@ -211,15 +220,14 @@ Item {
             item.cameraId = fullscreenCamera.id || fullscreenCamera.name
             item.cameraName = fullscreenCamera.name || fullscreenCamera.id
 
-            // Use backend queue URL instead of a QObject
-            let queue = gridContainer.frigateRef
-                        ? gridContainer.frigateRef.getQueue(item.cameraName)
-                        : null
-            if (queue && queue.url)
-                item.streamUrl = queue.url
-
-            item.isOnline = gridContainer.frigateRef.isCameraOnline(item.cameraName)
             item.frigateRef = gridContainer.frigateRef
+            item.isOnline = gridContainer.frigateRef
+                            ? gridContainer.frigateRef.isCameraOnline(item.cameraName)
+                            : false
+
+            // reuse queues from grid/tile
+            item.liveQueue = gridContainer.fullscreenLiveQueue
+            item.playbackQueue = gridContainer.fullscreenPlaybackQueue
 
             if (item.open)
                 item.open()

@@ -16,6 +16,7 @@
 
 #include "DiscoveryListener.h"
 #include "CameraVideoItem.h"
+#include "FrameItem.h"        // ⭐ REQUIRED for qmlRegisterType<FrameItem>()
 
 int main(int argc, char *argv[])
 {
@@ -37,6 +38,7 @@ int main(int argc, char *argv[])
     qmlRegisterType<FrigateOnvif>("PxOpen", 1, 0, "FrigateOnvif");
 
     qmlRegisterType<CameraVideoItem>("PxOpen", 1, 0, "CameraVideoItem");
+    qmlRegisterType<FrameItem>("PxOpen", 1, 0, "FrameItem");   // ⭐ Now valid
 
     //
     // Create backend singletons
