@@ -5,9 +5,11 @@ import json
 import sys
 import os
 from requests.auth import HTTPDigestAuth
+from threading import Lock
+import signal
 
-TIMEOUT = 1.1          # Reduced from 1.5
-MAX_WORKERS = 90       # Increased
+TIMEOUT = 1.15
+MAX_WORKERS = 80
 
 if len(sys.argv) < 2:
     print(json.dumps({"error": "No subnet provided"}))
@@ -20,19 +22,20 @@ PASSWORD = sys.argv[3] if len(sys.argv) >= 4 else ""
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROGRESS_FILE = os.path.join(SCRIPT_DIR, "onvif_progress.log")
 
-def log(msg):
-    with open(PROGRESS_FILE, "a", encoding="utf-8") as f:
-        f.write(msg + "\n")
-    print(msg, file=sys.stderr)
+progress_lock = Lock()
 
-# ---------------------------------------------------------
-# Session (reuse connections)
-# ---------------------------------------------------------
+def log(msg):
+    with progress_lock:
+        try:
+            with open(PROGRESS_FILE, "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+            print(msg, file=sys.stderr)
+        except:
+            pass
+
 session = requests.Session()
 session.mount('http://', requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100))
 
-# ---------------------------------------------------------
-# Detectors
 # ---------------------------------------------------------
 def detect_onvif(ip):
     try:
@@ -47,19 +50,26 @@ def detect_onvif(ip):
         
         if r.status_code == 200:
             xml = ET.fromstring(r.text)
-            def tag(t): 
-                n = xml.find(f".//{{*}}{t}")
-                return n.text if n is not None else "Unknown"
-            
             log(f"ONVIF → {ip}")
+            
+            manufacturer = model = firmware = serial = hardware = "Unknown"
+            for elem in xml.iter():
+                tag = elem.tag.split('}')[-1]
+                if elem.text:
+                    if tag == "Manufacturer": manufacturer = elem.text
+                    elif tag == "Model": model = elem.text
+                    elif tag == "FirmwareVersion": firmware = elem.text
+                    elif tag == "SerialNumber": serial = elem.text
+                    elif tag == "HardwareId": hardware = elem.text
+            
             return {
                 "address": ip,
                 "protocol": "ONVIF",
-                "manufacturer": tag("Manufacturer"),
-                "model": tag("Model"),
-                "firmware": tag("FirmwareVersion"),
-                "serial": tag("SerialNumber"),
-                "hardware": tag("HardwareId"),
+                "manufacturer": manufacturer,
+                "model": model,
+                "firmware": firmware,
+                "serial": serial,
+                "hardware": hardware,
                 "rtsp": []
             }
     except:
@@ -78,9 +88,9 @@ def detect_hikvision(ip):
                 "address": ip,
                 "protocol": "Hikvision",
                 "manufacturer": "Hikvision",
-                "model": xml.find(".//model").text or "Hikvision",
-                "firmware": xml.find(".//firmwareVersion").text or "Unknown",
-                "serial": xml.find(".//serialNumber").text or "Unknown",
+                "model": getattr(xml.find(".//model"), 'text', "Hikvision"),
+                "firmware": getattr(xml.find(".//firmwareVersion"), 'text', "Unknown"),
+                "serial": getattr(xml.find(".//serialNumber"), 'text', "Unknown"),
                 "hardware": "Unknown",
                 "rtsp": []
             }
@@ -119,6 +129,13 @@ def scan_ip(ip):
     return None
 
 
+def shutdown_handler(signum, frame):
+    log("[SCAN] Scan interrupted")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, shutdown_handler)
+signal.signal(signal.SIGTERM, shutdown_handler)
+
 # ---------------------------------------------------------
 if __name__ == "__main__":
     open(PROGRESS_FILE, "w").close()
@@ -127,9 +144,12 @@ if __name__ == "__main__":
     devices = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(scan_ip, f"{SUBNET}{i}") for i in range(1, 255)]
-        for future in concurrent.futures.as_completed(futures):
-            if result := future.result():
-                devices.append(result)
+        try:
+            for future in concurrent.futures.as_completed(futures):
+                if result := future.result():
+                    devices.append(result)
+        except KeyboardInterrupt:
+            log("[SCAN] Scan cancelled by user")
 
     log(f"[SCAN] Total cameras found: {len(devices)}")
     print(json.dumps(devices, indent=2))

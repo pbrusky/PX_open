@@ -88,9 +88,6 @@ void FrigateAPI::loadModuleInformation()
     });
 }
 
-//
-// ⭐ LOAD CAMERAS (Frigate /api/config)
-//
 void FrigateAPI::loadCameras()
 {
     if (m_server.isEmpty()) {
@@ -99,17 +96,17 @@ void FrigateAPI::loadCameras()
         return;
     }
 
+    // Extract IP from server URL
     QString serverIp = m_server;
     serverIp.remove("http://");
     serverIp.remove("https://");
     serverIp.remove(":5000");
     serverIp.remove("/");
-
     setServerIp(serverIp);
 
+    // Load Frigate config
     QUrl url(m_server + "/api/config");
     QNetworkRequest req(url);
-
     QNetworkReply* reply = m_net->get(req);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, serverIp]() {
@@ -131,6 +128,7 @@ void FrigateAPI::loadCameras()
                 entry["id"] = id;
                 entry["name"] = id;
 
+                // Correct go2rtc stream URL
                 entry["streamUrl"] = QString("rtsp://%1:8554/%2")
                                         .arg(serverIp, id);
 
