@@ -12,7 +12,9 @@ Item {
     property var frigateRef
 
     property string cameraName: ""
-    property bool isOnline: false
+
+    // Backend-driven online/offline state (not blocking stream anymore)
+    property bool isOnline: frigateRef ? frigateRef.isCameraOnline(cameraName) : false
 
     property bool selected: false
     property bool isHovered: false
@@ -59,13 +61,13 @@ Item {
         codec         = cam.codec         || ""
         streamType    = cam.streamType    || ""
 
-        if (!isOnline) {
+        // Use backend queue's URL, not the QObject itself
+        let queue = frigateRef ? frigateRef.getQueue(cameraName) : null
+        if (queue && queue.url) {
+            player.source = queue.url
+        } else {
             player.source = ""
-            return
         }
-
-        let url = cam.streamUrl || cam.rtspUrl || cam.url
-        player.source = url || ""
     }
 
     Rectangle {
@@ -112,9 +114,7 @@ Item {
     VideoOutput {
         id: videoItem
         anchors.fill: parent
-        visible: cameraName !== "" && isOnline
-
-        // Prevents VideoOutput from blocking mouse events
+        visible: cameraName !== ""
         enabled: false
         focus: false
     }

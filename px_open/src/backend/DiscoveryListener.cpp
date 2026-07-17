@@ -68,7 +68,8 @@ void DiscoveryListener::processPendingDatagrams()
         QString address = senderIp;
 
         qDebug() << "[Discovery] Emitting serverFound:"
-                 << name << address << port << container;
+                 << name << address << port << container
+                 << systemId << moduleId << type;
 
         emit serverFound(name,
                          address,

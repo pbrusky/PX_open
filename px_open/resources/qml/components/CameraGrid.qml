@@ -32,9 +32,11 @@ Item {
         return mainWindow.cameraList.find(c => c.name === name)
     }
 
+    //
+    // Backend-driven online/offline state
+    //
     function isCameraOnline(name) {
-        let cam = getCamera(name)
-        return cam ? !!cam.isOnline : false
+        return frigateRef ? frigateRef.isCameraOnline(name) : false
     }
 
     //
@@ -86,17 +88,14 @@ Item {
     }
 
     function requestRemoveCamera(cameraName) {
-        // Remove the confirmation popup: call backend and update UI directly
         if (gridContainer.frigateRef && gridContainer.frigateRef.removeCamera) {
             try {
                 gridContainer.frigateRef.removeCamera(cameraName)
             } catch (e) {
                 console.log("CameraGrid: error calling removeCamera:", e)
             }
-            // Optimistically remove the tile from the grid
             removeCamera(cameraName)
         } else if (serverViewRoot && serverViewRoot.openRemoveCameraPopup) {
-            // Fallback to previous behavior if frigateRef isn't available
             serverViewRoot.openRemoveCameraPopup(cameraName)
         } else {
             removeCamera(cameraName)
@@ -211,9 +210,15 @@ Item {
 
             item.cameraId = fullscreenCamera.id || fullscreenCamera.name
             item.cameraName = fullscreenCamera.name || fullscreenCamera.id
-            item.streamUrl = fullscreenCamera.streamUrl || fullscreenCamera.rtspUrl || fullscreenCamera.url
 
-            item.isOnline = !!fullscreenCamera.isOnline
+            // Use backend queue URL instead of a QObject
+            let queue = gridContainer.frigateRef
+                        ? gridContainer.frigateRef.getQueue(item.cameraName)
+                        : null
+            if (queue && queue.url)
+                item.streamUrl = queue.url
+
+            item.isOnline = gridContainer.frigateRef.isCameraOnline(item.cameraName)
             item.frigateRef = gridContainer.frigateRef
 
             if (item.open)

@@ -20,23 +20,20 @@ Popup {
         popup.focus = false
     }
 
-    // Backend reference
+    // Backend reference (must be set from ServerView: frigateRef: frigate)
     property var frigateRef: frigate
 
-    // Camera properties
     property string cameraId: ""
     property string streamUrl: ""
     property string username: ""
     property string password: ""
     property bool enableRecording: true
 
-    // Field aliases
     property alias ipField: ipInput
     property alias rtspField: rtspInput
     property alias userField: userInput
     property alias passField: passInput
 
-    // Build final RTSP URL
     function getFinalRtspUrl() {
         if (streamUrl.startsWith("rtsp://"))
             return streamUrl
@@ -153,9 +150,7 @@ Popup {
                 text: "Discover ONVIF"
                 Layout.fillWidth: true
                 enabled: !rtspInput.text.startsWith("rtsp://")
-                onClicked: {
-                    onvifPopup.open()
-                }
+                onClicked: onvifPopup.open()
             }
 
             Button {
@@ -163,8 +158,16 @@ Popup {
                 Layout.fillWidth: true
                 onClicked: {
                     let url = getFinalRtspUrl()
+
+                    if (!url || url === "") {
+                        rtspStatus.text = "RTSP URL required to test"
+                        rtspStatus.color = "red"
+                        return
+                    }
+
                     rtspStatus.text = "Testing: " + url
                     rtspStatus.color = "yellow"
+
                     frigateRef.testRtsp(url)
                 }
             }
@@ -204,26 +207,25 @@ Popup {
                 onClicked: popup.close()
             }
         }
-    }
 
-    // ONVIF popup
-    OnvifDiscoveryPopup {
-        id: onvifPopup
-        addCameraPopupRef: popup
-    }
+        Connections {
+            target: frigateRef
 
-    // RTSP test callback
-    Connections {
-        target: frigate
-
-        function onRtspTestResult(ok, message) {
-            if (ok) {
-                rtspStatus.text = "RTSP Test Passed"
-                rtspStatus.color = "lightgreen"
-            } else {
-                rtspStatus.text = "RTSP Test Failed: " + message
-                rtspStatus.color = "red"
+            function onRtspTestResult(ok, message) {
+                if (ok) {
+                    rtspStatus.text = "RTSP Test Passed: " + message
+                    rtspStatus.color = "lightgreen"
+                } else {
+                    rtspStatus.text = "RTSP Test Failed: " + message
+                    rtspStatus.color = "red"
+                }
             }
         }
+    }
+
+    OnvifDiscoveryPopup {
+        id: onvifPopup
+        frigateRef: popup.frigateRef
+        addCameraPopupRef: popup
     }
 }

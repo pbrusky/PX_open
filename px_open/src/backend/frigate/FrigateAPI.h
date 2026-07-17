@@ -2,15 +2,14 @@
 #define FRIGATEAPI_H
 
 #include <QObject>
-#include <QNetworkAccessManager>
 #include <QString>
 #include <QVariantList>
-#include <QHash>
-#include <QMap>
-#include <QThread>
 
-#include "FrameQueue.h"
-#include "FFmpegWorker.h"
+class FrigateCameraManager;
+class FrigateStreamManager;
+class FrigateTimeline;
+class FrigatePlayback;
+class FrigateOnvif;
 
 class FrigateAPI : public QObject
 {
@@ -27,77 +26,108 @@ public:
     QString moduleServer() const { return m_moduleServer; }
     QString serverIp() const { return m_serverIp; }
 
-    //
-    // ⭐ Server setters
-    //
     Q_INVOKABLE void setServer(QString server);
     Q_INVOKABLE void setModuleServer(QString server);
     Q_INVOKABLE void setServerIp(QString ip);
 
     //
-    // ⭐ Module + camera management
+    // Camera API
     //
-    Q_INVOKABLE void loadModuleInformation();
     Q_INVOKABLE void loadCameras();
-
     Q_INVOKABLE void addCamera(QString id, QString url, bool record);
     Q_INVOKABLE void editCamera(QString id, QString url);
     Q_INVOKABLE void removeCamera(QString id);
+    Q_INVOKABLE bool isCameraOnline(const QString& id) const;
+    Q_INVOKABLE QVariantList getCameraList() const;
 
     //
-    // ⭐ ONVIF discovery now requires username + password
+    // ONVIF
     //
     Q_INVOKABLE void discoverOnvif(const QString& username, const QString& password);
-
-    // ⭐ ONVIF progress polling (for live discovery popup)
     Q_INVOKABLE QVariantList getOnvifProgress();
-
-    Q_INVOKABLE void testRtsp(const QString& url);
+    Q_INVOKABLE void getRtsp(const QString& ip, const QString& username, const QString& password);
 
     //
-    // ⭐ Live streaming
+    // Streaming
     //
     Q_INVOKABLE QObject* getQueue(const QString& cameraName);
+    Q_INVOKABLE QObject* getPlaybackQueue(const QString& cameraName);
     Q_INVOKABLE void stopStream(const QString& cameraName);
     Q_INVOKABLE void stopAllStreams();
 
     //
-    // ⭐ Timeline backend
+    // Timeline
     //
     Q_INVOKABLE void loadRecordings(const QString& cameraId);
     Q_INVOKABLE void loadEvents(const QString& cameraId);
-    Q_INVOKABLE void seek(const QString& cameraId, qint64 timestampMs);
-
     Q_INVOKABLE QVariantList getRecordingsForCamera(const QString& cameraId);
     Q_INVOKABLE QVariantList getEventsForCamera(const QString& cameraId);
-    Q_INVOKABLE qint64 currentPosition(const QString& cameraId);
 
     //
-    // ⭐ Playback backend
+    // Playback
     //
+    Q_INVOKABLE void seek(const QString& cameraId, qint64 timestampMs);
     Q_INVOKABLE void startPlayback(const QString& cameraId, qint64 timestampMs);
+    Q_INVOKABLE qint64 currentPosition(const QString& cameraId);
     Q_INVOKABLE void switchToLive(const QString& cameraId);
 
     //
-    // ⭐ Add Camera Popup “Use” button support
+    // Module Information
     //
-    Q_INVOKABLE void applyNewCameraRtsp(const QString& id, const QString& url);
+    Q_INVOKABLE void loadModuleInformation();
 
     //
-    // ⭐ ONVIF RTSP resolver for “Use” button
+    // RTSP Testing
     //
-    Q_INVOKABLE void getRtsp(const QString& ip, const QString& username, const QString& password);
+    Q_INVOKABLE void testRtsp(const QString& url);
 
 signals:
     //
-    // ⭐ Server signals
+    // Server properties
     //
     void serverChanged();
     void moduleServerChanged();
     void serverIpChanged();
 
     //
-    // ⭐ Module info
+    // Camera list
+    //
+    void camerasLoaded(QVariantList cameras);
+
+    //
+    // Camera CRUD
+    //
+    void cameraAddResult(bool ok, QString message);
+    void cameraEditResult(bool ok, QString message);
+    void cameraRemoveResult(bool ok, QString message);
+
+    //
+    // Camera online/offline
+    //
+    void cameraOnline(QString id);
+    void cameraOffline(QString id);
+
+    //
+    // ONVIF
+    //
+    void onvifDevicesDiscovered(QVariantList devices);
+    void onvifProgress(QVariantList devices);
+    void rtspResolved(QString rtsp);
+    void onvifError(QString message);
+
+    //
+    // Timeline
+    //
+    void recordingsLoaded(const QString& cameraId, const QVariantList& segments);
+    void eventsLoaded(const QString& cameraId, const QVariantList& events);
+
+    //
+    // Playback
+    //
+    void playbackPositionChanged(const QString& cameraId, qint64 positionMs);
+
+    //
+    // Module Information
     //
     void moduleInformationReceived(QString name,
                                    QString version,
@@ -106,78 +136,20 @@ signals:
                                    QString moduleId);
 
     //
-    // ⭐ Camera list
-    //
-    void camerasLoaded(QVariantList cameras);
-
-    //
-    // ⭐ Camera CRUD
-    //
-    void cameraAddResult(bool ok, QString message);
-    void cameraEditResult(bool ok, QString message);
-    void cameraRemoveResult(bool ok, QString message);
-
-    //
-    // ⭐ ONVIF
-    //
-    void onvifDevicesDiscovered(QVariantList devices);
-
-    // ⭐ ONVIF progress (live updates for discovery popup)
-    void onvifProgress(QVariantList devices);
-
-    //
-    // ⭐ RTSP test
+    // RTSP Test Result
     //
     void rtspTestResult(bool ok, QString message);
 
-    //
-    // ⭐ RTSP resolved for “Use” button
-    //
-    void rtspResolved(QString rtsp);
-
-    //
-    // ⭐ Camera online/offline
-    //
-    void cameraOnline(QString id);
-    void cameraOffline(QString id);
-
-    //
-    // ⭐ Timeline signals
-    //
-    void recordingsLoaded(const QString& cameraId, const QVariantList& segments);
-    void eventsLoaded(const QString& cameraId, const QVariantList& events);
-
-    //
-    // ⭐ Playback signals
-    //
-    void playbackPositionChanged(const QString& cameraId, qint64 positionMs);
-
 private:
-    //
-    // ⭐ Internal helpers
-    //
-    void checkCameraReachable(const QString& cameraName);
-
-    //
-    // ⭐ Members
-    //
     QString m_server;
     QString m_moduleServer;
     QString m_serverIp;
 
-    QNetworkAccessManager* m_net;
-
-    QHash<QString, FrameQueue*> m_queues;
-    QHash<QString, FFmpegWorker*> m_workers;
-    QMap<QString, QThread*> m_threads;
-
-    // NX-style timeline caches
-    QHash<QString, QVariantList> m_recordingsByCamera;
-    QHash<QString, QVariantList> m_eventsByCamera;
-    QHash<QString, qint64>       m_playbackPositionByCamera;
-
-    // ⭐ ONVIF live progress cache
-    QVariantList m_onvifProgress;
+    FrigateCameraManager* m_cameraManager;
+    FrigateStreamManager* m_streamManager;
+    FrigateTimeline* m_timeline;
+    FrigatePlayback* m_playback;
+    FrigateOnvif* m_onvif;
 };
 
-#endif // FRIGATEAPI_H
+#endif

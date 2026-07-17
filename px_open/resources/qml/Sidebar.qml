@@ -7,15 +7,12 @@ Item {
     objectName: "Sidebar"
 
     //
-    // ⭐ Sidebar only visible on ServerView
+    // ⭐ REQUIRED — MainWindow assigns this
     //
+    property var frigateRef
+
     visible: isCameraPage
 
-    //
-    // ⭐ Width logic:
-    //    - On StartupPage → width = 0 (no layout impact)
-    //    - On ServerView → NX-style collapse (0 → 260)
-    //
     width: isCameraPage
            ? (collapsed ? 0 : 260)
            : 0
@@ -119,7 +116,13 @@ Item {
 
                 property string cameraId: modelData.id
                 property string cameraName: modelData.name
-                property bool isOnline: modelData.isOnline === true
+
+                //
+                // ⭐ FIXED — use frigateRef directly
+                //
+                property bool isOnline: frigateRef
+                                        ? frigateRef.isCameraOnline(cameraId)
+                                        : false
 
                 color: (cameraId === sidebar.selectedCameraId)
                        ? "#404060"
@@ -169,15 +172,16 @@ Item {
                             sidebar.navigate("addCamera")
                         }
                     }
+
                     MenuItem {
                         text: "Fullscreen"
                         enabled: cameraName !== "" && sidebar.selectedCameraId === cameraId
                         onTriggered: {
-                        sidebar.cameraSelected(cameraId)
-                            sidebar.navigate("CameraGrid.qml")
+                            sidebar.cameraSelected(cameraId)
+                            sidebar.navigate("fullscreen:" + cameraId)
+                        }
                     }
                 }
-            }
 
                 MouseArea {
                     anchors.fill: parent
@@ -188,13 +192,13 @@ Item {
                     onPressed: {
                         sidebar.pressCameraId = cameraId
                         sidebar.pressCameraName = cameraName
-        }
+                    }
 
                     onClicked: function(mouse) {
                         if (mouse.button === Qt.RightButton) {
                             sidebarContextMenu.open()
                             return
-    }
+                        }
                         sidebar.selectedCameraId = cameraId
                         sidebar.cameraSelected(cameraId)
                     }
@@ -203,6 +207,9 @@ Item {
         }
     }
 
+    //
+    // Drag & Drop logic (unchanged)
+    //
     DragHandler {
         id: globalDrag
         target: null
@@ -274,4 +281,3 @@ Item {
         }
     }
 }
-

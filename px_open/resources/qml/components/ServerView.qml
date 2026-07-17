@@ -2,7 +2,6 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
-// Correct QRC import
 import "qrc:/app/resources/qml"
 
 Item {
@@ -19,14 +18,16 @@ Item {
     signal gridReady()
 
     //
-    // Popups (no frigateRef assigned here — correct)
+    // Popups
     //
     AddCameraPopup {
         id: addCameraPopup
+        frigateRef: root.frigateRef   // ⭐ REQUIRED
     }
 
     RemoveCameraPopup {
         id: removeCameraPopup
+        frigateRef: root.frigateRef   // ⭐ REQUIRED
 
         onCameraRemoved: {
             if (root.cameraGrid && root.cameraGrid.removeCamera)
@@ -34,14 +35,7 @@ Item {
         }
     }
 
-    //
-    // Remove camera popup helper
-    //
     function openRemoveCameraPopup(cameraId) {
-        if (!removeCameraPopup) {
-            console.log("ServerView: removeCameraPopup is not available")
-            return
-        }
         removeCameraPopup.cameraId = cameraId
         removeCameraPopup.open()
     }
@@ -62,7 +56,7 @@ Item {
     }
 
     //
-    // Initialize grid once mainWindow + frigateRef are valid
+    // Initialize grid
     //
     function initializeGrid() {
         if (!mainWindow || !frigateRef) {
@@ -76,14 +70,7 @@ Item {
         gridLoader.active = true
     }
 
-    //
-    // Open Add Camera popup
-    //
     function openAddCameraPopup() {
-        if (!addCameraPopup) {
-            console.log("ServerView: addCameraPopup is not available")
-            return
-        }
         addCameraPopup.open()
     }
 
@@ -101,8 +88,7 @@ Item {
             cameraList: root.mainWindow.cameraList
             serverViewRoot: root
 
-            // CameraGrid receives frigateRef — correct
-            frigateRef: root.frigateRef
+            frigateRef: root.frigateRef   // ⭐ REQUIRED
 
             //
             // Timeline dock
@@ -118,7 +104,7 @@ Item {
                 cameraId: root.mainWindow.selectedCameraId
                 cameraName: root.mainWindow.selectedCameraId
 
-                frigateRef: root.frigateRef
+                frigateRef: root.frigateRef   // ⭐ REQUIRED
 
                 recordings: root.frigateRef
                             ? root.frigateRef.getRecordingsForCamera(root.mainWindow.selectedCameraId)
@@ -131,6 +117,28 @@ Item {
                 playbackPositionMs: root.frigateRef
                                     ? root.frigateRef.currentPosition(root.mainWindow.selectedCameraId)
                                     : 0
+            }
+
+            //
+            // Timeline live updates
+            //
+            Connections {
+                target: root.frigateRef
+
+                function onRecordingsLoaded(cameraId, segments) {
+                    if (cameraId === root.mainWindow.selectedCameraId)
+                        timeline.recordings = segments
+                }
+
+                function onEventsLoaded(cameraId, events) {
+                    if (cameraId === root.mainWindow.selectedCameraId)
+                        timeline.events = events
+                }
+
+                function onPlaybackPositionChanged(cameraId, positionMs) {
+                    if (cameraId === root.mainWindow.selectedCameraId)
+                        timeline.playbackPositionMs = positionMs
+                }
             }
         }
     }

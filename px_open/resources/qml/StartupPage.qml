@@ -8,10 +8,10 @@ Rectangle {
     color: "black"
 
     //
-    // Backend references
+    // Backend references (MUST MATCH MainWindow.qml)
     //
     property var discovery: null
-    property var frigate: null
+    property var frigateRef: null
 
     //
     // Discovered servers
@@ -89,25 +89,6 @@ Rectangle {
     }
 
     //
-    // ⭐ BACKEND SIGNALS
-    //
-    Connections {
-        target: frigate
-
-        function onModuleInformationReceived(name, version, status, systemId, moduleId) {
-            console.log("StartupPage: module info received")
-        }
-
-        function onCameraOffline(id) {
-            console.log("StartupPage: camera offline:", id)
-        }
-
-        function onCameraOnline(id) {
-            console.log("StartupPage: camera online:", id)
-        }
-    }
-
-    //
     // ⭐ CONNECT TO SERVER
     //
     function connectToServer(address, modulePort, username, password) {
@@ -133,8 +114,16 @@ Rectangle {
         var apiUrl = "http://" + auth + address + ":" + apiPort
         var moduleUrl = "http://" + auth + address + ":" + modulePort
 
-        frigate.setServer(apiUrl)
-        frigate.setModuleServer(moduleUrl)
+        //
+        // ⭐ Use the injected backend instance
+        //
+        if (!frigateRef) {
+            console.log("StartupPage: frigateRef is NULL — cannot connect")
+            return
+        }
+
+        frigateRef.setServer(apiUrl)
+        frigateRef.setModuleServer(moduleUrl)
 
         console.log("StartupPage: Frigate API =", apiUrl)
         console.log("StartupPage: Module Server =", moduleUrl)
@@ -142,8 +131,8 @@ Rectangle {
         //
         // Load module info + cameras
         //
-        frigate.loadModuleInformation()
-        frigate.loadCameras()
+        frigateRef.loadModuleInformation()
+        frigateRef.loadCameras()
 
         //
         // Notify MainWindow

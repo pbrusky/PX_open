@@ -78,13 +78,11 @@ void FFmpegWorker::decodeLoop()
     qDebug() << "FFmpegWorker: open_input OK";
     emit openInputOk();
 
-    // ⭐ Make av_read_frame non-blocking so timeout and abort work
+    // Make av_read_frame non-blocking so timeout and abort work
     if (fmtCtx)
         fmtCtx->flags |= AVFMT_FLAG_NONBLOCK;
 
-    //
-    // ⭐ TEST MODE — stop immediately after open_input
-    //
+    // TEST MODE — stop immediately after open_input
     if (m_testMode) {
         if (fmtCtx)
             avformat_close_input(&fmtCtx);
@@ -94,9 +92,7 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
-    //
-    // ⭐ Normal streaming path
-    //
+    // Normal streaming path
     ret = avformat_find_stream_info(fmtCtx, nullptr);
     if (ret < 0) {
         qDebug() << "FFmpegWorker: stream_info FAILED";
@@ -198,9 +194,7 @@ void FFmpegWorker::decodeLoop()
     emit streamStarted();
     qDebug() << "FFmpegWorker: decode loop started";
 
-    //
-    // ⭐ FIRST FRAME TIMEOUT (2 seconds)
-    //
+    // FIRST FRAME TIMEOUT (2 seconds)
     qint64 firstFrameDeadline = QDateTime::currentMSecsSinceEpoch() + 2000;
     bool firstFrameDecoded = false;
 
@@ -211,9 +205,7 @@ void FFmpegWorker::decodeLoop()
 
         ret = av_read_frame(fmtCtx, &pkt);
 
-        //
-        // ⭐ Timeout: no frames received
-        //
+        // Timeout: no frames received
         if (!firstFrameDecoded &&
             QDateTime::currentMSecsSinceEpoch() > firstFrameDeadline)
         {
@@ -254,9 +246,7 @@ void FFmpegWorker::decodeLoop()
             if (ret < 0)
                 break;
 
-            //
-            // ⭐ First frame decoded → camera ONLINE
-            //
+            // First frame decoded → camera ONLINE
             if (!firstFrameDecoded) {
                 firstFrameDecoded = true;
                 qDebug() << "FFmpegWorker: first frame decoded:"
@@ -271,8 +261,8 @@ void FFmpegWorker::decodeLoop()
                       outFrame->data,
                       outFrame->linesize);
 
-            AVFrame* cloned = av_frame_clone(outFrame);
-            emit frameReady(cloned);
+            // No clone: reuse outFrame, FrameQueue converts to QImage
+            emit frameReady(outFrame);
         }
     }
 

@@ -6,28 +6,29 @@ Rectangle {
     height: 90
     width: parent.width
 
-    // NX Witness timeline background
     color: "#0E0E0E"
     border.color: "#333333"
     border.width: 1
     radius: 6
     z: 10
 
-    // Properties provided by ServerView
-    signal scrubbed(real ratio, int timestampMs)
+    //
+    // Provided by FullscreenCamera
+    //
     property string cameraId: ""
     property string cameraName: ""
-    property var frigateRef
+    property var frigateRef: null
     property var recordings: []
     property var events: []
     property int playbackPositionMs: 0
     property real position: 0
-    property int currentTimeMs: Date.now()
 
-    // start/end timestamps (seconds)
+    // timeline range
     property real startTs: 0
     property real endTs: 0
 
+    // live clock
+    property int currentTimeMs: Date.now()
     Timer {
         id: nowTimer
         interval: 1000
@@ -36,40 +37,53 @@ Rectangle {
         onTriggered: currentTimeMs = Date.now()
     }
 
-    function timestampToRatio(tsMs) {
-        if (effectiveEndTs() <= effectiveStartTs())
-            return 0
+    //
+    // Backend updates (SAFE target)
+    //
+    Connections {
+        target: frigateRef ? frigateRef : null
+        ignoreUnknownSignals: true
 
-        return (tsMs - effectiveStartTs() * 1000) / ((effectiveEndTs() - effectiveStartTs()) * 1000)
+        function onRecordingsLoaded(receivedCameraId, segments) {
+            if (receivedCameraId !== cameraId)
+                return
+
+            recordings = segments
+
+            if (segments.length > 0) {
+                startTs = segments[0].start
+                endTs = segments[segments.length - 1].end
+            }
+        }
+
+        function onEventsLoaded(receivedCameraId, eventsList) {
+            if (receivedCameraId !== cameraId)
+                return
+
+            events = eventsList
+        }
+
+        function onPlaybackPositionChanged(receivedCameraId, positionMs) {
+            if (receivedCameraId !== cameraId)
+                return
+
+            playbackPositionMs = positionMs
+            timeline.position = timeline.timestampToRatio(positionMs)
+            scrubber.x = timeline.timestampToX(positionMs) - scrubber.width/2
+        }
+
+        function onCameraEditResult(ok, message) {
+            if (!ok) return
+            if (frigateRef) {
+                frigateRef.loadEvents(cameraId)
+                frigateRef.loadRecordings(cameraId)
+            }
+        }
     }
 
-    function ratioToTimestamp(ratio) {
-        return effectiveStartTs() * 1000 + ratio * (effectiveEndTs() - effectiveStartTs()) * 1000
-    }
-
-    onPositionChanged: {
-        playbackPositionMs = ratioToTimestamp(position)
-    }
-
-    // zoom + pan
-    property real zoom: 1.0
-    property real pan: 0.0
-    property real minZoom: 0.2
-    property real maxZoom: 8.0
-    property int segmentCount: 10
-
-    // Timestamp -> X coordinate
-    function timestampToX(tsMs) {
-        if (endTs <= startTs)
-            return 0
-
-        let totalMs = (endTs - startTs) * 1000
-        let ratio = (tsMs - startTs * 1000) / totalMs
-        let scaled = ratio * width * zoom
-        return scaled + pan
-    }
-
-    // X coordinate -> timestamp
+    //
+    // Timestamp conversion
+    //
     function effectiveStartTs() {
         if (endTs > startTs)
             return startTs
@@ -82,13 +96,51 @@ Rectangle {
         return Date.now() / 1000
     }
 
+    function timestampToRatio(tsMs) {
+        if (effectiveEndTs() <= effectiveStartTs())
+            return 0
+
+        return (tsMs - effectiveStartTs() * 1000) /
+               ((effectiveEndTs() - effectiveStartTs()) * 1000)
+    }
+
+    function ratioToTimestamp(ratio) {
+        return effectiveStartTs() * 1000 +
+               ratio * (effectiveEndTs() - effectiveStartTs()) * 1000
+    }
+
+    onPositionChanged: {
+        playbackPositionMs = ratioToTimestamp(position)
+    }
+
+    //
+    // Zoom + Pan
+    //
+    property real zoom: 1.0
+    property real pan: 0.0
+    property real minZoom: 0.2
+    property real maxZoom: 8.0
+    property int segmentCount: 10
+
+    function timestampToX(tsMs) {
+        if (endTs <= startTs)
+            return 0
+
+        let totalMs = (endTs - startTs) * 1000
+        let ratio = (tsMs - startTs * 1000) / totalMs
+        let scaled = ratio * width * zoom
+        return scaled + pan
+    }
+
     function xToTimestamp(x) {
         let scaled = (x - pan) / (width * zoom)
         let ts = effectiveStartTs() + scaled * (effectiveEndTs() - effectiveStartTs())
         return ts * 1000
     }
 
-    // Time ruler and tick marks
+    //
+    // Ruler
+    //
     Item {
         id: ruler
         anchors.left: parent.left
@@ -123,13 +175,13 @@ Rectangle {
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.top: parent.top
-                    anchors.topMargin: 0
                     font.pixelSize: 10
                     color: "#DDDDDD"
                     text: {
                         if (effectiveEndTs() <= effectiveStartTs()) return ""
                         let frac = index / timeline.segmentCount
-                        let ts = effectiveStartTs() * 1000 + frac * (effectiveEndTs() - effectiveStartTs()) * 1000
+                        let ts = effectiveStartTs() * 1000 +
+                                 frac * (effectiveEndTs() - effectiveStartTs()) * 1000
                         return Qt.formatDateTime(new Date(ts), "hh:mm")
                     }
                 }
@@ -137,14 +189,15 @@ Rectangle {
         }
     }
 
+    //
     // Recording segments
+    //
     Repeater {
         model: recordings
 
         Rectangle {
             height: timeline.height - 28
             y: 24
-            color: "transparent"
             radius: 4
             border.color: "#3A8DFFAA"
             border.width: 1
@@ -168,6 +221,9 @@ Rectangle {
         }
     }
 
+    //
+    // Empty state
+    //
     Rectangle {
         id: emptyState
         anchors.left: parent.left
@@ -195,7 +251,9 @@ Rectangle {
         }
     }
 
-    // Current live time indicator
+    //
+    // Live time indicator
+    //
     Rectangle {
         width: 2
         height: parent.height
@@ -216,7 +274,9 @@ Rectangle {
         z: 21
     }
 
+    //
     // Event markers
+    //
     Repeater {
         model: events
 
@@ -243,7 +303,9 @@ Rectangle {
         }
     }
 
+    //
     // Scrubber
+    //
     Rectangle {
         id: scrubber
         width: Math.max(8, 10 * timeline.zoom)
@@ -290,7 +352,9 @@ Rectangle {
         }
     }
 
+    //
     // Hover preview
+    //
     Rectangle {
         id: hoverPreview
         width: 120
@@ -312,7 +376,9 @@ Rectangle {
         property string tsString: ""
     }
 
+    //
     // Mouse interaction
+    //
     MouseArea {
         id: mouseArea
         anchors.fill: parent
@@ -322,7 +388,6 @@ Rectangle {
         property real startPan: 0
         property real startX: 0
 
-        // Hover + pan
         onPositionChanged: function(mouse) {
             let ts = xToTimestamp(mouse.x)
             hoverPreview.visible = true
@@ -337,37 +402,25 @@ Rectangle {
             }
         }
 
-        onExited: hoverPreview.visible = false
-
-        // Scrub start
         onPressed: function(mouse) {
-            let ts = xToTimestamp(mouse.x)
-            scrubber.x = mouse.x - scrubber.width/2
-            playbackPositionMs = ts
-            if (frigateRef)
-                frigateRef.startPlayback(cameraId, ts)
-            mouseArea.startPan = pan
-            mouseArea.startX = mouse.x
-            if (cameraId && cameraId !== "") {
-                let ratio = timestampToRatio(ts)
-                timeline.scrubbed(ratio, ts)
+            if (mouse.button === Qt.RightButton) {
+                mouseArea.startPan = pan
+                mouseArea.startX = mouse.x
             }
         }
 
-        // Scrub end
-        onReleased: function(mouse) {
-            let ts = xToTimestamp(mouse.x)
-            playbackPositionMs = ts
-            if (frigateRef)
-                frigateRef.startPlayback(cameraId, ts)
+        onExited: {
+            hoverPreview.visible = false
         }
+    }
 
-        onDoubleClicked: function(mouse) {
-            if (frigateRef && cameraId && cameraId !== "")
-                frigateRef.switchToLive(cameraId)
-        }
-
-        onWheel: function(wheel) {
+    //
+    // Mouse wheel zoom
+    //
+    WheelHandler {
+        id: wheelHandler
+        target: timeline
+        onWheel: {
             let delta = wheel.angleDelta.y > 0 ? 1.12 : 0.88
             if (wheel.modifiers & Qt.ShiftModifier)
                 delta = wheel.angleDelta.y > 0 ? 1.3 : 0.7
@@ -376,46 +429,6 @@ Rectangle {
             let cursorTs = xToTimestamp(wheel.x)
             let newX = timestampToX(cursorTs)
             pan += wheel.x - newX
-        }
-    }
-
-    // Backend signals
-    Connections {
-        target: frigate
-        ignoreUnknownSignals: true
-
-        function onRecordingsLoaded(receivedCameraId, segments) {
-            if (receivedCameraId !== cameraId)
-                return
-
-            recordings = segments
-            if (segments.length > 0) {
-                startTs = segments[0].start
-                endTs = segments[segments.length - 1].end
-            }
-        }
-
-        function onEventsLoaded(receivedCameraId, eventsList) {
-            if (receivedCameraId !== cameraId)
-                return
-
-            events = eventsList
-        }
-
-        function onPlaybackPositionChanged(receivedCameraId, positionMs) {
-            if (receivedCameraId !== cameraId)
-                return
-
-            playbackPositionMs = positionMs
-            scrubber.x = timeline.timestampToX(positionMs) - scrubber.width/2
-        }
-
-        function onCameraEditResult(ok, message) {
-            if (!ok) return
-            if (frigateRef) {
-                frigateRef.loadEvents(cameraId)
-                frigateRef.loadRecordings(cameraId)
-            }
         }
     }
 }

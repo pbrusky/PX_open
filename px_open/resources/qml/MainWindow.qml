@@ -1,3 +1,4 @@
+import PxOpen 1.0
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
@@ -11,27 +12,24 @@ ApplicationWindow {
     visible: true
     color: "black"
 
-    // ⭐ Remove Windows title bar
     flags: Qt.FramelessWindowHint
 
-    //
-    // State
-    //
     property var cameraList: []
     property string selectedCameraId: ""
     property string serverName: ""
     property string _fullscreenCameraKey: ""
 
-    //
-    // Signals
-    //
     signal cameraOnline(string name)
     signal cameraOffline(string name)
     signal camerasLoaded(var list)
 
     //
-    // Fullscreen Loader
+    // Backend instance
     //
+    FrigateAPI {
+        id: frigateRef
+    }
+
     Loader {
         id: fullscreenLoader
         anchors.fill: parent
@@ -43,8 +41,8 @@ ApplicationWindow {
 
             item.cameraId = _fullscreenCameraKey
             item.cameraName = _fullscreenCameraKey
-            item.frigateRef = frigate
-            item.isOnline = false
+            item.frigateRef = frigateRef
+            item.isOnline = frigateRef.isCameraOnline(_fullscreenCameraKey)
 
             if (item.open)
                 item.open()
@@ -64,9 +62,6 @@ ApplicationWindow {
         fullscreenLoader.visible = false
     }
 
-    //
-    // Drag & Drop from Sidebar → CameraGrid
-    //
     function handleCameraDrop(x, y, cameraName) {
         let sv = contentLoader.item
         if (!sv || sv.objectName !== "ServerView")
@@ -87,9 +82,6 @@ ApplicationWindow {
         grid.dropAt(p.x, p.y, cameraName)
     }
 
-    //
-    // Top Bar
-    //
     TopBar {
         id: topbar
         width: parent.width
@@ -124,12 +116,14 @@ ApplicationWindow {
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
     }
 
-    //
-    // Sidebar
-    //
     Sidebar {
         id: sidebarWrapper
         objectName: "Sidebar"
+
+        //
+        // ⭐ FIX: pass backend into Sidebar
+        //
+        frigateRef: frigateRef
 
         width: 260
         height: mainWindow.height - topbar.height
@@ -152,12 +146,12 @@ ApplicationWindow {
         }
 
         onRequestRemoveCamera: function(id) {
-                if (contentLoader.item &&
-                    contentLoader.item.objectName === "ServerView" &&
+            if (contentLoader.item &&
+                contentLoader.item.objectName === "ServerView" &&
                 contentLoader.item.openRemoveCameraPopup) {
                 contentLoader.item.openRemoveCameraPopup(id)
-                }
             }
+        }
 
         onCameraDropped: function(x, y, cameraName) {
             mainWindow.handleCameraDrop(x, y, cameraName)
@@ -173,33 +167,33 @@ ApplicationWindow {
             if (page === "disconnect") {
                 topbar.disconnectRequested()
                 return
-        }
+            }
 
             if (page === "addCamera") {
-            if (contentLoader.item &&
-                contentLoader.item.objectName === "ServerView" &&
+                if (contentLoader.item &&
+                    contentLoader.item.objectName === "ServerView" &&
                     contentLoader.item.openAddCameraPopup) {
                     contentLoader.item.openAddCameraPopup()
-        }
+                }
                 return
             }
 
             if (page === "reloadCameras") {
-            if (contentLoader.item &&
+                if (contentLoader.item &&
                     contentLoader.item.objectName === "ServerView") {
                     if (contentLoader.item.reloadCameras)
                         contentLoader.item.reloadCameras()
-                    else if (frigate)
-                        frigate.loadCameras()
-                } else if (frigate) {
-                    frigate.loadCameras()
-            }
+                    else
+                        frigateRef.loadCameras()
+                } else {
+                    frigateRef.loadCameras()
+                }
                 return
-        }
+            }
 
             contentLoader.source = page
         }
-        }
+    }
 
     IconButton {
         id: sidebarReturnArrow
@@ -223,9 +217,7 @@ ApplicationWindow {
 
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
     }
-        //
-    // Main Content Loader (StartupPage → ServerView)
-        //
+
     Loader {
         id: contentLoader
         anchors.fill: parent
@@ -245,17 +237,18 @@ ApplicationWindow {
 
             if (item.objectName === "StartupPage") {
                 item.discovery = discovery
-                item.frigate = frigate
+                item.frigateRef = frigateRef
 
-                item.serverSelected.connect(function(name, ip, port) {
+                item.serverSelected.connect(function(name, ip, apiPort, modulePort) {
                     mainWindow.serverName = name
-                    frigate.serverIp = ip
-                    frigate.server = "http://" + ip + ":5000"
+
+                    frigateRef.serverIp = ip
+                    frigateRef.server = "http://" + ip + ":" + apiPort
+                    frigateRef.setModuleServer("http://" + ip + ":" + modulePort)
 
                     contentLoader.startupDone = true
                     contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
 
-                    // ⭐ Maximize = fullscreen
                     mainWindow.visibility = Window.FullScreen
                     mainWindow.showFullScreen()
                     topbar.isMaximized = true
@@ -266,11 +259,11 @@ ApplicationWindow {
                 discovery.stopDiscovery()
 
             if (item.objectName === "ServerView") {
-                item.frigateRef = frigate
+                item.frigateRef = frigateRef
                 item.mainWindow = mainWindow
 
                 item.initializeGrid()
-                frigate.loadCameras()
+                frigateRef.loadCameras()
 
                 item.camerasLoadedToMain.connect(function(list) {
                     mainWindow.cameraList = list
@@ -280,11 +273,8 @@ ApplicationWindow {
         }
     }
 
-    //
-    // Frigate Events
-    //
     Connections {
-        target: frigate
+        target: frigateRef
 
         function onCamerasLoaded(list) {
             mainWindow.cameraList = list
@@ -305,7 +295,7 @@ ApplicationWindow {
 
             sidebarWrapper.cameraList = mainWindow.cameraList
             mainWindow.cameraOffline(name)
-    }
+        }
 
         function onCameraOnline(name) {
             for (var i = 0; i < mainWindow.cameraList.length; ++i)
@@ -314,20 +304,17 @@ ApplicationWindow {
 
             sidebarWrapper.cameraList = mainWindow.cameraList
             mainWindow.cameraOnline(name)
-}
+        }
 
         function onCameraEditResult(ok, message) {
-            if (ok) frigate.loadCameras()
+            if (ok) frigateRef.loadCameras()
         }
 
         function onCameraAddResult(ok, message) {
-            if (ok) frigate.loadCameras()
+            if (ok) frigateRef.loadCameras()
         }
     }
 
-    //
-    // TopBar Window Controls
-    //
     Connections {
         target: topbar
 
@@ -336,10 +323,9 @@ ApplicationWindow {
             contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
 
             mainWindow.serverName = ""
-            frigate.server = ""
-            frigate.serverIp = ""
+            frigateRef.server = ""
+            frigateRef.serverIp = ""
 
-            // ⭐ Exit fullscreen → normal window
             mainWindow.showNormal()
             mainWindow.visibility = Window.Windowed
 
@@ -367,18 +353,12 @@ ApplicationWindow {
             mainWindow.showMinimized()
         }
 
-        //
-        // ⭐ Maximize = fullscreen
-        //
         function onMaximizeRequested() {
             mainWindow.visibility = Window.FullScreen
             mainWindow.showFullScreen()
             topbar.isMaximized = true
         }
 
-        //
-        // ⭐ Restore = normal window (1400×900)
-        //
         function onRestoreRequested() {
             mainWindow.showNormal()
             mainWindow.visibility = Window.Windowed
@@ -392,4 +372,3 @@ ApplicationWindow {
         }
     }
 }
-

@@ -28,6 +28,6 @@ private:
     QMutex m_mutex;
     QQueue<QImage> m_queue;
 
-    // ⭐ REQUIRED — fixes your build error
+    // ⭐ Prevents runaway memory growth
     int m_maxSize = 3;
 };

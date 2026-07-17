@@ -1,30 +1,34 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
 
 Item {
     id: topbarWrapper
-    width: parent.width
+    objectName: "TopBar"
 
+    width: parent.width
     height: collapsed ? 0 : 48
     Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
 
-    QtObject {
-        id: state
-        property bool isStartupPage: false
-        property bool isCameraPage: false
-    }
+    //
+    // Page state flags (set by MainWindow)
+    //
+    property bool isStartupPage: false
+    property bool isCameraPage: false
 
-    property alias isStartupPage: state.isStartupPage
-    property alias isCameraPage: state.isCameraPage
-    property alias serverName: serverNameText.text
+    //
+    // Server name shown on the right
+    //
+    property string serverName: ""
 
-    // expose maximize state to MainWindow
-    QtObject {
-        id: maximizeState
-        property bool isMaximized: false
-    }
-    property alias isMaximized: maximizeState.isMaximized
+    //
+    // Maximize state (MainWindow reads/writes this)
+    //
+    property bool isMaximized: false
 
+    //
+    // Signals to MainWindow
+    //
     signal disconnectRequested()
     signal exitRequested()
     signal minimizeRequested()
@@ -32,6 +36,9 @@ Item {
     signal maximizeRequested()
     signal addCameraRequested()
 
+    //
+    // Context menu for server name
+    //
     Menu {
         id: serverNameContextMenu
         x: serverNameContainer.x
@@ -53,6 +60,9 @@ Item {
         color: "#1E1E1E"
     }
 
+    //
+    // Hamburger menu (left side)
+    //
     Rectangle {
         id: menuButton
         width: 36
@@ -99,40 +109,49 @@ Item {
         }
     }
 
+    //
+    // Right-side controls (server name + window buttons)
+    //
     Row {
         anchors.right: parent.right
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         spacing: 16
 
-            Rectangle {
-                id: serverNameContainer
-                width: serverNameText.paintedWidth + 24
-                height: parent.height
-                color: "transparent"
+        //
+        // Server name display
+        //
+        Rectangle {
+            id: serverNameContainer
+            width: serverNameText.paintedWidth + 24
+            height: parent.height
+            color: "transparent"
 
-                Text {
-                    id: serverNameText
-                    anchors.centerIn: parent
-                    text: topbarWrapper.serverName !== "" ? topbarWrapper.serverName : "Frigate System"
-                    color: "white"
-                    font.pixelSize: 18
-                }
+            Text {
+                id: serverNameText
+                anchors.centerIn: parent
+                text: topbarWrapper.serverName !== "" ? topbarWrapper.serverName : "Frigate System"
+                color: "white"
+                font.pixelSize: 18
+            }
 
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    acceptedButtons: Qt.RightButton | Qt.LeftButton
-                    preventStealing: true
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.RightButton | Qt.LeftButton
+                preventStealing: true
 
-                    onPressed: function(mouse) {
-                        if (mouse.button === Qt.RightButton) {
-                            serverNameContextMenu.open()
-                        }
+                onPressed: function(mouse) {
+                    if (mouse.button === Qt.RightButton) {
+                        serverNameContextMenu.open()
                     }
                 }
+            }
         }
 
+        //
+        // Minimize button
+        //
         Rectangle {
             id: minimizeButton
             width: 28
@@ -158,6 +177,9 @@ Item {
             }
         }
 
+        //
+        // Maximize / Restore button
+        //
         Rectangle {
             id: maximizeRestoreButton
             width: 28
@@ -168,7 +190,7 @@ Item {
 
             Text {
                 anchors.centerIn: parent
-                text: maximizeState.isMaximized ? "▢" : "⬜"
+                text: topbarWrapper.isMaximized ? "▢" : "⬜"
                 color: "white"
                 font.pixelSize: 16
                 font.bold: true
@@ -181,7 +203,7 @@ Item {
                 onExited: maximizeRestoreButton.hovered = false
 
                 onClicked: {
-                    if (maximizeState.isMaximized) {
+                    if (topbarWrapper.isMaximized) {
                         topbarWrapper.restoreRequested()
                     } else {
                         topbarWrapper.maximizeRequested()
@@ -190,6 +212,9 @@ Item {
             }
         }
 
+        //
+        // Exit button
+        //
         Rectangle {
             id: exitButton
             width: 28

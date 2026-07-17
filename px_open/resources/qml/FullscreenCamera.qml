@@ -12,7 +12,6 @@ Rectangle {
     //
     property string cameraId: ""
     property string cameraName: ""
-    property string streamUrl: ""      // required by CameraGrid
     property var frigateRef: null
     property bool isOnline: false
 
@@ -45,7 +44,7 @@ Rectangle {
         anchors.fill: parent
         visible: isPlayback
         queue: (isPlayback && frigateRef && cameraId)
-               ? frigateRef.getQueue(cameraId + "_playback")
+               ? frigateRef.getPlaybackQueue(cameraId)
                : null
     }
 
@@ -209,6 +208,7 @@ Rectangle {
 
                 isPlayback = false
                 playbackPositionMs = 0
+
                 if (frigateRef)
                     frigateRef.switchToLive(cameraId)
             }
@@ -234,7 +234,7 @@ Rectangle {
             item.cameraId = cameraId
             item.cameraName = cameraName || cameraId
 
-                if (cameraId && cameraId !== "") {
+            if (cameraId && cameraId !== "") {
                 frigateRef.loadEvents(cameraId)
                 frigateRef.loadRecordings(cameraId)
             }
@@ -245,7 +245,7 @@ Rectangle {
     // BACKEND SIGNALS
     //
     Connections {
-        target: frigate
+        target: frigateRef
         ignoreUnknownSignals: true
 
         function onPlaybackPositionChanged(receivedCameraId, positionMs) {
@@ -275,7 +275,7 @@ Rectangle {
             if (!ok) return
 
             if (isPlayback)
-                playbackVideo.queue = frigateRef.getQueue(cameraId + "_playback")
+                playbackVideo.queue = frigateRef.getPlaybackQueue(cameraId)
             else
                 liveVideo.queue = frigateRef.getQueue(cameraId)
         }
