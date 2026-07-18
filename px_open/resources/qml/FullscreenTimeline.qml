@@ -1,16 +1,33 @@
 ﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 
+import "components/timeline"   // Folder containing modular components (requires index.qml)
+
 Rectangle {
     id: timeline
-    height: 90
     width: parent.width
-
+    height: collapsed ? 0 : 90
     color: "#0E0E0E"
     border.color: "#333333"
     border.width: 1
     radius: 6
     z: 10
+
+    //
+    // Hide / Show
+    //
+    property bool collapsed: false
+
+    Behavior on height {
+        NumberAnimation { duration: 180; easing.type: Easing.InOutQuad }
+    }
+    Behavior on opacity {
+        NumberAnimation { duration: 120; easing.type: Easing.InOutQuad }
+    }
+
+    function toggle() {
+        collapsed = !collapsed
+    }
 
     //
     // Provided by FullscreenCamera
@@ -38,7 +55,7 @@ Rectangle {
     }
 
     //
-    // Backend updates (SAFE target)
+    // Backend updates
     //
     Connections {
         target: frigateRef ? frigateRef : null
@@ -141,84 +158,100 @@ Rectangle {
     //
     // Ruler
     //
-    Item {
+    TimelineRuler {
         id: ruler
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: 20
 
-        property int segments: timeline.segmentCount
-
-        Repeater {
-            model: timeline.segmentCount + 1
-
-            Rectangle {
-                width: parent.width / (ruler.segments + 1)
-                height: parent.height
-                color: "transparent"
-
-                Canvas {
-                    anchors.fill: parent
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.clearRect(0,0,width,height)
-                        ctx.strokeStyle = "#4A4A4A"
-                        ctx.lineWidth = 1
-                        ctx.beginPath()
-                        ctx.moveTo(width/2, height)
-                        ctx.lineTo(width/2, height-8)
-                        ctx.stroke()
-                    }
-                }
-
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top
-                    font.pixelSize: 10
-                    color: "#DDDDDD"
-                    text: {
-                        if (effectiveEndTs() <= effectiveStartTs()) return ""
-                        let frac = index / timeline.segmentCount
-                        let ts = effectiveStartTs() * 1000 +
-                                 frac * (effectiveEndTs() - effectiveStartTs()) * 1000
-                        return Qt.formatDateTime(new Date(ts), "hh:mm")
-                    }
-                }
-            }
-        }
+        startTs: timeline.effectiveStartTs()
+        endTs: timeline.effectiveEndTs()
+        segmentCount: timeline.segmentCount
     }
 
     //
     // Recording segments
     //
-    Repeater {
-        model: recordings
+    TimelineSegments {
+        id: segments
+        recordings: timeline.recordings
+        startTs: timeline.startTs
+        endTs: timeline.endTs
+        zoom: timeline.zoom
+        pan: timeline.pan
+        timelineWidth: timeline.width
+        timestampToX: timeline.timestampToX   // REQUIRED
+        anchors.top: ruler.bottom
+    }
 
-        Rectangle {
-            height: timeline.height - 28
-            y: 24
-            radius: 4
-            border.color: "#3A8DFFAA"
-            border.width: 1
-            clip: true
+    //
+    // Event markers
+    //
+    TimelineEvents {
+        id: eventsLayer
+        events: timeline.events
+        startTs: timeline.startTs
+        endTs: timeline.endTs
+        zoom: timeline.zoom
+        pan: timeline.pan
+        timelineWidth: timeline.width
+        timestampToX: timeline.timestampToX   // REQUIRED
+        anchors.top: ruler.bottom
+    }
 
-            Rectangle {
-                anchors.fill: parent
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#3A8DFF88" }
-                    GradientStop { position: 1.0; color: "#2E6BFF44" }
-                }
-            }
+    //
+    // Scrubber
+    //
+    TimelineScrubber {
+        id: scrubber
+        playbackPositionMs: timeline.playbackPositionMs
+        startTs: timeline.startTs
+        endTs: timeline.endTs
+        zoom: timeline.zoom
+        pan: timeline.pan
+        timelineWidth: timeline.width
+        timestampToX: timeline.timestampToX   // REQUIRED
+    }
 
-            width: {
-                let x1 = timeline.timestampToX(modelData.start * 1000)
-                let x2 = timeline.timestampToX(modelData.end * 1000)
-                return Math.max(8, x2 - x1)
-            }
+    //
+    // Hover preview
+    //
+    TimelineHoverPreview {
+        id: hoverPreview
+    }
 
-            x: timeline.timestampToX(modelData.start * 1000)
-        }
+    //
+    // Mouse interaction
+    //
+    TimelineMouseHandler {
+        id: mouseHandler
+        scrubber: scrubber
+        hoverPreview: hoverPreview
+        pan: timeline.pan
+        xToTimestamp: timeline.xToTimestamp   // REQUIRED
+    }
+
+    //
+    // Live time indicator
+    //
+    Rectangle {
+        width: 2
+        height: parent.height
+        color: "#FF4444"
+        anchors.right: parent.right
+        opacity: (cameraId === "" || effectiveEndTs() <= effectiveStartTs()) ? 0 : 0.35
+        z: 20
+    }
+
+    Text {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 6
+        text: Qt.formatDateTime(new Date(currentTimeMs), "hh:mm:ss")
+        color: "#FF4444"
+        font.pixelSize: 10
+        opacity: cameraId === "" ? 0 : 0.8
+        z: 21
     }
 
     //
@@ -248,187 +281,6 @@ Rectangle {
                 color: "#777777"
                 font.pixelSize: 10
             }
-        }
-    }
-
-    //
-    // Live time indicator
-    //
-    Rectangle {
-        width: 2
-        height: parent.height
-        color: "#FF4444"
-        anchors.right: parent.right
-        opacity: (cameraId === "" || effectiveEndTs() <= effectiveStartTs()) ? 0 : 0.35
-        z: 20
-    }
-
-    Text {
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.margins: 6
-        text: Qt.formatDateTime(new Date(currentTimeMs), "hh:mm:ss")
-        color: "#FF4444"
-        font.pixelSize: 10
-        opacity: cameraId === "" ? 0 : 0.8
-        z: 21
-    }
-
-    //
-    // Event markers
-    //
-    Repeater {
-        model: events
-
-        Item {
-            width: 16
-            height: 22
-            x: timeline.timestampToX(modelData.start * 1000) - width/2
-            y: 2
-
-            Canvas {
-                anchors.fill: parent
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.clearRect(0,0,width,height)
-                    ctx.fillStyle = "#FF5C5C"
-                    ctx.beginPath()
-                    ctx.moveTo(width/2, 0)
-                    ctx.lineTo(width, height)
-                    ctx.lineTo(0, height)
-                    ctx.closePath()
-                    ctx.fill()
-                }
-            }
-        }
-    }
-
-    //
-    // Scrubber
-    //
-    Rectangle {
-        id: scrubber
-        width: Math.max(8, 10 * timeline.zoom)
-        height: timeline.height
-        radius: 3
-        color: "#FFFFFF"
-        border.color: "#CCCCCC"
-        border.width: 1
-        x: timeline.timestampToX(playbackPositionMs) - width/2
-        z: 50
-
-        Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.top: parent.top
-            width: 2
-            height: parent.height
-            color: "#BBBBBB"
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            drag.target: parent
-            cursorShape: Qt.SizeHorCursor
-
-            onPressed: {
-                let ts = timeline.xToTimestamp(parent.x + parent.width/2)
-                playbackPositionMs = ts
-                if (frigateRef) frigateRef.startPlayback(cameraId, ts)
-            }
-
-            onPositionChanged: function(mouse) {
-                if (mouse.buttons & Qt.LeftButton) {
-                    let ts = timeline.xToTimestamp(parent.x + parent.width/2)
-                    playbackPositionMs = ts
-                    if (frigateRef) frigateRef.startPlayback(cameraId, ts)
-                }
-            }
-
-            onReleased: {
-                let ts = timeline.xToTimestamp(parent.x + parent.width/2)
-                playbackPositionMs = ts
-                if (frigateRef) frigateRef.startPlayback(cameraId, ts)
-            }
-        }
-    }
-
-    //
-    // Hover preview
-    //
-    Rectangle {
-        id: hoverPreview
-        width: 120
-        height: 28
-        radius: 4
-        color: "#000000DD"
-        border.color: "#888888"
-        border.width: 1
-        visible: false
-        z: 100
-
-        Text {
-            anchors.centerIn: parent
-            color: "white"
-            font.pixelSize: 11
-            text: hoverPreview.tsString
-        }
-
-        property string tsString: ""
-    }
-
-    //
-    // Mouse interaction
-    //
-    MouseArea {
-        id: mouseArea
-        anchors.fill: parent
-        hoverEnabled: true
-        drag.target: scrubber
-
-        property real startPan: 0
-        property real startX: 0
-
-        onPositionChanged: function(mouse) {
-            let ts = xToTimestamp(mouse.x)
-            hoverPreview.visible = true
-            hoverPreview.x = mouse.x - hoverPreview.width/2
-            hoverPreview.y = -hoverPreview.height - 4
-
-            let d = new Date(ts)
-            hoverPreview.tsString = Qt.formatDateTime(d, "hh:mm:ss ap")
-
-            if (mouse.buttons & Qt.RightButton) {
-                pan = mouseArea.startPan + (mouse.x - mouseArea.startX)
-            }
-        }
-
-        onPressed: function(mouse) {
-            if (mouse.button === Qt.RightButton) {
-                mouseArea.startPan = pan
-                mouseArea.startX = mouse.x
-            }
-        }
-
-        onExited: {
-            hoverPreview.visible = false
-        }
-    }
-
-    //
-    // Mouse wheel zoom
-    //
-    WheelHandler {
-        id: wheelHandler
-        target: timeline
-        onWheel: {
-            let delta = wheel.angleDelta.y > 0 ? 1.12 : 0.88
-            if (wheel.modifiers & Qt.ShiftModifier)
-                delta = wheel.angleDelta.y > 0 ? 1.3 : 0.7
-
-            zoom = Math.max(minZoom, Math.min(maxZoom, zoom * delta))
-            let cursorTs = xToTimestamp(wheel.x)
-            let newX = timestampToX(cursorTs)
-            pan += wheel.x - newX
         }
     }
 }

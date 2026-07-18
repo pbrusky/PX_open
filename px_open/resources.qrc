@@ -34,6 +34,15 @@
         <file>resources/qml/components/OnvifDiscoveryPopup.qml</file>
         <file>resources/qml/components/FullscreenToolbar.qml</file>
 
+        <!-- NEW Timeline Components -->
+        <file>resources/qml/components/timeline/index.qml</file>
+        <file>resources/qml/components/timeline/TimelineRuler.qml</file>
+        <file>resources/qml/components/timeline/TimelineSegments.qml</file>
+        <file>resources/qml/components/timeline/TimelineEvents.qml</file>
+        <file>resources/qml/components/timeline/TimelineScrubber.qml</file>
+        <file>resources/qml/components/timeline/TimelineHoverPreview.qml</file>
+        <file>resources/qml/components/timeline/TimelineMouseHandler.qml</file>
+
         <!-- html -->
         <file>resources/html/mp4player.html</file>
 
@@ -82,7 +91,6 @@
         <file>assets/icons/nx/audio-off.svg</file>
         <file>assets/icons/nx/play.svg</file>
         <file>assets/icons/nx/pause.svg</file>
-
 
     </qresource>
 </RCC>
