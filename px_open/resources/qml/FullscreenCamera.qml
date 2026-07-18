@@ -1,12 +1,12 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import PxOpen 1.0
-import "components/timeline"
 
 Rectangle {
     id: root
     anchors.fill: parent
     color: "black"
+    z: 10000
 
     property string cameraId: ""
     property string cameraName: ""
@@ -88,8 +88,8 @@ Rectangle {
             }
 
             Text {
-                text: isOnline ? "LIVE" : "OFFLINE"
-                color: isOnline ? "#00C853" : "#FF4444"
+                text: isOnline ? (isPlayback ? "PLAYBACK" : "LIVE") : "OFFLINE"
+                color: isOnline ? (isPlayback ? "#FFC107" : "#00C853") : "#00C853"
                 font.pixelSize: 14
             }
 
@@ -134,13 +134,15 @@ Rectangle {
         }
     }
 
-    // Timeline container with clipping
+    //
+    // ⭐ TIMELINE (NX-style auto-hide)
+    //
     Rectangle {
         id: timelineContainer
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: timelineLoader.item ? timelineLoader.item.timelineHeight : 0
+        height: 90
         color: "transparent"
         clip: true
 
@@ -150,17 +152,16 @@ Rectangle {
             source: "qrc:/app/resources/qml/FullscreenTimeline.qml"
 
             onLoaded: {
-                if (!item || !frigateRef)
+                if (!timelineLoader.item)
                     return
 
-                item.frigateRef = frigateRef
-                item.cameraId = cameraId
-                item.cameraName = cameraName || cameraId
+                var t = timelineLoader.item
+                t.cameraId = cameraId
+                t.cameraName = cameraName
+                t.frigateRef = frigateRef
 
-                if (cameraId && cameraId !== "") {
-                    frigateRef.loadEvents(cameraId)
-                    frigateRef.loadRecordings(cameraId)
-                }
+                t.allowAutoReveal = true
+                t.collapsed = true
             }
         }
     }
@@ -169,8 +170,8 @@ Rectangle {
         id: bottomNameOverlay
         width: parent.width
         height: 40
-        anchors.bottom: timelineContainer.top
-        anchors.bottomMargin: 14
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 10
         color: "#00000088"
         opacity: root.opacity
         Behavior on opacity { NumberAnimation { duration: 200 } }
@@ -215,15 +216,11 @@ Rectangle {
 
                 if (frigateRef)
                     frigateRef.switchToLive(cameraId)
+
+                if (timelineLoader.item)
+                    timelineLoader.item.collapsed = true
             }
         }
-    }
-
-    TimelineAutoHide {
-        id: timelineAutoHide
-        timeline: timelineLoader.item
-        scrubber: timelineLoader.item ? timelineLoader.item.scrubber : null
-        mouseHandler: timelineLoader.item ? timelineLoader.item.mouseHandler : null
     }
 
     Connections {
@@ -235,12 +232,6 @@ Rectangle {
                 return
 
             playbackPositionMs = positionMs
-            isPlayback = true
-
-            if (timelineLoader.item && timelineLoader.item.timestampToRatio) {
-                timelineLoader.item.position =
-                    timelineLoader.item.timestampToRatio(positionMs)
-            }
         }
 
         function onCameraOnline(id) {
@@ -269,9 +260,21 @@ Rectangle {
         topOverlay.opacity = 1.0
         exitButton.opacity = 1.0
 
+        isPlayback = false
+        playbackPositionMs = 0
+
         if (frigateRef && cameraId && cameraId !== "") {
             frigateRef.loadEvents(cameraId)
             frigateRef.loadRecordings(cameraId)
+        }
+
+        if (timelineLoader.item) {
+            var t = timelineLoader.item
+            t.cameraId = cameraId
+            t.cameraName = cameraName
+            t.frigateRef = frigateRef
+            t.allowAutoReveal = true
+            t.collapsed = true
         }
     }
 

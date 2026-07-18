@@ -4,11 +4,13 @@ Item {
     id: autoHide
     anchors.fill: parent
 
+    signal mouseNearBottom()
+    signal mouseAway()
+
     property var timeline
     property var scrubber
     property var mouseHandler
 
-    property bool mouseNearBottom: false
     property bool forceVisible: false
     property int autoHideDelay: 2500
 
@@ -22,18 +24,16 @@ Item {
         }
     }
 
-    // Idle detection ONLY when expanded
     MouseArea {
         id: idleDetector
         anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
-        visible: !timeline.collapsed
+        visible: true
 
         onPositionChanged: autoHideTimer.restart()
     }
 
-    // Reveal zone INSIDE timeline
     MouseArea {
         id: edgeDetector
         width: parent.width
@@ -41,18 +41,20 @@ Item {
         anchors.bottom: parent.bottom
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
-        visible: timeline.collapsed
+        visible: true
+        z: 99999
 
         onEntered: {
-            mouseNearBottom = true
             timeline.collapsed = false
             autoHideTimer.restart()
+            autoHide.mouseNearBottom()
         }
 
-        onExited: mouseNearBottom = false
+        onExited: {
+            autoHide.mouseAway()
+        }
     }
 
-    // Collapse arrow ONLY when expanded
     Rectangle {
         id: collapseHandle
         width: 32
@@ -82,20 +84,5 @@ Item {
                     autoHideTimer.restart()
             }
         }
-    }
-
-    // Correct signal connections
-    Connections {
-        target: scrubber
-        function onMoved() { autoHideTimer.restart() }
-        function onPressed() { autoHideTimer.restart() }
-        function onReleased() { autoHideTimer.restart() }
-    }
-
-    Connections {
-        target: mouseHandler
-        function onMoved() { autoHideTimer.restart() }
-        function onPressed() { autoHideTimer.restart() }
-        function onReleased() { autoHideTimer.restart() }
     }
 }

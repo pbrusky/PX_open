@@ -7,15 +7,9 @@ Rectangle {
     anchors.fill: parent
     color: "black"
 
-    //
-    // Backend references (MUST MATCH MainWindow.qml)
-    //
     property var discovery: null
     property var frigateRef: null
 
-    //
-    // Discovered servers
-    //
     property var servers: []
     ListModel { id: serverModel }
 
@@ -24,53 +18,34 @@ Rectangle {
     property string manualUsername: ""
     property string manualPassword: ""
 
-    //
-    // Prevent double‑connect
-    //
     property bool serverAssigned: false
 
-    //
-    // Signal to MainWindow
-    //
     signal serverSelected(string name, string ip, int apiPort, int modulePort)
 
     Component.onCompleted: {
-        console.log("StartupPage: waiting for discovery assignment…")
+        // removed logs
     }
 
     Component.onDestruction: {
-        console.log("StartupPage: stopping discovery")
         if (discovery) discovery.stopDiscovery()
     }
 
-    //
-    // When discovery object is assigned
-    //
     onDiscoveryChanged: {
-        if (!discovery) {
-            console.log("StartupPage: discovery still null")
+        if (!discovery)
             return
-        }
 
-        console.log("StartupPage: discovery assigned, starting discovery…")
         servers = []
         serverModel.clear()
         discovery.startDiscovery()
     }
 
-    //
-    // ⭐ DISCOVERY LISTENER
-    //
     Connections {
         target: discovery
 
         function onServerFound(name, address, port, container) {
-            console.log("StartupPage: server found:", name, address, port)
-
             if (root.serverAssigned)
                 return
 
-            // Avoid duplicates
             for (var i = 0; i < servers.length; i++) {
                 var s = servers[i]
                 if (s.address === address && s.port === port)
@@ -88,16 +63,9 @@ Rectangle {
         }
     }
 
-    //
-    // ⭐ CONNECT TO SERVER
-    //
     function connectToServer(address, modulePort, username, password) {
-        console.log("StartupPage: connecting to server", address, modulePort)
-
-        if (!modulePort || modulePort === 0) {
+        if (!modulePort || modulePort === 0)
             modulePort = 7001
-            console.log("StartupPage: module port not provided, defaulting to", modulePort)
-        }
 
         var auth = ""
         if (username && username.length > 0) {
@@ -107,42 +75,22 @@ Rectangle {
             auth += "@"
         }
 
-        //
-        // Frigate API is ALWAYS port 5000
-        //
         var apiPort = 5000
         var apiUrl = "http://" + auth + address + ":" + apiPort
         var moduleUrl = "http://" + auth + address + ":" + modulePort
 
-        //
-        // ⭐ Use the injected backend instance
-        //
-        if (!frigateRef) {
-            console.log("StartupPage: frigateRef is NULL — cannot connect")
+        if (!frigateRef)
             return
-        }
 
         frigateRef.setServer(apiUrl)
         frigateRef.setModuleServer(moduleUrl)
 
-        console.log("StartupPage: Frigate API =", apiUrl)
-        console.log("StartupPage: Module Server =", moduleUrl)
-
-        //
-        // Load module info + cameras
-        //
         frigateRef.loadModuleInformation()
         frigateRef.loadCameras()
 
-        //
-        // Notify MainWindow
-        //
         root.serverSelected("Frigate System", address, apiPort, modulePort)
     }
 
-    //
-    // UI
-    //
     Column {
         spacing: 20
         width: 420
@@ -196,8 +144,6 @@ Rectangle {
                             return
 
                         root.serverAssigned = true
-
-                        console.log("StartupPage: selected server", name, address, port)
                         root.connectToServer(address, port)
                     }
                 }
@@ -284,15 +230,11 @@ Rectangle {
                 text: "Connect"
                 width: parent.width
                 onClicked: {
-                    if (!manualIpField.text || manualIpField.text.length === 0) {
-                        console.log("Manual connect requires IP address")
+                    if (!manualIpField.text || manualIpField.text.length === 0)
                         return
-                    }
 
-                    if (!manualPortField.text || manualPortField.text.length === 0) {
-                        console.log("Manual connect requires port")
+                    if (!manualPortField.text || manualPortField.text.length === 0)
                         return
-                    }
 
                     root.serverAssigned = true
                     root.connectToServer(

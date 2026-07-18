@@ -18,7 +18,7 @@ Item {
     property int cols: 0
     property int rows: 0
 
-    // Camera selected for fullscreen
+    // Fullscreen state
     property var fullscreenCamera: null
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
@@ -89,28 +89,15 @@ Item {
         updateGridSize()
     }
 
-    // NEW: tile-based removal, UI-only + stop single stream
+    // tile-based removal, UI-only
     function removeTile(index) {
         if (index < 0 || index >= cameraNames.length)
             return
 
-        var name = cameraNames[index]
-
-        // stop ONLY this camera’s stream
-        if (frigateRef && frigateRef.stopStream) {
-            try {
-                frigateRef.stopStream(name)
-            } catch (e) {
-                console.log("CameraGrid: error calling stopStream:", e)
-            }
-        }
-
-        // remove from grid
         cameraNames.splice(index, 1)
         updateGridSize()
     }
 
-    // OLD path that touched Frigate – keep but no longer used by tiles
     function requestRemoveCamera(cameraName) {
         if (gridContainer.frigateRef && gridContainer.frigateRef.removeCamera) {
             try {
@@ -215,9 +202,8 @@ Item {
                     frigateRef: gridContainer.frigateRef
                     mainWindow: gridContainer.mainWindow
 
-                    tileIndex: index   // REQUIRED
+                    tileIndex: index
 
-                    // NEW: use removeTile(index) instead of requestRemoveCamera()
                     onRemoveRequested: {
                         gridContainer.removeTile(tileIndex)
                     }
@@ -236,10 +222,8 @@ Item {
         z: 9999
 
         onLoaded: {
-            if (!item || !fullscreenCamera) {
-                console.log("FullscreenLoader: no item or no camera")
+            if (!item || !fullscreenCamera)
                 return
-            }
 
             item.cameraId = fullscreenCamera.id || fullscreenCamera.name
             item.cameraName = fullscreenCamera.name || fullscreenCamera.id
@@ -257,6 +241,10 @@ Item {
         }
 
         Keys.onEscapePressed: gridContainer.exitFullscreen()
+
+        onVisibleChanged: {
+            // fullscreen overlays on top; grid stays intact underneath
+        }
     }
 
     Component.onCompleted: {

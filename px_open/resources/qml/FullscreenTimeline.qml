@@ -1,41 +1,45 @@
 ﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 
-import "components/timeline"
+// Correct QRC import path
+import "qrc:/app/resources/qml/components/timeline"
 
 Rectangle {
     id: timeline
     width: parent.width
+
+    property bool collapsed: true
+    property bool allowAutoReveal: false
+
+    function showTimeline() {
+        if (!allowAutoReveal) return
+        collapsed = false
+    }
+
+    function hideTimeline() {
+        collapsed = true
+    }
+
     height: collapsed ? 0 : 90
-    color: "#0E0E0E"
-    border.color: "#333333"
-    border.width: 1
-    radius: 6
+    visible: true
+
+    color: collapsed ? "transparent" : "#0E0E0E"
+    border.color: collapsed ? "transparent" : "#333333"
+    border.width: collapsed ? 0 : 1
+    radius: collapsed ? 0 : 6
+
     z: 10
     clip: true
 
-    // Correct alias
     property alias timelineHeight: timeline.height
 
-    //
-    // REQUIRED for TimelineAutoHide
-    //
     property var scrubber
     property var mouseHandler
-
-    //
-    // Collapse state
-    //
-    property bool collapsed: false
-    function toggle() { collapsed = !collapsed }
 
     Behavior on height {
         NumberAnimation { duration: 180; easing.type: Easing.InOutQuad }
     }
 
-    //
-    // Provided by FullscreenCamera
-    //
     property string cameraId: ""
     property string cameraName: ""
     property var frigateRef: null
@@ -47,9 +51,6 @@ Rectangle {
     property real startTs: 0
     property real endTs: 0
 
-    //
-    // Live clock
-    //
     property int currentTimeMs: Date.now()
     Timer {
         id: nowTimer
@@ -59,9 +60,6 @@ Rectangle {
         onTriggered: currentTimeMs = Date.now()
     }
 
-    //
-    // Backend updates
-    //
     Connections {
         target: frigateRef ? frigateRef : null
         ignoreUnknownSignals: true
@@ -84,13 +82,11 @@ Rectangle {
             if (id !== cameraId) return
             playbackPositionMs = posMs
             timeline.position = timeline.timestampToRatio(posMs)
-            scrubber.x = timeline.timestampToX(posMs) - scrubber.width/2
+            if (scrubber)
+                scrubber.x = timeline.timestampToX(posMs) - scrubber.width/2
         }
     }
 
-    //
-    // Timestamp conversion
-    //
     function effectiveStartTs() {
         if (endTs > startTs) return startTs
         return Date.now() / 1000 - 3600
@@ -114,9 +110,6 @@ Rectangle {
 
     onPositionChanged: playbackPositionMs = ratioToTimestamp(position)
 
-    //
-    // Zoom + Pan
-    //
     property real zoom: 1.0
     property real pan: 0.0
     property real minZoom: 0.2
@@ -135,9 +128,6 @@ Rectangle {
         return (effectiveStartTs() + scaled*(effectiveEndTs()-effectiveStartTs())) * 1000
     }
 
-    //
-    // Ruler
-    //
     TimelineRuler {
         id: ruler
         anchors.left: parent.left
@@ -146,11 +136,9 @@ Rectangle {
         startTs: timeline.effectiveStartTs()
         endTs: timeline.effectiveEndTs()
         segmentCount: timeline.segmentCount
+        visible: !collapsed
     }
 
-    //
-    // Segments
-    //
     TimelineSegments {
         id: segments
         recordings: timeline.recordings
@@ -161,11 +149,9 @@ Rectangle {
         timelineWidth: timeline.width
         timestampToX: timeline.timestampToX
         anchors.top: ruler.bottom
+        visible: !collapsed
     }
 
-    //
-    // Events
-    //
     TimelineEvents {
         id: eventsLayer
         events: timeline.events
@@ -176,11 +162,9 @@ Rectangle {
         timelineWidth: timeline.width
         timestampToX: timeline.timestampToX
         anchors.top: ruler.bottom
+        visible: !collapsed
     }
 
-    //
-    // Scrubber
-    //
     TimelineScrubber {
         id: scrubber
         playbackPositionMs: timeline.playbackPositionMs
@@ -190,33 +174,29 @@ Rectangle {
         pan: timeline.pan
         timelineWidth: timeline.width
         timestampToX: timeline.timestampToX
+        visible: !collapsed
     }
 
-    //
-    // Hover preview
-    //
-    TimelineHoverPreview { id: hoverPreview }
+    TimelineHoverPreview {
+        id: hoverPreview
+        visible: !collapsed
+    }
 
-    //
-    // Mouse interaction
-    //
     TimelineMouseHandler {
         id: mouseHandler
         scrubber: scrubber
         hoverPreview: hoverPreview
         pan: timeline.pan
         xToTimestamp: timeline.xToTimestamp
+        visible: !collapsed
     }
 
-    //
-    // Live time indicator
-    //
     Rectangle {
         width: 2
         height: parent.height
         color: "#FF4444"
         anchors.right: parent.right
-        opacity: (cameraId === "" || effectiveEndTs() <= effectiveStartTs()) ? 0 : 0.35
+        opacity: (cameraId === "" || effectiveEndTs() <= effectiveStartTs() || collapsed) ? 0 : 0.35
         z: 20
     }
 
@@ -227,13 +207,10 @@ Rectangle {
         text: Qt.formatDateTime(new Date(currentTimeMs), "hh:mm:ss")
         color: "#FF4444"
         font.pixelSize: 10
-        opacity: cameraId === "" ? 0 : 0.8
+        opacity: (cameraId === "" || collapsed) ? 0 : 0.8
         z: 21
     }
 
-    //
-    // Empty state
-    //
     Rectangle {
         id: emptyState
         anchors.left: parent.left
@@ -241,7 +218,7 @@ Rectangle {
         anchors.top: ruler.bottom
         anchors.bottom: scrubber.top
         color: "transparent"
-        visible: cameraId === "" || (recordings.length === 0 && events.length === 0)
+        visible: !collapsed && (cameraId === "" || (recordings.length === 0 && events.length === 0))
 
         Column {
             anchors.centerIn: parent
@@ -261,19 +238,14 @@ Rectangle {
         }
     }
 
-    //
-    // Auto-hide module
-    //
     TimelineAutoHide {
         id: autoHide
         timeline: timeline
-        scrubber: scrubber
-        mouseHandler: mouseHandler
+
+        onMouseNearBottom: timeline.showTimeline()
+        onMouseAway: timeline.hideTimeline()
     }
 
-    //
-    // Expose scrubber + mouseHandler to FullscreenCamera
-    //
     Component.onCompleted: {
         timeline.scrubber = scrubber
         timeline.mouseHandler = mouseHandler

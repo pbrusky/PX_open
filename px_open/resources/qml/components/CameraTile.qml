@@ -18,9 +18,6 @@ Item {
     property string cameraName: ""
     property bool isOnline: frigateRef ? frigateRef.isCameraOnline(cameraName) : false
 
-    // ❌ no direct worker reference
-    // property var worker: frigateRef ? frigateRef.getWorker(cameraName) : null
-
     // simple metadata placeholders (can be filled from backend later)
     property string resolution: ""
     property real fps: 0
@@ -39,12 +36,10 @@ Item {
         return mainWindow.cameraList.find(c => c.name === cameraName)
     }
 
+    // UI-only removal: do not stop the backend stream here
     function handleRemove() {
-        if (gridRoot && gridRoot.removeTile)
+        if (gridRoot && gridRoot.removeTile && tileIndex >= 0)
             gridRoot.removeTile(tileIndex)
-
-        if (frigateRef)
-            frigateRef.stopStream(cameraName)
     }
 
     onCameraNameChanged: {
@@ -55,18 +50,7 @@ Item {
         }
 
         frameQueue = frigateRef ? frigateRef.getQueue(cameraName) : null
-        // worker     = frigateRef ? frigateRef.getWorker(cameraName) : null
     }
-
-    // ❌ remove Connections to worker (cross-thread)
-    // Connections {
-    //     target: worker
-    //     ignoreUnknownSignals: true
-    //
-    //     function onStatsChanged() {
-    //         // bindings auto-update
-    //     }
-    // }
 
     Connections {
         target: frameQueue
