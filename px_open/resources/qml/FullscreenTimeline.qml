@@ -1,7 +1,7 @@
 ﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 
-import "components/timeline"   // Folder containing modular components (requires index.qml)
+import "components/timeline"
 
 Rectangle {
     id: timeline
@@ -12,21 +12,25 @@ Rectangle {
     border.width: 1
     radius: 6
     z: 10
+    clip: true
+
+    // Correct alias
+    property alias timelineHeight: timeline.height
 
     //
-    // Hide / Show
+    // REQUIRED for TimelineAutoHide
+    //
+    property var scrubber
+    property var mouseHandler
+
+    //
+    // Collapse state
     //
     property bool collapsed: false
+    function toggle() { collapsed = !collapsed }
 
     Behavior on height {
         NumberAnimation { duration: 180; easing.type: Easing.InOutQuad }
-    }
-    Behavior on opacity {
-        NumberAnimation { duration: 120; easing.type: Easing.InOutQuad }
-    }
-
-    function toggle() {
-        collapsed = !collapsed
     }
 
     //
@@ -40,11 +44,12 @@ Rectangle {
     property int playbackPositionMs: 0
     property real position: 0
 
-    // timeline range
     property real startTs: 0
     property real endTs: 0
 
-    // live clock
+    //
+    // Live clock
+    //
     property int currentTimeMs: Date.now()
     Timer {
         id: nowTimer
@@ -61,40 +66,25 @@ Rectangle {
         target: frigateRef ? frigateRef : null
         ignoreUnknownSignals: true
 
-        function onRecordingsLoaded(receivedCameraId, segments) {
-            if (receivedCameraId !== cameraId)
-                return
-
+        function onRecordingsLoaded(id, segments) {
+            if (id !== cameraId) return
             recordings = segments
-
             if (segments.length > 0) {
                 startTs = segments[0].start
                 endTs = segments[segments.length - 1].end
             }
         }
 
-        function onEventsLoaded(receivedCameraId, eventsList) {
-            if (receivedCameraId !== cameraId)
-                return
-
-            events = eventsList
+        function onEventsLoaded(id, list) {
+            if (id !== cameraId) return
+            events = list
         }
 
-        function onPlaybackPositionChanged(receivedCameraId, positionMs) {
-            if (receivedCameraId !== cameraId)
-                return
-
-            playbackPositionMs = positionMs
-            timeline.position = timeline.timestampToRatio(positionMs)
-            scrubber.x = timeline.timestampToX(positionMs) - scrubber.width/2
-        }
-
-        function onCameraEditResult(ok, message) {
-            if (!ok) return
-            if (frigateRef) {
-                frigateRef.loadEvents(cameraId)
-                frigateRef.loadRecordings(cameraId)
-            }
+        function onPlaybackPositionChanged(id, posMs) {
+            if (id !== cameraId) return
+            playbackPositionMs = posMs
+            timeline.position = timeline.timestampToRatio(posMs)
+            scrubber.x = timeline.timestampToX(posMs) - scrubber.width/2
         }
     }
 
@@ -102,33 +92,27 @@ Rectangle {
     // Timestamp conversion
     //
     function effectiveStartTs() {
-        if (endTs > startTs)
-            return startTs
+        if (endTs > startTs) return startTs
         return Date.now() / 1000 - 3600
     }
 
     function effectiveEndTs() {
-        if (endTs > startTs)
-            return endTs
+        if (endTs > startTs) return endTs
         return Date.now() / 1000
     }
 
     function timestampToRatio(tsMs) {
-        if (effectiveEndTs() <= effectiveStartTs())
-            return 0
-
-        return (tsMs - effectiveStartTs() * 1000) /
-               ((effectiveEndTs() - effectiveStartTs()) * 1000)
+        if (effectiveEndTs() <= effectiveStartTs()) return 0
+        return (tsMs - effectiveStartTs()*1000) /
+               ((effectiveEndTs()-effectiveStartTs())*1000)
     }
 
     function ratioToTimestamp(ratio) {
-        return effectiveStartTs() * 1000 +
-               ratio * (effectiveEndTs() - effectiveStartTs()) * 1000
+        return effectiveStartTs()*1000 +
+               ratio*(effectiveEndTs()-effectiveStartTs())*1000
     }
 
-    onPositionChanged: {
-        playbackPositionMs = ratioToTimestamp(position)
-    }
+    onPositionChanged: playbackPositionMs = ratioToTimestamp(position)
 
     //
     // Zoom + Pan
@@ -140,19 +124,15 @@ Rectangle {
     property int segmentCount: 10
 
     function timestampToX(tsMs) {
-        if (endTs <= startTs)
-            return 0
-
-        let totalMs = (endTs - startTs) * 1000
-        let ratio = (tsMs - startTs * 1000) / totalMs
-        let scaled = ratio * width * zoom
-        return scaled + pan
+        if (endTs <= startTs) return 0
+        let totalMs = (endTs - startTs)*1000
+        let ratio = (tsMs - startTs*1000) / totalMs
+        return ratio * width * zoom + pan
     }
 
     function xToTimestamp(x) {
         let scaled = (x - pan) / (width * zoom)
-        let ts = effectiveStartTs() + scaled * (effectiveEndTs() - effectiveStartTs())
-        return ts * 1000
+        return (effectiveStartTs() + scaled*(effectiveEndTs()-effectiveStartTs())) * 1000
     }
 
     //
@@ -163,14 +143,13 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-
         startTs: timeline.effectiveStartTs()
         endTs: timeline.effectiveEndTs()
         segmentCount: timeline.segmentCount
     }
 
     //
-    // Recording segments
+    // Segments
     //
     TimelineSegments {
         id: segments
@@ -180,12 +159,12 @@ Rectangle {
         zoom: timeline.zoom
         pan: timeline.pan
         timelineWidth: timeline.width
-        timestampToX: timeline.timestampToX   // REQUIRED
+        timestampToX: timeline.timestampToX
         anchors.top: ruler.bottom
     }
 
     //
-    // Event markers
+    // Events
     //
     TimelineEvents {
         id: eventsLayer
@@ -195,7 +174,7 @@ Rectangle {
         zoom: timeline.zoom
         pan: timeline.pan
         timelineWidth: timeline.width
-        timestampToX: timeline.timestampToX   // REQUIRED
+        timestampToX: timeline.timestampToX
         anchors.top: ruler.bottom
     }
 
@@ -210,15 +189,13 @@ Rectangle {
         zoom: timeline.zoom
         pan: timeline.pan
         timelineWidth: timeline.width
-        timestampToX: timeline.timestampToX   // REQUIRED
+        timestampToX: timeline.timestampToX
     }
 
     //
     // Hover preview
     //
-    TimelineHoverPreview {
-        id: hoverPreview
-    }
+    TimelineHoverPreview { id: hoverPreview }
 
     //
     // Mouse interaction
@@ -228,7 +205,7 @@ Rectangle {
         scrubber: scrubber
         hoverPreview: hoverPreview
         pan: timeline.pan
-        xToTimestamp: timeline.xToTimestamp   // REQUIRED
+        xToTimestamp: timeline.xToTimestamp
     }
 
     //
@@ -282,5 +259,23 @@ Rectangle {
                 font.pixelSize: 10
             }
         }
+    }
+
+    //
+    // Auto-hide module
+    //
+    TimelineAutoHide {
+        id: autoHide
+        timeline: timeline
+        scrubber: scrubber
+        mouseHandler: mouseHandler
+    }
+
+    //
+    // Expose scrubber + mouseHandler to FullscreenCamera
+    //
+    Component.onCompleted: {
+        timeline.scrubber = scrubber
+        timeline.mouseHandler = mouseHandler
     }
 }

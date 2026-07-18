@@ -3,14 +3,23 @@ import QtQuick 2.15
 Rectangle {
     id: scrubber
 
-    // REQUIRED PROPERTIES
+    //
+    // Signals TimelineAutoHide listens to
+    //
+    signal moved()
+    signal pressed()
+    signal released()
+
+    //
+    // Properties
+    //
     property real playbackPositionMs
     property real startTs
     property real endTs
     property real zoom
     property real pan
     property real timelineWidth
-    property var timestampToX   // <-- FIXED
+    property var timestampToX
 
     width: Math.max(8, 10 * zoom)
     height: parent.height
@@ -28,5 +37,22 @@ Rectangle {
         width: 2
         height: parent.height
         color: "#BBBBBB"
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        drag.target: scrubber
+
+        onPressed: {
+            scrubber.pressed()
+        }
+
+        onReleased: {
+            scrubber.released()
+        }
+
+        onPositionChanged: {
+            scrubber.moved()
+        }
     }
 }

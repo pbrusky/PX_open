@@ -1,75 +1,64 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import PxOpen 1.0   // CameraVideoItem
+import PxOpen 1.0
+import "components/timeline"
 
 Rectangle {
     id: root
     anchors.fill: parent
     color: "black"
 
-    //
-    // REQUIRED PROPERTIES (MainWindow sets these)
-    //
     property string cameraId: ""
     property string cameraName: ""
     property var frigateRef: null
-    property var liveQueue: null        // queue passed from grid
-    property var playbackQueue: null    // queue passed from grid
+    property var liveQueue: null
+    property var playbackQueue: null
     property bool isOnline: false
 
-    //
-    // Playback state
-    //
     property bool isPlayback: false
     property int playbackPositionMs: 0
 
     opacity: 0.0
     Behavior on opacity { NumberAnimation { duration: 200 } }
 
-    //
-    // LIVE VIDEO (reuses existing queue)
-    //
-    CameraVideoItem {
-        id: liveVideo
-        anchors.fill: parent
-        visible: isOnline && !isPlayback
-        queue: liveQueue
-    }
-
-    //
-    // PLAYBACK VIDEO (reuses existing queue)
-    //
-    CameraVideoItem {
-        id: playbackVideo
-        anchors.fill: parent
-        visible: isPlayback
-        queue: playbackQueue
-    }
-
-    //
-    // OFFLINE OVERLAY
-    //
     Rectangle {
+        id: videoArea
         anchors.fill: parent
-        color: "#222"
-        visible: !isOnline && !isPlayback
+        color: "black"
 
-        Text {
-            anchors.centerIn: parent
-            text: "Camera Offline"
-            color: "white"
-            font.pixelSize: 24
-            font.bold: true
+        CameraVideoItem {
+            id: liveVideo
+            anchors.fill: parent
+            visible: isOnline && !isPlayback
+            queue: liveQueue
         }
-    }
 
-    //
-    // EXIT FULLSCREEN (double-click)
-    //
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.LeftButton
-        onDoubleClicked: root.close()
+        CameraVideoItem {
+            id: playbackVideo
+            anchors.fill: parent
+            visible: isPlayback
+            queue: playbackQueue
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: "#222"
+            visible: !isOnline && !isPlayback
+
+            Text {
+                anchors.centerIn: parent
+                text: "Camera Offline"
+                color: "white"
+                font.pixelSize: 24
+                font.bold: true
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            onDoubleClicked: root.close()
+        }
     }
 
     Keys.onReleased: {
@@ -77,9 +66,6 @@ Rectangle {
             root.close()
     }
 
-    //
-    // TOP BAR OVERLAY
-    //
     Rectangle {
         id: topOverlay
         height: 40
@@ -123,9 +109,6 @@ Rectangle {
         }
     }
 
-    //
-    // EXIT BUTTON
-    //
     Rectangle {
         id: exitButton
         width: 80
@@ -151,17 +134,43 @@ Rectangle {
         }
     }
 
-    //
-    // BOTTOM‑CENTER CAMERA NAME (NX‑style)
-    //
+    // Timeline container with clipping
+    Rectangle {
+        id: timelineContainer
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: timelineLoader.item ? timelineLoader.item.timelineHeight : 0
+        color: "transparent"
+        clip: true
+
+        Loader {
+            id: timelineLoader
+            anchors.fill: parent
+            source: "qrc:/app/resources/qml/FullscreenTimeline.qml"
+
+            onLoaded: {
+                if (!item || !frigateRef)
+                    return
+
+                item.frigateRef = frigateRef
+                item.cameraId = cameraId
+                item.cameraName = cameraName || cameraId
+
+                if (cameraId && cameraId !== "") {
+                    frigateRef.loadEvents(cameraId)
+                    frigateRef.loadRecordings(cameraId)
+                }
+            }
+        }
+    }
+
     Rectangle {
         id: bottomNameOverlay
         width: parent.width
         height: 40
-
-        anchors.bottom: timelineLoader.top
+        anchors.bottom: timelineContainer.top
         anchors.bottomMargin: 14
-
         color: "#00000088"
         opacity: root.opacity
         Behavior on opacity { NumberAnimation { duration: 200 } }
@@ -175,9 +184,6 @@ Rectangle {
         }
     }
 
-    //
-    // BACK TO LIVE BUTTON
-    //
     Rectangle {
         id: liveButton
         width: 100
@@ -213,35 +219,13 @@ Rectangle {
         }
     }
 
-    //
-    // TIMELINE
-    //
-    Loader {
-        id: timelineLoader
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: 80
-        source: "qrc:/app/resources/qml/FullscreenTimeline.qml"
-
-        onLoaded: {
-            if (!item || !frigateRef)
-                return
-
-            item.frigateRef = frigateRef
-            item.cameraId = cameraId
-            item.cameraName = cameraName || cameraId
-
-            if (cameraId && cameraId !== "") {
-                frigateRef.loadEvents(cameraId)
-                frigateRef.loadRecordings(cameraId)
-            }
-        }
+    TimelineAutoHide {
+        id: timelineAutoHide
+        timeline: timelineLoader.item
+        scrubber: timelineLoader.item ? timelineLoader.item.scrubber : null
+        mouseHandler: timelineLoader.item ? timelineLoader.item.mouseHandler : null
     }
 
-    //
-    // BACKEND SIGNALS
-    //
     Connections {
         target: frigateRef
         ignoreUnknownSignals: true
@@ -279,13 +263,9 @@ Rectangle {
         }
     }
 
-    //
-    // OPEN/CLOSE
-    //
     function open() {
         root.visible = true
         root.opacity = 1.0
-
         topOverlay.opacity = 1.0
         exitButton.opacity = 1.0
 
@@ -302,7 +282,7 @@ Rectangle {
 
         Qt.callLater(() => {
             root.visible = false
-            root.parent.source = ""     // destroys fullscreen instance
+            root.parent.source = ""
         })
     }
 }

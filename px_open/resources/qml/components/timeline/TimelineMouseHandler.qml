@@ -1,41 +1,62 @@
 import QtQuick 2.15
 
-MouseArea {
-    id: mouseArea
-    anchors.fill: parent
-    hoverEnabled: true
-    drag.target: scrubber
+Item {
+    id: mouseHandler
 
+    //
+    // Signals TimelineAutoHide listens to
+    //
+    signal moved()
+    signal pressed()
+    signal released()
+
+    //
     // REQUIRED PROPERTIES
+    //
     property real pan
     property var scrubber
     property var hoverPreview
-    property var xToTimestamp   // <-- FIXED
+    property var xToTimestamp
 
     property real startPan: 0
     property real startX: 0
 
-    onPositionChanged: function(mouse) {
-        let ts = xToTimestamp(mouse.x)
-        hoverPreview.visible = true
-        hoverPreview.x = mouse.x - hoverPreview.width/2
-        hoverPreview.y = -hoverPreview.height - 4
+    MouseArea {
+        id: mouseArea
+        anchors.fill: parent
+        hoverEnabled: true
+        drag.target: scrubber
 
-        hoverPreview.tsString = Qt.formatDateTime(new Date(ts), "hh:mm:ss ap")
+        onPositionChanged: function(mouse) {
+            mouseHandler.moved()
 
-        if (mouse.buttons & Qt.RightButton) {
-            pan = mouseArea.startPan + (mouse.x - mouseArea.startX)
+            let ts = xToTimestamp(mouse.x)
+            hoverPreview.visible = true
+            hoverPreview.x = mouse.x - hoverPreview.width/2
+            hoverPreview.y = -hoverPreview.height - 4
+
+            hoverPreview.tsString = Qt.formatDateTime(new Date(ts), "hh:mm:ss ap")
+
+            if (mouse.buttons & Qt.RightButton) {
+                pan = mouseHandler.startPan + (mouse.x - mouseHandler.startX)
+            }
         }
-    }
 
-    onPressed: function(mouse) {
-        if (mouse.button === Qt.RightButton) {
-            mouseArea.startPan = pan
-            mouseArea.startX = mouse.x
+        onPressed: function(mouse) {
+            mouseHandler.pressed()
+
+            if (mouse.button === Qt.RightButton) {
+                mouseHandler.startPan = pan
+                mouseHandler.startX = mouse.x
+            }
         }
-    }
 
-    onExited: {
-        hoverPreview.visible = false
+        onReleased: {
+            mouseHandler.released()
+        }
+
+        onExited: {
+            hoverPreview.visible = false
+        }
     }
 }

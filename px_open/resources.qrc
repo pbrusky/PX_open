@@ -42,7 +42,8 @@
         <file>resources/qml/components/timeline/TimelineScrubber.qml</file>
         <file>resources/qml/components/timeline/TimelineHoverPreview.qml</file>
         <file>resources/qml/components/timeline/TimelineMouseHandler.qml</file>
-
+        <file>resources/qml/components/timeline/TimelineAutoHide.qml</file>
+        
         <!-- html -->
         <file>resources/html/mp4player.html</file>
 
