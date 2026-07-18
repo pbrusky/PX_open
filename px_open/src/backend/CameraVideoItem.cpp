@@ -17,7 +17,7 @@ void CameraVideoItem::setQueue(QObject* q)
     m_queue = q ? qobject_cast<FrameQueue*>(q) : nullptr;
 
     if (m_queue) {
-        // ⭐ Ensure GUI-thread update
+        // Ensure GUI-thread update
         connect(m_queue, &FrameQueue::frameReady,
                 this, &QQuickItem::update,
                 Qt::QueuedConnection);
@@ -32,7 +32,7 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
 {
     QSGSimpleTextureNode* node = static_cast<QSGSimpleTextureNode*>(oldNode);
 
-    // ⭐ Only popImage once per frame
+    // Pop one frame per update
     if (m_queue) {
         QImage img = m_queue->popImage();
         if (!img.isNull())
@@ -40,21 +40,53 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
     }
 
     if (!window() || m_lastImage.isNull()) {
-        return oldNode;   // ⭐ Do NOT delete node; keep stable
+        return oldNode;   // Keep node stable
     }
 
-    // ⭐ Reuse node if possible
+    // Reuse node if possible
     if (!node)
         node = new QSGSimpleTextureNode();
 
-    // ⭐ Replace texture safely
+    // Create texture from latest frame
     QSGTexture* tex = window()->createTextureFromImage(m_lastImage);
     if (!tex)
         return node;
 
     node->setTexture(tex);
     node->setOwnsTexture(true);
-    node->setRect(boundingRect());
+
+    //
+    // ⭐ NX Witness–style aspect ratio preservation
+    //
+    QRectF bounds = boundingRect();
+    float tileW = bounds.width();
+    float tileH = bounds.height();
+
+    float frameW = m_lastImage.width();
+    float frameH = m_lastImage.height();
+
+    if (frameW > 0 && frameH > 0) {
+        float frameAspect = frameW / frameH;
+        float tileAspect = tileW / tileH;
+
+        float renderW, renderH;
+
+        if (frameAspect > tileAspect) {
+            // Frame is wider → limit by width
+            renderW = tileW;
+            renderH = tileW / frameAspect;
+        } else {
+            // Frame is taller → limit by height
+            renderH = tileH;
+            renderW = tileH * frameAspect;
+        }
+
+        // Center the video inside the tile
+        float x = (tileW - renderW) / 2.0f;
+        float y = (tileH - renderH) / 2.0f;
+
+        node->setRect(QRectF(x, y, renderW, renderH));
+    }
 
     return node;
 }

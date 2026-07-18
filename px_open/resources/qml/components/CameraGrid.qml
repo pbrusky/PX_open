@@ -7,7 +7,7 @@ Item {
     anchors.fill: parent
     clip: true
     z: 1
-    
+
     // Provided by ServerView
     property var mainWindow
     property var frigateRef: null
@@ -23,27 +23,16 @@ Item {
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
 
-    //
-    // Safe camera lookup
-    //
     function getCamera(name) {
-        if (!mainWindow || !mainWindow.cameraList) {
-            console.log("CameraGrid: mainWindow or cameraList undefined")
+        if (!mainWindow || !mainWindow.cameraList)
             return null
-        }
         return mainWindow.cameraList.find(c => c.name === name)
     }
 
-    //
-    // Backend-driven online/offline state
-    //
     function isCameraOnline(name) {
         return frigateRef ? frigateRef.isCameraOnline(name) : false
     }
 
-    //
-    // Grid sizing
-    //
     function updateGridSize() {
         let count = cameraNames.length
 
@@ -66,9 +55,6 @@ Item {
         }
     }
 
-    //
-    // Drag & Drop
-    //
     function dropAt(x, y, cameraName) {
         if (!cameraName || cameraName === "")
             return
@@ -79,9 +65,8 @@ Item {
         cameraNames.push(cameraName)
         updateGridSize()
 
-        if (mainWindow && mainWindow.selectedCameraId !== cameraName) {
+        if (mainWindow && mainWindow.selectedCameraId !== cameraName)
             mainWindow.selectedCameraId = cameraName
-        }
     }
 
     function removeCamera(cameraName) {
@@ -89,7 +74,6 @@ Item {
         updateGridSize()
     }
 
-    // tile-based removal, UI-only
     function removeTile(index) {
         if (index < 0 || index >= cameraNames.length)
             return
@@ -103,7 +87,6 @@ Item {
             try {
                 gridContainer.frigateRef.removeCamera(cameraName)
             } catch (e) {
-                console.log("CameraGrid: error calling removeCamera:", e)
             }
             removeCamera(cameraName)
         } else if (serverViewRoot && serverViewRoot.openRemoveCameraPopup) {
@@ -129,9 +112,6 @@ Item {
         cameraNames.splice(newIndex, 0, name)
     }
 
-    //
-    // Fullscreen
-    //
     function enterFullscreen(cameraName, liveQueue) {
         let cam = getCamera(cameraName)
         if (!cam)
@@ -155,9 +135,6 @@ Item {
         fullscreenPlaybackQueue = null
     }
 
-    //
-    // Grid layout
-    //
     Grid {
         id: grid
         anchors.fill: parent
@@ -173,12 +150,20 @@ Item {
             Item {
                 id: tileWrapper
 
-                width: gridContainer.cols > 0
-                       ? grid.width / gridContainer.cols - grid.columnSpacing
-                       : 0
-                height: gridContainer.rows > 0
-                        ? grid.height / gridContainer.rows - grid.rowSpacing
-                        : 0
+                // keep tiles in a stable 16:9 shape so video size feels consistent
+                property real cellWidth: gridContainer.cols > 0
+                                         ? grid.width / gridContainer.cols - grid.columnSpacing
+                                         : 0
+                property real cellHeight: gridContainer.rows > 0
+                                          ? grid.height / gridContainer.rows - grid.rowSpacing
+                                          : 0
+
+                // target 16:9 tile, limited by available cell size
+                property real targetWidth: cellWidth
+                property real targetHeight: targetWidth * 9 / 16
+
+                width: targetHeight > cellHeight ? cellHeight * 16 / 9 : targetWidth
+                height: targetHeight > cellHeight ? cellHeight : targetHeight
 
                 property string cameraName: (
                     index < gridContainer.cameraNames.length
@@ -192,7 +177,9 @@ Item {
 
                 CameraTile {
                     id: tile
-                    anchors.fill: parent
+                    anchors.centerIn: parent
+                    width: tileWrapper.width
+                    height: tileWrapper.height
                     z: 1
 
                     cameraName: tileWrapper.cameraName
@@ -212,9 +199,6 @@ Item {
         }
     }
 
-    //
-    // Fullscreen Loader
-    //
     Loader {
         id: fullscreenLoader
         anchors.fill: parent
@@ -241,10 +225,6 @@ Item {
         }
 
         Keys.onEscapePressed: gridContainer.exitFullscreen()
-
-        onVisibleChanged: {
-            // fullscreen overlays on top; grid stays intact underneath
-        }
     }
 
     Component.onCompleted: {
