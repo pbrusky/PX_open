@@ -4,110 +4,55 @@ import json
 import socket
 import threading
 import time
-import requests
 import subprocess
-import uuid
-import os
-import shutil
-import yaml
-import traceback
-from requests.auth import HTTPDigestAuth
-import xml.etree.ElementTree as ET
+from pathlib import Path
 
-# ---------------------------------------------------------
-# IP DETECTION
-# ---------------------------------------------------------
-SERVER_IP = os.environ.get("FRIGATE_SERVER_IP", "127.0.0.1")
+# Import config
+from config import (
+    LAN_IP, HTTP_PORT, HTTPS_PORT, BROADCAST_IP,
+    PROGRESS_FILE, MODULE_ID, SYSTEM_ID, SYSTEM_NAME
+)
 
-def get_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))   # does NOT send traffic
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except:
-        return "127.0.0.1"
-
-LAN_IP = get_local_ip()
-
-# ---------------------------------------------------------
-# CONFIG
-# ---------------------------------------------------------
-HTTP_PORT = 8001
-HTTPS_PORT = 8002
 HOST = "0.0.0.0"
 DISCOVERY_PORT = 3666
-BROADCAST_IP = "255.255.255.255"
-
-FRIGATE_HOST = LAN_IP
-FRIGATE_PORT = 5000
-FRIGATE_BASE = f"http://{FRIGATE_HOST}:{FRIGATE_PORT}"
-
-GO2RTC_HOST = LAN_IP
-GO2RTC_PORT = 1984
-GO2RTC_BASE = f"http://{GO2RTC_HOST}:{GO2RTC_PORT}"
-
-GO2RTC_CONFIG_PATH = r"C:\frigate\go2rtc.yaml"
-FRIGATE_CONFIG_PATH = r"C:\frigate\config\config.yml"
-
-SYSTEM_ID = "{11111111-2222-3333-4444-555555555555}"
-MODULE_ID = "{66666666-7777-8888-9999-000000000000}"
-SYSTEM_NAME = "Frigate System"
-
-PROGRESS_FILE = r"C:\PX\onvif_progress.log"
 
 # ---------------------------------------------------------
-# ONVIF SCANNING
+# BROADCAST DISCOVERY
 # ---------------------------------------------------------
-def get_subnet_from_lan_ip():
-    try:
-        parts = LAN_IP.split(".")
-        if len(parts) == 4:
-            return ".".join(parts[:3]) + "."
-    except:
-        pass
-    return "192.168.1."
+def broadcast_discovery():
+    packet = json.dumps({
+        "id": MODULE_ID,
+        "systemId": SYSTEM_ID,
+        "name": SYSTEM_NAME,
+        "port": HTTP_PORT,
+        "type": "frigate",
+        "address": LAN_IP,
+    }).encode("utf-8")
 
-def run_external_onvif_scan(username="", password=""):
-    try:
+    while True:
         try:
-            open(PROGRESS_FILE, "w").close()
-        except:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            targets = []
+            if BROADCAST_IP:
+                targets.append(BROADCAST_IP)
+            else:
+                base = LAN_IP.rsplit(".", 1)[0]
+                targets.extend([f"{base}.255", f"{base}.1", f"{base}.254"])
+
+            for target in targets:
+                try:
+                    sock.sendto(packet, (target, DISCOVERY_PORT))
+                except:
+                    continue
+            sock.close()
+        except Exception:
             pass
 
-        subnet = get_subnet_from_lan_ip()
-        print(f"[SCAN] Starting ONVIF scan on subnet {subnet} with user='{username}'")
+        time.sleep(2)
 
-        result = subprocess.run(
-            ["python", "onvif_scan.py", subnet, username, password],
-            capture_output=True,
-            text=True
-        )
-
-        if result.stderr.strip():
-            print("[SCAN] Scanner stderr:", result.stderr.strip())
-
-        output = result.stdout.strip()
-
-        try:
-            devices = json.loads(output)
-            print(f"[SCAN] Parsed {len(devices)} devices from scanner output.")
-            return devices
-        except Exception as e:
-            print("[SCAN] JSON parse error:", e)
-            print("[SCAN] Raw output:", output)
-            return []
-
-    except Exception as e:
-        print("[SCAN] Error running external ONVIF scanner:", e)
-        return []
-
-def discover_onvif(username="", password=""):
-    print(f"[MODULE] Calling external ONVIF scanner (user={username})...")
-    devices = run_external_onvif_scan(username, password)
-    print(f"[MODULE] External scanner found {len(devices)} devices.")
-    return devices
 
 # ---------------------------------------------------------
 # HTTP HANDLER
@@ -117,67 +62,86 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
         return
 
     def send_json(self, data, code=200):
-        payload = json.dumps(data).encode("utf-8")
-        try:
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.send_header("Connection", "close")
-            self.end_headers()
-            self.wfile.write(payload)
-        except:
-            pass
+        payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def do_POST(self):
-        # import here to avoid circular import at module load time
-        from camera_manager import (
-            add_camera,
-            edit_camera,
-            remove_camera,
-            get_rtsp_url,
-        )
-
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
         try:
-            data = json.loads(body)
-        except:
-            data = {}
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b''
+            data = json.loads(body) if body else {}
 
-        # ONVIF DISCOVERY
-        if self.path == "/api/onvifDiscover":
-            username = data.get("username", "")
-            password = data.get("password", "")
-            devices = discover_onvif(username, password)
-            return self.send_json({"devices": devices})
+            # ====================== ONVIF DISCOVERY ======================
+            if self.path == "/api/onvifDiscover":
+                username = data.get("username", "")
+                password = data.get("password", "")
+                
+                print(f"[ONVIF] Discovery requested with user: '{username}'")
+                
+                # Direct call to scanner (NO dependency on camera_manager)
+                try:
+                    result = subprocess.run(
+                        ["python", "onvif_scan.py", "10.36.24.", username, password],
+                        capture_output=True,
+                        text=True,
+                        timeout=40
+                    )
 
-        # RTSP RESOLUTION
-        if self.path == "/api/getRtsp":
-            ip = data.get("ip")
-            username = data.get("username", "")
-            password = data.get("password", "")
-            rtsp = get_rtsp_url(ip, username, password)
-            return self.send_json({"rtsp": rtsp})
+                    if result.stderr.strip():
+                        print("[ONVIF Scanner] Stderr:", result.stderr.strip())
 
-        # ADD CAMERA
-        if self.path == "/api/addCamera":
-            cam_id = data.get("id")
-            rtsp = data.get("rtsp")
-            record = bool(data.get("record", True))
-            return self.send_json(add_camera(cam_id, rtsp, record))
+                    devices = json.loads(result.stdout.strip())
+                    print(f"[ONVIF] Found {len(devices)} device(s)")
+                    return self.send_json({"devices": devices})
 
-        # EDIT CAMERA
-        if self.path == "/api/editCamera":
-            cam_id = data.get("id")
-            rtsp = data.get("rtsp")
-            return self.send_json(edit_camera(cam_id, rtsp))
+                except subprocess.TimeoutExpired:
+                    print("[ONVIF] Scanner timed out")
+                    return self.send_json({"devices": []})
+                except json.JSONDecodeError:
+                    print("[ONVIF] Failed to parse scanner output")
+                    return self.send_json({"devices": []})
+                except Exception as e:
+                    print(f"[ONVIF] Error: {e}")
+                    return self.send_json({"devices": []})
 
-        # REMOVE CAMERA
-        if self.path == "/api/removeCamera":
-            cam_id = data.get("id")
-            return self.send_json(remove_camera(cam_id))
+            # ====================== OTHER ENDPOINTS ======================
+            if self.path == "/api/getRtsp":
+                from camera_manager import get_rtsp_url
+                rtsp = get_rtsp_url(
+                    data.get("ip"),
+                    data.get("username", ""),
+                    data.get("password", "")
+                )
+                return self.send_json({"rtsp": rtsp})
 
-        return self.send_json({"status": "ok"})
+            if self.path == "/api/addCamera":
+                from camera_manager import add_camera
+                return self.send_json(add_camera(
+                    data.get("id"),
+                    data.get("rtsp"),
+                    bool(data.get("record", True))
+                ))
+
+            if self.path == "/api/editCamera":
+                from camera_manager import edit_camera
+                return self.send_json(edit_camera(data.get("id"), data.get("rtsp")))
+
+            if self.path == "/api/removeCamera":
+                from camera_manager import remove_camera
+                return self.send_json(remove_camera(data.get("id")))
+
+            return self.send_json({"status": "ok"})
+
+        except Exception as e:
+            import traceback
+            print(f"[HTTP ERROR] {self.path}: {e}")
+            print(traceback.format_exc())
+            return self.send_json({"status": "error", "message": str(e)}, code=500)
 
     def do_GET(self):
         if self.path.startswith("/api/moduleInformation"):
@@ -186,7 +150,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     "id": MODULE_ID,
                     "systemId": SYSTEM_ID,
                     "name": SYSTEM_NAME,
-                    "version": "0.17.x",
+                    "version": "1.0",
                     "status": "online",
                     "httpPort": HTTP_PORT,
                     "httpsPort": HTTPS_PORT
@@ -201,48 +165,37 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                 lines = []
             return self.send_json({"progress": lines})
 
-# ---------------------------------------------------------
-# BROADCAST
-# ---------------------------------------------------------
-def broadcast_discovery():
-    while True:
-        packet = json.dumps({
-            "id": MODULE_ID,
-            "systemId": SYSTEM_ID,
-            "name": SYSTEM_NAME,
-            "port": HTTP_PORT,
-            "type": "frigate",
-            "address": LAN_IP,
-        }).encode("utf-8")
+        return self.send_json({"status": "ok"})
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.sendto(packet, (BROADCAST_IP, DISCOVERY_PORT))
-        time.sleep(2)
 
 # ---------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------
 if __name__ == "__main__":
+    print(f"[*] Starting Frigate Integration Module on {LAN_IP}")
+
     threading.Thread(target=broadcast_discovery, daemon=True).start()
 
+    # HTTP Server
     httpd = http.server.HTTPServer((HOST, HTTP_PORT), VMSHandler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    print(f"[*] HTTP server active on http://0.0.0.0:{HTTP_PORT}")
+    print(f"[*] HTTP server running → http://{LAN_IP}:{HTTP_PORT}")
 
+    # HTTPS Server
     try:
         httpsd = http.server.HTTPServer((HOST, HTTPS_PORT), VMSHandler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(certfile="combined.pem")
         httpsd.socket = context.wrap_socket(httpsd.socket, server_side=True)
         threading.Thread(target=httpsd.serve_forever, daemon=True).start()
-        print(f"[*] HTTPS server active on https://0.0.0.0:{HTTPS_PORT}")
+        print(f"[*] HTTPS server running → https://{LAN_IP}:{HTTPS_PORT}")
     except Exception as e:
-        print(f"[HTTPS] Failed: {e}")
+        print(f"[HTTPS] Failed to start: {e}")
 
-    print("[MAIN] All services started.")
+    print("[MAIN] All services started. Press Ctrl+C to stop.")
+
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("Shutdown.")
+        print("\nShutdown.")

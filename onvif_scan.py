@@ -6,11 +6,11 @@ import sys
 import os
 from requests.auth import HTTPDigestAuth
 from threading import Lock
-import signal
 
-TIMEOUT = 1.15
+TIMEOUT = 1.2
 MAX_WORKERS = 80
 
+# Command line arguments
 if len(sys.argv) < 2:
     print(json.dumps({"error": "No subnet provided"}))
     sys.exit(1)
@@ -52,26 +52,27 @@ def detect_onvif(ip):
             xml = ET.fromstring(r.text)
             log(f"ONVIF → {ip}")
             
-            manufacturer = model = firmware = serial = hardware = "Unknown"
-            for elem in xml.iter():
-                tag = elem.tag.split('}')[-1]
-                if elem.text:
-                    if tag == "Manufacturer": manufacturer = elem.text
-                    elif tag == "Model": model = elem.text
-                    elif tag == "FirmwareVersion": firmware = elem.text
-                    elif tag == "SerialNumber": serial = elem.text
-                    elif tag == "HardwareId": hardware = elem.text
-            
-            return {
+            info = {
                 "address": ip,
                 "protocol": "ONVIF",
-                "manufacturer": manufacturer,
-                "model": model,
-                "firmware": firmware,
-                "serial": serial,
-                "hardware": hardware,
+                "manufacturer": "Unknown",
+                "model": "Unknown",
+                "firmware": "Unknown",
+                "serial": "Unknown",
+                "hardware": "Unknown",
                 "rtsp": []
             }
+
+            for elem in xml.iter():
+                tag = elem.tag.split('}')[-1]
+                if elem.text and elem.text.strip():
+                    if tag == "Manufacturer": info["manufacturer"] = elem.text.strip()
+                    elif tag == "Model": info["model"] = elem.text.strip()
+                    elif tag == "FirmwareVersion": info["firmware"] = elem.text.strip()
+                    elif tag == "SerialNumber": info["serial"] = elem.text.strip()
+                    elif tag == "HardwareId": info["hardware"] = elem.text.strip()
+
+            return info
     except:
         pass
     return None
@@ -88,10 +89,9 @@ def detect_hikvision(ip):
                 "address": ip,
                 "protocol": "Hikvision",
                 "manufacturer": "Hikvision",
-                "model": getattr(xml.find(".//model"), 'text', "Hikvision"),
-                "firmware": getattr(xml.find(".//firmwareVersion"), 'text', "Unknown"),
-                "serial": getattr(xml.find(".//serialNumber"), 'text', "Unknown"),
-                "hardware": "Unknown",
+                "model": (xml.find(".//model") or ET.Element("")).text or "Hikvision",
+                "firmware": (xml.find(".//firmwareVersion") or ET.Element("")).text or "Unknown",
+                "serial": (xml.find(".//serialNumber") or ET.Element("")).text or "Unknown",
                 "rtsp": []
             }
     except:
@@ -113,7 +113,6 @@ def detect_dahua(ip):
                 "model": info.get("deviceType", "Dahua"),
                 "firmware": info.get("softwareVersion", "Unknown"),
                 "serial": info.get("serialNumber", "Unknown"),
-                "hardware": info.get("hardwareVersion", "Unknown"),
                 "rtsp": []
             }
     except:
@@ -129,13 +128,6 @@ def scan_ip(ip):
     return None
 
 
-def shutdown_handler(signum, frame):
-    log("[SCAN] Scan interrupted")
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, shutdown_handler)
-signal.signal(signal.SIGTERM, shutdown_handler)
-
 # ---------------------------------------------------------
 if __name__ == "__main__":
     open(PROGRESS_FILE, "w").close()
@@ -144,12 +136,13 @@ if __name__ == "__main__":
     devices = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(scan_ip, f"{SUBNET}{i}") for i in range(1, 255)]
-        try:
-            for future in concurrent.futures.as_completed(futures):
+        
+        for future in concurrent.futures.as_completed(futures):
+            try:
                 if result := future.result():
                     devices.append(result)
-        except KeyboardInterrupt:
-            log("[SCAN] Scan cancelled by user")
+            except Exception:
+                pass
 
-    log(f"[SCAN] Total cameras found: {len(devices)}")
+    log(f"[SCAN] Total devices found: {len(devices)}")
     print(json.dumps(devices, indent=2))
