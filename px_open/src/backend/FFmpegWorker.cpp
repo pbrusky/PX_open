@@ -4,6 +4,10 @@
 #include <QDebug>
 #include <QDateTime>
 
+extern "C" {
+#include <libavutil/error.h>
+}
+
 FFmpegWorker::FFmpegWorker(QObject* parent)
     : QObject(parent)
 {
@@ -17,6 +21,8 @@ FFmpegWorker::FFmpegWorker(QObject* parent)
 
 FFmpegWorker::~FFmpegWorker()
 {
+    // graceful shutdown
+    m_abort = true;
 }
 
 void FFmpegWorker::setUrl(const QString& url)
@@ -42,13 +48,43 @@ void FFmpegWorker::startDecoding()
 
 void FFmpegWorker::stopDecoding()
 {
+    // graceful shutdown trigger
     m_abort = true;
+}
+
+void FFmpegWorker::updateStats(AVFormatContext* fmtCtx,
+                               AVCodecContext* codecCtx,
+                               AVStream* videoStream)
+{
+    m_resolution = QString::number(codecCtx->width) + "x" +
+                   QString::number(codecCtx->height);
+
+    if (videoStream &&
+        videoStream->avg_frame_rate.num > 0 &&
+        videoStream->avg_frame_rate.den > 0)
+    {
+        m_fps = double(videoStream->avg_frame_rate.num) /
+                double(videoStream->avg_frame_rate.den);
+    } else {
+        m_fps = 0.0;
+    }
+
+    int64_t br = codecCtx->bit_rate;
+    if (br <= 0 && fmtCtx && fmtCtx->bit_rate > 0)
+        br = fmtCtx->bit_rate;
+
+    m_bitrateKbps = br > 0 ? int(br / 1000) : 0;
+
+    if (codecCtx && codecCtx->codec && codecCtx->codec->name)
+        m_codec = QString::fromUtf8(codecCtx->codec->name);
+    else
+        m_codec.clear();
+
+    emit statsChanged();
 }
 
 void FFmpegWorker::decodeLoop()
 {
-    qDebug() << "FFmpegWorker: starting, url =" << m_url;
-
     AVFormatContext* fmtCtx = nullptr;
     AVCodecContext* codecCtx = nullptr;
     SwsContext* sws = nullptr;
@@ -57,17 +93,19 @@ void FFmpegWorker::decodeLoop()
 
     AVDictionary* opts = nullptr;
     av_dict_set(&opts, "rtsp_transport", "tcp", 0);
-    av_dict_set(&opts, "stimeout", "5000000", 0);
 
     int ret = avformat_open_input(&fmtCtx, m_url.toUtf8().constData(), nullptr, &opts);
     av_dict_free(&opts);
 
     if (ret < 0) {
-        emit openInputFailed("Failed to open RTSP input");
+        char errbuf[256];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        emit openInputFailed(QString("Failed to open RTSP input: %1").arg(errbuf));
         emit finished();
         return;
     }
 
+    fmtCtx->flags |= AVFMT_FLAG_GENPTS;
     emit openInputOk();
 
     if (m_testMode) {
@@ -78,7 +116,9 @@ void FFmpegWorker::decodeLoop()
 
     ret = avformat_find_stream_info(fmtCtx, nullptr);
     if (ret < 0) {
-        emit openInputFailed("Failed to find stream info");
+        char errbuf[256];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        emit openInputFailed(QString("Failed to find stream info: %1").arg(errbuf));
         avformat_close_input(&fmtCtx);
         emit finished();
         return;
@@ -87,7 +127,7 @@ void FFmpegWorker::decodeLoop()
     int videoStreamIndex = -1;
     for (unsigned i = 0; i < fmtCtx->nb_streams; ++i) {
         if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            videoStreamIndex = i;
+            videoStreamIndex = int(i);
             break;
         }
     }
@@ -105,14 +145,21 @@ void FFmpegWorker::decodeLoop()
     codecCtx = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(codecCtx, videoStream->codecpar);
 
+    codecCtx->flags |= AV_CODEC_FLAG_LOW_DELAY;
+    codecCtx->skip_frame = AVDISCARD_NONREF;
+
     ret = avcodec_open2(codecCtx, codec, nullptr);
     if (ret < 0) {
-        emit openInputFailed("Failed to open codec");
+        char errbuf[256];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        emit openInputFailed(QString("Failed to open codec: %1").arg(errbuf));
         avcodec_free_context(&codecCtx);
         avformat_close_input(&fmtCtx);
         emit finished();
         return;
     }
+
+    updateStats(fmtCtx, codecCtx, videoStream);
 
     frame = av_frame_alloc();
     outFrame = av_frame_alloc();
@@ -128,6 +175,8 @@ void FFmpegWorker::decodeLoop()
                          SWS_BILINEAR, nullptr, nullptr, nullptr);
 
     emit streamStarted();
+
+    qint64 lastStatsMs = QDateTime::currentMSecsSinceEpoch();
 
     while (!m_abort) {
 
@@ -157,6 +206,12 @@ void FFmpegWorker::decodeLoop()
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;
 
+            qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+            if (nowMs - lastStatsMs > 1000) {
+                lastStatsMs = nowMs;
+                updateStats(fmtCtx, codecCtx, videoStream);
+            }
+
             sws_scale(sws,
                       frame->data,
                       frame->linesize,
@@ -165,7 +220,6 @@ void FFmpegWorker::decodeLoop()
                       outFrame->data,
                       outFrame->linesize);
 
-            // Convert NV12 → QImage (BGRA)
             QImage img(codecCtx->width, codecCtx->height, QImage::Format_RGB32);
 
             SwsContext* rgbSws = sws_getContext(
@@ -187,12 +241,12 @@ void FFmpegWorker::decodeLoop()
 
             sws_freeContext(rgbSws);
 
-            if (m_queue) {
+            if (m_queue)
                 m_queue->pushImage(img);
-            }
         }
     }
 
+    // graceful shutdown cleanup
     if (sws) sws_freeContext(sws);
     if (frame) av_frame_free(&frame);
     if (outFrame) av_frame_free(&outFrame);

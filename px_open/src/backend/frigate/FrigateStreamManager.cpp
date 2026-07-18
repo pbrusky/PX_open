@@ -2,8 +2,8 @@
 #include "FrameQueue.h"
 #include "FFmpegWorker.h"
 
-#include <QDebug>
 #include <QThread>
+#include <QVariant>
 
 FrigateStreamManager::FrigateStreamManager(QObject* parent)
     : QObject(parent)
@@ -12,7 +12,7 @@ FrigateStreamManager::FrigateStreamManager(QObject* parent)
 
 FrigateStreamManager::~FrigateStreamManager()
 {
-    stopAllStreams();
+    stopAllStreams();   // graceful shutdown
 }
 
 void FrigateStreamManager::setServer(const QString& server)
@@ -32,44 +32,38 @@ static QString buildRtspUrl(const QString& serverIp, const QString& cameraName)
 
 QObject* FrigateStreamManager::getQueue(const QString& cameraName)
 {
-    if (cameraName.trimmed().isEmpty()) {
-        qWarning() << "[StreamManager] getQueue(): invalid cameraName";
+    if (cameraName.trimmed().isEmpty())
         return nullptr;
-    }
 
-    // Reuse existing queue
+    if (m_serverIp.trimmed().isEmpty())
+        return nullptr;
+
     if (m_queues.contains(cameraName))
         return m_queues[cameraName];
 
-    // Create queue
     FrameQueue* queue = new FrameQueue(this);
     m_queues.insert(cameraName, queue);
 
-    // Build RTSP URL
     const QString url = buildRtspUrl(m_serverIp, cameraName);
 
-    // Create worker
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
-    worker->setFrameQueue(queue);   // ⭐ NEW: connect worker → queue
+    worker->setFrameQueue(queue);
+    worker->setProperty("isProbe", false);
+
     m_workers.insert(cameraName, worker);
 
-    // Online/offline detection
     connect(worker, &FFmpegWorker::openInputOk,
             this, [this, cameraName]() {
         emit cameraOnline(cameraName);
     }, Qt::QueuedConnection);
 
     connect(worker, &FFmpegWorker::openInputFailed,
-            this, [this, cameraName](const QString& reason) {
-        qDebug() << "[StreamManager] Camera offline:" << cameraName << "reason:" << reason;
+            this, [this, cameraName](const QString&) {
         emit cameraOffline(cameraName);
+        stopStream(cameraName);
     }, Qt::QueuedConnection);
 
-    // ⭐ REMOVED: old frameReady(img) connection
-    // (worker no longer emits frameReady(img))
-
-    // Thread
     QThread* thread = new QThread(this);
     m_threads.insert(cameraName, thread);
 
@@ -93,32 +87,27 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
 
 QObject* FrigateStreamManager::getPlaybackQueue(const QString& cameraName)
 {
-    if (cameraName.trimmed().isEmpty()) {
-        qWarning() << "[StreamManager] getPlaybackQueue(): invalid cameraName";
+    if (cameraName.trimmed().isEmpty())
         return nullptr;
-    }
 
-    // Reuse existing queue
+    if (m_server.trimmed().isEmpty())
+        return nullptr;
+
     if (m_playbackQueues.contains(cameraName))
         return m_playbackQueues[cameraName];
 
-    // Create queue
     FrameQueue* queue = new FrameQueue(this);
     m_playbackQueues.insert(cameraName, queue);
 
-    // Build playback URL
-    const QString url = QString("%1/api/playback/%2")
-                            .arg(m_server, cameraName);
+    const QString url = QString("%1/api/playback/%2").arg(m_server, cameraName);
 
-    // Worker
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
-    worker->setFrameQueue(queue);   // ⭐ NEW: connect worker → queue
+    worker->setFrameQueue(queue);
+    worker->setProperty("isProbe", false);
+
     m_playbackWorkers.insert(cameraName, worker);
 
-    // ⭐ REMOVED: old frameReady(img) connection
-
-    // Thread
     QThread* thread = new QThread(this);
     m_playbackThreads.insert(cameraName, thread);
 
@@ -142,18 +131,16 @@ QObject* FrigateStreamManager::getPlaybackQueue(const QString& cameraName)
 
 void FrigateStreamManager::stopStream(const QString& cameraName)
 {
-    qDebug() << "[StreamManager] stopStream(): stopping" << cameraName;
-
     if (m_workers.contains(cameraName)) {
         FFmpegWorker* worker = m_workers.value(cameraName);
         QThread* thread = m_threads.value(cameraName);
 
         if (worker)
-            worker->stopDecoding();
+            worker->stopDecoding();   // graceful stop
 
         if (thread) {
             thread->quit();
-            thread->wait();
+            thread->wait();           // wait for FFmpegWorker::finished()
         }
 
         m_workers.remove(cameraName);
@@ -182,16 +169,17 @@ void FrigateStreamManager::stopStream(const QString& cameraName)
 
 void FrigateStreamManager::stopAllStreams()
 {
-    qDebug() << "[StreamManager] stopAllStreams(): stopping all";
-
+    // graceful shutdown of all workers
     for (auto w : m_workers)
-        if (w) w->stopDecoding();
+        if (w && !w->property("isProbe").toBool())
+            w->stopDecoding();
 
     for (auto t : m_threads)
         if (t) { t->quit(); t->wait(); }
 
     for (auto w : m_playbackWorkers)
-        if (w) w->stopDecoding();
+        if (w && !w->property("isProbe").toBool())
+            w->stopDecoding();
 
     for (auto t : m_playbackThreads)
         if (t) { t->quit(); t->wait(); }
@@ -208,4 +196,20 @@ void FrigateStreamManager::restartStream(const QString& cameraName)
 {
     stopStream(cameraName);
     getQueue(cameraName);
+}
+
+QObject* FrigateStreamManager::getWorker(const QString& cameraName)
+{
+    if (!m_workers.contains(cameraName))
+        return nullptr;
+
+    return m_workers.value(cameraName);
+}
+
+QObject* FrigateStreamManager::getPlaybackWorker(const QString& cameraName)
+{
+    if (!m_playbackWorkers.contains(cameraName))
+        return nullptr;
+
+    return m_playbackWorkers.value(cameraName);
 }

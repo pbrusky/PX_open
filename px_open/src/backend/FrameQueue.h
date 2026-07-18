@@ -13,7 +13,7 @@ public:
     explicit FrameQueue(QObject* parent = nullptr);
     ~FrameQueue() override;
 
-    Q_INVOKABLE void pushImage(const QImage& img);
+    void pushImage(const QImage& img);
     Q_INVOKABLE QImage popImage();
     void clear();
 

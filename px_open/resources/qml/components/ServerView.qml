@@ -18,26 +18,46 @@ Item {
     signal gridReady()
 
     //
-    // Popups
+    // Add Camera Popup (delayed creation)
     //
-    AddCameraPopup {
-        id: addCameraPopup
-        frigateRef: root.frigateRef   // ⭐ REQUIRED
+    Loader {
+        id: addCameraPopupLoader
+        active: root.frigateRef !== undefined
+        source: "qrc:/app/resources/qml/components/AddCameraPopup.qml"
+
+        onLoaded: {
+            item.frigateRef = root.frigateRef
+        }
     }
 
-    RemoveCameraPopup {
-        id: removeCameraPopup
-        frigateRef: root.frigateRef   // ⭐ REQUIRED
+    function openAddCameraPopup() {
+        if (addCameraPopupLoader.item)
+            addCameraPopupLoader.item.open()
+    }
 
-        onCameraRemoved: {
-            if (root.cameraGrid && root.cameraGrid.removeCamera)
-                root.cameraGrid.removeCamera(removeCameraPopup.cameraId)
+    //
+    // Remove Camera Popup (delayed creation)
+    //
+    Loader {
+        id: removeCameraPopupLoader
+        active: root.frigateRef !== undefined
+        source: "qrc:/app/resources/qml/components/RemoveCameraPopup.qml"
+
+        onLoaded: {
+            item.frigateRef = root.frigateRef
+
+            item.cameraRemoved.connect(function(cameraId) {
+                if (root.cameraGrid && root.cameraGrid.removeCamera)
+                    root.cameraGrid.removeCamera(cameraId)
+            })
         }
     }
 
     function openRemoveCameraPopup(cameraId) {
-        removeCameraPopup.cameraId = cameraId
-        removeCameraPopup.open()
+        if (removeCameraPopupLoader.item) {
+            removeCameraPopupLoader.item.cameraId = cameraId
+            removeCameraPopupLoader.item.open()
+        }
     }
 
     //
@@ -64,14 +84,8 @@ Item {
             return
         }
 
-        console.log("ServerView: initializeGrid() — mainWindow is now valid")
-
         gridLoader.sourceComponent = gridComponent
         gridLoader.active = true
-    }
-
-    function openAddCameraPopup() {
-        addCameraPopup.open()
     }
 
     //
@@ -88,7 +102,7 @@ Item {
             cameraList: root.mainWindow.cameraList
             serverViewRoot: root
 
-            frigateRef: root.frigateRef   // ⭐ REQUIRED
+            frigateRef: root.frigateRef
 
             //
             // Timeline dock
@@ -104,7 +118,7 @@ Item {
                 cameraId: root.mainWindow.selectedCameraId
                 cameraName: root.mainWindow.selectedCameraId
 
-                frigateRef: root.frigateRef   // ⭐ REQUIRED
+                frigateRef: root.frigateRef
 
                 recordings: root.frigateRef
                             ? root.frigateRef.getRecordingsForCamera(root.mainWindow.selectedCameraId)

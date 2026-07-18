@@ -5,6 +5,8 @@
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QProcess>
+#include <QRegularExpression>
 #include <QDebug>
 
 FrigateCameraManager::FrigateCameraManager(QObject* parent)
@@ -65,30 +67,116 @@ void FrigateCameraManager::loadCameras()
                 QString id = it.key();
                 QJsonObject camObj = it.value().toObject();
 
+                //
+                // Base entry used by QML (CameraTile / Sidebar)
+                //
                 QVariantMap entry;
-                entry["id"] = id;
-                entry["name"] = id;
+                entry["id"]        = id;
+                entry["name"]      = id;
                 entry["streamUrl"] = QString("rtsp://%1:8554/%2")
                                         .arg(m_serverIp, id);
 
-                // Metadata extraction
-                QVariantMap meta;
-                meta["resolution"] = camObj.value("resolution").toString();
-                meta["fps"]        = camObj.value("fps").toDouble();
-                meta["codec"]      = camObj.value("codec").toString();
-                meta["bitrate"]    = camObj.value("bitrate").toInt();
-                meta["streamType"] = camObj.value("streamType").toString();
-
-                m_cameraMetadata[id] = meta;
+                //
+                // Default metadata (will be replaced by FFmpeg probe)
+                //
+                entry["resolution"]  = "";
+                entry["fps"]         = 0;
+                entry["codec"]       = "";
+                entry["bitrateKbps"] = 0;
+                entry["streamType"]  = "rtsp";
 
                 m_cameraList.append(entry);
 
+                //
                 // Mark camera online by default
+                //
                 m_cameraOnline[id] = true;
                 emit cameraOnline(id);
+
+                //
+                // ⭐ FFmpeg PROBE — extract real metadata
+                //
+                QString rtspUrl = entry["streamUrl"].toString();
+
+                QProcess* ff = new QProcess(this);
+
+                QStringList args;
+                args << "-hide_banner"
+                     << "-rtsp_transport" << "tcp"
+                     << "-i" << rtspUrl
+                     << "-t" << "1"
+                     << "-f" << "null"
+                     << "-";
+
+                //
+                // Parse FFmpeg stderr output
+                //
+                connect(ff, &QProcess::readyReadStandardError, this, [this, ff, id]() {
+                    QString output = ff->readAllStandardError();
+
+                    // Resolution
+                    QRegularExpression reRes("(\\d{3,4})x(\\d{3,4})");
+                    auto resMatch = reRes.match(output);
+                    QString resolution = resMatch.hasMatch() ? resMatch.captured(0) : "";
+
+                    // FPS
+                    QRegularExpression reFps("(\\d+(?:\\.\\d+)?)\\s?fps");
+                    auto fpsMatch = reFps.match(output);
+                    double fps = fpsMatch.hasMatch() ? fpsMatch.captured(1).toDouble() : 0;
+
+                    // Codec
+                    QRegularExpression reCodec("Video:\\s*(\\w+)");
+                    auto codecMatch = reCodec.match(output);
+                    QString codec = codecMatch.hasMatch() ? codecMatch.captured(1) : "";
+
+                    // Bitrate
+                    QRegularExpression reBitrate("(\\d+)\\s?kb/s");
+                    auto brMatch = reBitrate.match(output);
+                    int bitrate = brMatch.hasMatch() ? brMatch.captured(1).toInt() : 0;
+
+                    //
+                    // Store metadata
+                    //
+                    QVariantMap meta;
+                    meta["resolution"]  = resolution;
+                    meta["fps"]         = fps;
+                    meta["codec"]       = codec;
+                    meta["bitrateKbps"] = bitrate;
+                    meta["streamType"]  = "rtsp";
+
+                    m_cameraMetadata[id] = meta;
+                });
+
+                //
+                // Merge metadata into cameraList entry
+                //
+                connect(ff, &QProcess::finished, this, [this, ff, id](int, QProcess::ExitStatus) {
+                    ff->deleteLater();
+
+                    for (int i = 0; i < m_cameraList.size(); ++i) {
+                        QVariantMap cam = m_cameraList[i].toMap();
+                        if (cam["id"].toString() == id) {
+                            QVariantMap meta = m_cameraMetadata[id];
+                            for (auto it = meta.begin(); it != meta.end(); ++it)
+                                cam[it.key()] = it.value();
+                            m_cameraList[i] = cam;
+                            break;
+                        }
+                    }
+
+                    //
+                    // Emit updated list so QML refreshes the i-popup
+                    //
+                    emit camerasLoaded(m_cameraList);
+                });
+
+                ff->start("ffmpeg", args);
             }
         }
 
+        //
+        // Initial emit (before FFmpeg probes complete)
+        //
         emit camerasLoaded(m_cameraList);
     });
 }
@@ -108,8 +196,8 @@ void FrigateCameraManager::addCamera(const QString& id, const QString& url, bool
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QJsonObject obj;
-    obj["id"] = id;
-    obj["rtsp"] = url;
+    obj["id"]    = id;
+    obj["rtsp"]  = url;
     obj["record"] = record;
 
     QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
@@ -119,7 +207,7 @@ void FrigateCameraManager::addCamera(const QString& id, const QString& url, bool
         reply->deleteLater();
 
         QJsonDocument doc = QJsonDocument::fromJson(data);
-        QJsonObject root = doc.object();
+        QJsonObject root  = doc.object();
 
         bool ok = root.value("status").toString() == "ok";
         emit cameraAddResult(ok, ok ? "Camera added" : "Failed to add camera");
@@ -144,7 +232,7 @@ void FrigateCameraManager::editCamera(const QString& id, const QString& url)
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QJsonObject obj;
-    obj["id"] = id;
+    obj["id"]   = id;
     obj["rtsp"] = url;
 
     QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
@@ -226,7 +314,6 @@ QVariantMap FrigateCameraManager::getCameraMetadata(const QString& id) const
 void FrigateCameraManager::loadModuleInformation()
 {
     if (m_moduleServer.isEmpty()) {
-        // ⭐ FIXED: 5 arguments, not 6
         emit moduleInformationReceived("unknown", "unknown", "error", "", "");
         return;
     }
@@ -241,7 +328,7 @@ void FrigateCameraManager::loadModuleInformation()
         reply->deleteLater();
 
         QJsonDocument doc = QJsonDocument::fromJson(data);
-        QJsonObject root = doc.object();
+        QJsonObject root  = doc.object();
 
         emit moduleInformationReceived(
             root.value("name").toString(),

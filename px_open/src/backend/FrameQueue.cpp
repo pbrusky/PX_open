@@ -15,9 +15,6 @@ void FrameQueue::pushImage(const QImage& img)
 {
     QMutexLocker locker(&m_mutex);
 
-    if (img.isNull())
-        return;
-
     if (m_queue.size() >= m_maxSize)
         m_queue.dequeue();
 

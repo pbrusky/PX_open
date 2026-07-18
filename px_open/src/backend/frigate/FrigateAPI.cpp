@@ -192,6 +192,14 @@ void FrigateAPI::stopAllStreams()
 }
 
 //
+// ⭐ NEW — expose FFmpegWorker to QML
+//
+QObject* FrigateAPI::getWorker(const QString& cameraName)
+{
+    return m_streamManager->getWorker(cameraName);
+}
+
+//
 // TIMELINE API
 //
 void FrigateAPI::loadRecordings(const QString& cameraId)
@@ -267,7 +275,6 @@ void FrigateAPI::testRtsp(const QString& url)
         QByteArray err = ff->readAllStandardError();
         QString errorText = QString(err);
 
-        // Extract a short, meaningful error
         QString shortError;
 
         if (errorText.contains("401") || errorText.contains("Unauthorized"))

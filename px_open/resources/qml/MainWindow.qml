@@ -14,6 +14,11 @@ ApplicationWindow {
 
     flags: Qt.FramelessWindowHint
 
+    //
+    // REAL backend from main.cpp
+    //
+    property var frigateRef: frigate
+
     property var cameraList: []
     property string selectedCameraId: ""
     property string serverName: ""
@@ -22,13 +27,6 @@ ApplicationWindow {
     signal cameraOnline(string name)
     signal cameraOffline(string name)
     signal camerasLoaded(var list)
-
-    //
-    // Backend instance
-    //
-    FrigateAPI {
-        id: frigateRef
-    }
 
     Loader {
         id: fullscreenLoader
@@ -121,9 +119,9 @@ ApplicationWindow {
         objectName: "Sidebar"
 
         //
-        // ⭐ FIX: pass backend into Sidebar
+        // FIX: one-way binding, no loop
         //
-        frigateRef: frigateRef
+        frigateRef: mainWindow.frigateRef
 
         width: 260
         height: mainWindow.height - topbar.height

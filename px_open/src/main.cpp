@@ -16,7 +16,7 @@
 
 #include "DiscoveryListener.h"
 #include "CameraVideoItem.h"
-#include "FrameItem.h"        // ⭐ REQUIRED for qmlRegisterType<FrameItem>()
+#include "FrameItem.h"
 
 int main(int argc, char *argv[])
 {
@@ -28,7 +28,7 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
 
     //
-    // Register all backend types for QML
+    // Register backend types
     //
     qmlRegisterType<FrigateAPI>("PxOpen", 1, 0, "FrigateAPI");
     qmlRegisterType<FrigateCameraManager>("PxOpen", 1, 0, "FrigateCameraManager");
@@ -38,22 +38,28 @@ int main(int argc, char *argv[])
     qmlRegisterType<FrigateOnvif>("PxOpen", 1, 0, "FrigateOnvif");
 
     qmlRegisterType<CameraVideoItem>("PxOpen", 1, 0, "CameraVideoItem");
-    qmlRegisterType<FrameItem>("PxOpen", 1, 0, "FrameItem");   // ⭐ Now valid
+    qmlRegisterType<FrameItem>("PxOpen", 1, 0, "FrameItem");
 
     //
     // Create backend singletons
     //
     FrigateAPI* frigateApi = new FrigateAPI(&engine);
     DiscoveryListener* discovery = new DiscoveryListener(&engine);
+    FrigateStreamManager* frigateStream = new FrigateStreamManager(&engine);
 
     //
-    // Expose to QML as global singletons
+    // Expose to QML
     //
     engine.rootContext()->setContextProperty("frigate", frigateApi);
     engine.rootContext()->setContextProperty("discovery", discovery);
+    engine.rootContext()->setContextProperty("frigateStream", frigateStream);
 
-    QObject::connect(&app, &QCoreApplication::aboutToQuit,
-                     frigateApi, &FrigateAPI::stopAllStreams);
+    //
+    // Graceful shutdown: stop all FFmpeg workers BEFORE QML engine dies
+    //
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, [&]() {
+        frigateStream->stopAllStreams();
+    });
 
     engine.load(QUrl("qrc:/app/resources/qml/MainWindow.qml"));
 

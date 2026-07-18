@@ -89,6 +89,28 @@ Item {
         updateGridSize()
     }
 
+    // NEW: tile-based removal, UI-only + stop single stream
+    function removeTile(index) {
+        if (index < 0 || index >= cameraNames.length)
+            return
+
+        var name = cameraNames[index]
+
+        // stop ONLY this camera’s stream
+        if (frigateRef && frigateRef.stopStream) {
+            try {
+                frigateRef.stopStream(name)
+            } catch (e) {
+                console.log("CameraGrid: error calling stopStream:", e)
+            }
+        }
+
+        // remove from grid
+        cameraNames.splice(index, 1)
+        updateGridSize()
+    }
+
+    // OLD path that touched Frigate – keep but no longer used by tiles
     function requestRemoveCamera(cameraName) {
         if (gridContainer.frigateRef && gridContainer.frigateRef.removeCamera) {
             try {
@@ -192,10 +214,12 @@ Item {
                     gridRoot: gridContainer
                     frigateRef: gridContainer.frigateRef
                     mainWindow: gridContainer.mainWindow
-                    tileIndex: index
 
+                    tileIndex: index   // REQUIRED
+
+                    // NEW: use removeTile(index) instead of requestRemoveCamera()
                     onRemoveRequested: {
-                        gridContainer.requestRemoveCamera(tileWrapper.cameraName)
+                        gridContainer.removeTile(tileIndex)
                     }
                 }
             }
@@ -225,7 +249,6 @@ Item {
                             ? gridContainer.frigateRef.isCameraOnline(item.cameraName)
                             : false
 
-            // reuse queues from grid/tile
             item.liveQueue = gridContainer.fullscreenLiveQueue
             item.playbackQueue = gridContainer.fullscreenPlaybackQueue
 

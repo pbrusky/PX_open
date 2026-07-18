@@ -20,8 +20,7 @@ Popup {
         popup.focus = false
     }
 
-    // Backend reference (must be set from ServerView: frigateRef: frigate)
-    property var frigateRef: frigate
+    property var frigateRef
 
     property string cameraId: ""
     property string streamUrl: ""
@@ -168,7 +167,12 @@ Popup {
                     rtspStatus.text = "Testing: " + url
                     rtspStatus.color = "yellow"
 
-                    frigateRef.testRtsp(url)
+                    if (frigateRef)
+                        frigateRef.testRtsp(url)
+                    else {
+                        rtspStatus.text = "Backend not ready yet"
+                        rtspStatus.color = "red"
+                    }
                 }
             }
         }
@@ -196,7 +200,8 @@ Popup {
                     }
 
                     let url = getFinalRtspUrl()
-                    frigateRef.addCamera(popup.cameraId, url, enableRecording)
+                    if (frigateRef)
+                        frigateRef.addCamera(popup.cameraId, url, enableRecording)
                     popup.close()
                 }
             }
@@ -209,7 +214,7 @@ Popup {
         }
 
         Connections {
-            target: frigateRef
+            target: popup.frigateRef ? popup.frigateRef : null
 
             function onRtspTestResult(ok, message) {
                 if (ok) {

@@ -1,10 +1,15 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import PxOpen 1.0
+import "qrc:/app/resources/qml/components"
 
 Item {
     id: tile
     z: 5
+
+    property bool dragging: false
+    property int dragIndex: -1
+    property int tileIndex: -1
 
     property var mainWindow
     property var gridRoot
@@ -13,12 +18,10 @@ Item {
     property string cameraName: ""
     property bool isOnline: frigateRef ? frigateRef.isCameraOnline(cameraName) : false
 
-    property bool selected: false
-    property bool isHovered: false
-    property bool dragging: false
-    property int dragIndex: -1
-    property int tileIndex: -1
+    // ❌ no direct worker reference
+    // property var worker: frigateRef ? frigateRef.getWorker(cameraName) : null
 
+    // simple metadata placeholders (can be filled from backend later)
     property string resolution: ""
     property real fps: 0
     property int bitrateKbps: 0
@@ -36,51 +39,43 @@ Item {
         return mainWindow.cameraList.find(c => c.name === cameraName)
     }
 
-    onCameraNameChanged: {
-        if (!cameraName || cameraName === "") {
-            frameQueue = null
-            currentFrame = null
-            return
-        }
+    function handleRemove() {
+        if (gridRoot && gridRoot.removeTile)
+            gridRoot.removeTile(tileIndex)
 
-        let cam = cameraObject()
-        if (!cam) {
-            frameQueue = null
-            currentFrame = null
-            return
-        }
-
-        resolution    = cam.resolution    || ""
-        fps           = cam.fps           || 0
-        bitrateKbps   = cam.bitrateKbps   || 0
-        codec         = cam.codec         || ""
-        streamType    = cam.streamType    || ""
-
-        if (!frigateRef) {
-            frameQueue = null
-            currentFrame = null
-            return
-        }
-
-        frameQueue = frigateRef.getQueue(cameraName)
-        if (frameQueue)
-            console.log("CameraTile: using FrameQueue for", cameraName)
-        else
-            console.log("CameraTile: no FrameQueue for", cameraName)
+        if (frigateRef)
+            frigateRef.stopStream(cameraName)
     }
+
+    onCameraNameChanged: {
+        if (!cameraName) {
+            frameQueue = null
+            currentFrame = null
+            return
+        }
+
+        frameQueue = frigateRef ? frigateRef.getQueue(cameraName) : null
+        // worker     = frigateRef ? frigateRef.getWorker(cameraName) : null
+    }
+
+    // ❌ remove Connections to worker (cross-thread)
+    // Connections {
+    //     target: worker
+    //     ignoreUnknownSignals: true
+    //
+    //     function onStatsChanged() {
+    //         // bindings auto-update
+    //     }
+    // }
 
     Connections {
         target: frameQueue
         ignoreUnknownSignals: true
 
         function onFrameReady() {
-            if (!frameQueue)
-                return
-
             var img = frameQueue.popImage()
             if (!img)
                 return
-
             currentFrame = img
             videoFrame.frame = img
         }
@@ -109,71 +104,56 @@ Item {
         Column {
             anchors.centerIn: parent
             spacing: 6
-
             Text { text: "Camera Offline"; color: "white"; font.pixelSize: 18 }
             Text { text: cameraName; color: "#CCCCCC"; font.pixelSize: 14 }
         }
     }
 
-    Rectangle {
-        id: nameTag
-        width: parent.width
-        height: 24
-        anchors.bottom: parent.bottom
-        color: "#00000088"
-        z: 20
+    CameraTileOverlay {
+        id: overlay
+        anchors.fill: parent
+        z: 100
         visible: cameraName !== ""
 
-        Text {
+        cameraName: tile.cameraName
+        resolution: tile.resolution
+        fps: tile.fps
+        bitrateKbps: tile.bitrateKbps
+        codec: tile.codec
+
+        onInfoRequested: infoPopup.open()
+        onRemoveRequested: tile.handleRemove()
+    }
+
+    Popup {
+        id: infoPopup
+        modal: true
+        focus: true
+        width: 260
+        height: 180
+        background: Rectangle { color: "#222"; radius: 8 }
+
+        Column {
             anchors.centerIn: parent
-            text: cameraName
-            color: "white"
-            font.pixelSize: 14
+            spacing: 6
+            Text { text: cameraName; color: "white"; font.pixelSize: 18 }
+            Text { text: "Resolution: " + resolution; color: "white" }
+            Text { text: "Codec: " + codec; color: "white" }
+            Text { text: "FPS: " + fps; color: "white" }
+            Text { text: "Bitrate: " + bitrateKbps + " kbps"; color: "white" }
         }
     }
 
-    Rectangle {
-        id: statusDot
-        width: 10
-        height: 10
-        radius: 5
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.margins: 6
-
-        visible: cameraName !== ""
-        color: isOnline ? "#4CAF50" : "#D32F2F"
-        z: 20
-    }
-
     MouseArea {
-        id: interactionArea
         anchors.fill: parent
-        z: 100
+        z: 50
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        drag.target: tile
-        drag.axis: Drag.XAndYAxis
-
-        onEntered: tile.isHovered = true
-        onExited: tile.isHovered = false
+        propagateComposedEvents: true
 
         onDoubleClicked: {
             if (gridRoot && gridRoot.enterFullscreen && cameraName !== "")
                 gridRoot.enterFullscreen(cameraName, frameQueue)
-        }
-
-        onPressed: {
-            tile.dragging = true
-            tile.dragIndex = tile.tileIndex
-        }
-
-        onReleased: {
-            tile.dragging = false
-            if (gridRoot && gridRoot.reorderTiles)
-                gridRoot.reorderTiles(tile.dragIndex, tile.x, tile.y)
-            tile.x = 0
-            tile.y = 0
         }
 
         onClicked: function(mouse) {
@@ -198,7 +178,7 @@ Item {
         MenuItem {
             text: "Remove Camera"
             enabled: cameraName !== ""
-            onTriggered: removeRequested()
+            onTriggered: tile.handleRemove()
         }
     }
 }
