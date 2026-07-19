@@ -8,7 +8,6 @@ Item {
     clip: true
     z: 1
 
-    // Provided by ServerView
     property var mainWindow
     property var frigateRef: null
     property var cameraList: []
@@ -18,7 +17,10 @@ Item {
     property int cols: 0
     property int rows: 0
 
-    // Fullscreen state
+    // hover target for drag logic
+    property int hoverIndex: -1
+    property string hoverCameraName: ""
+
     property var fullscreenCamera: null
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
@@ -96,20 +98,42 @@ Item {
         }
     }
 
-    function reorderTiles(oldIndex, x, y) {
+    // compute hover cell from global coords
+    function updateHoverIndex(x, y, cameraName) {
+        if (cols <= 0 || rows <= 0)
+            return
+
+        let cellW = grid.width / cols
+        let cellH = grid.height / rows
+
+        let col = Math.floor(x / cellW)
+        let row = Math.floor(y / cellH)
+        let idx = row * cols + col
+
+        if (idx < 0 || idx >= cameraNames.length) {
+            hoverIndex = -1
+            hoverCameraName = ""
+        } else {
+            hoverIndex = idx
+            hoverCameraName = cameraName
+        }
+    }
+
+    // swap tiles based on hoverIndex
+    function reorderTilesByTileCenter(oldIndex, tile) {
+        if (hoverIndex < 0 || hoverIndex >= cameraNames.length)
+            return
         if (oldIndex < 0 || oldIndex >= cameraNames.length)
             return
-
-        let col = Math.floor(x / (grid.width / cols))
-        let row = Math.floor(y / (grid.height / rows))
-        let newIndex = row * cols + col
-
-        if (newIndex < 0 || newIndex >= cameraNames.length)
+        if (hoverIndex === oldIndex)
             return
 
-        let name = cameraNames[oldIndex]
-        cameraNames.splice(oldIndex, 1)
-        cameraNames.splice(newIndex, 0, name)
+        let tmp = cameraNames[oldIndex]
+        cameraNames[oldIndex] = cameraNames[hoverIndex]
+        cameraNames[hoverIndex] = tmp
+
+        hoverIndex = -1
+        hoverCameraName = ""
     }
 
     function enterFullscreen(cameraName, liveQueue) {
@@ -150,7 +174,6 @@ Item {
             Item {
                 id: tileWrapper
 
-                // keep tiles in a stable 16:9 shape so video size feels consistent
                 property real cellWidth: gridContainer.cols > 0
                                          ? grid.width / gridContainer.cols - grid.columnSpacing
                                          : 0
@@ -158,7 +181,6 @@ Item {
                                           ? grid.height / gridContainer.rows - grid.rowSpacing
                                           : 0
 
-                // target 16:9 tile, limited by available cell size
                 property real targetWidth: cellWidth
                 property real targetHeight: targetWidth * 9 / 16
 
@@ -177,7 +199,10 @@ Item {
 
                 CameraTile {
                     id: tile
-                    anchors.centerIn: parent
+
+                    x: (parent.width - width) / 2
+                    y: (parent.height - height) / 2
+
                     width: tileWrapper.width
                     height: tileWrapper.height
                     z: 1

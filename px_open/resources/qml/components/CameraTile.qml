@@ -8,7 +8,6 @@ Item {
     z: 5
 
     property bool dragging: false
-    property int dragIndex: -1
     property int tileIndex: -1
 
     property var mainWindow
@@ -18,7 +17,6 @@ Item {
     property string cameraName: ""
     property bool isOnline: frigateRef ? frigateRef.isCameraOnline(cameraName) : false
 
-    // simple metadata placeholders (can be filled from backend later)
     property string resolution: ""
     property real fps: 0
     property int bitrateKbps: 0
@@ -30,17 +28,8 @@ Item {
 
     signal removeRequested()
 
-    function cameraObject() {
-        if (!mainWindow || !mainWindow.cameraList)
-            return null
-        return mainWindow.cameraList.find(c => c.name === cameraName)
-    }
-
-    // UI-only removal: do not stop the backend stream here
-    function handleRemove() {
-        if (gridRoot && gridRoot.removeTile && tileIndex >= 0)
-            gridRoot.removeTile(tileIndex)
-    }
+    Behavior on x { enabled: !dragging; NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+    Behavior on y { enabled: !dragging; NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
 
     onCameraNameChanged: {
         if (!cameraName) {
@@ -48,7 +37,6 @@ Item {
             currentFrame = null
             return
         }
-
         frameQueue = frigateRef ? frigateRef.getQueue(cameraName) : null
     }
 
@@ -135,6 +123,36 @@ Item {
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         propagateComposedEvents: true
 
+        drag.target: tile
+        drag.axis: Drag.XAndYAxis
+
+        onPressed: {
+            tile.z = 9999
+            dragging = true
+        }
+
+        onPositionChanged: {
+            if (drag.active && gridRoot && gridRoot.updateHoverIndex) {
+                var global = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
+                gridRoot.updateHoverIndex(global.x, global.y, cameraName)
+            }
+        }
+
+        onReleased: {
+            tile.z = 5
+            dragging = false
+
+            if (!gridRoot)
+                return
+
+            // snap back into its wrapper
+            tile.x = (tile.parent.width - tile.width) / 2
+            tile.y = (tile.parent.height - tile.height) / 2
+
+            if (gridRoot.reorderTilesByTileCenter)
+                gridRoot.reorderTilesByTileCenter(tileIndex, tile)
+        }
+
         onDoubleClicked: {
             if (gridRoot && gridRoot.enterFullscreen && cameraName !== "")
                 gridRoot.enterFullscreen(cameraName, frameQueue)
@@ -164,5 +182,9 @@ Item {
             enabled: cameraName !== ""
             onTriggered: tile.handleRemove()
         }
+    }
+
+    function handleRemove() {
+        removeRequested()
     }
 }
