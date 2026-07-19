@@ -193,7 +193,9 @@ Popup {
             addCameraPopupRef.rtspField.text = rtsp
             addCameraPopupRef.streamUrl = rtsp
 
-            addCameraPopupRef.open()
+            // ✅ Do NOT reopen; AddCameraPopup is already open
+            // addCameraPopupRef.open()
+
             popup.close()
         }
 

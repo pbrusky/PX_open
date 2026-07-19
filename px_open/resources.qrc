@@ -33,6 +33,7 @@
         <file>resources/qml/components/RemoveCameraPopup.qml</file>
         <file>resources/qml/components/OnvifDiscoveryPopup.qml</file>
         <file>resources/qml/components/FullscreenToolbar.qml</file>
+        <file>resources/qml/components/RestartPopup.qml</file>
 
         <!-- NEW Timeline Components -->
         <file>resources/qml/components/timeline/index.qml</file>

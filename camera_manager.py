@@ -121,8 +121,6 @@ def restart_frigate():
 
 def restart_go2rtc():
     print("[go2rtc] Restart requested")
-
-    # go2rtc is always Docker in your environment
     return restart_docker(GO2RTC_CONTAINER_NAME)
 
 # ---------------------------------------------------------
@@ -290,14 +288,20 @@ def add_camera(cam_id, rtsp_url, record=True):
     print(f"[camera_manager] add_camera {cam_id}")
 
     if not is_valid_camera_name(cam_id) or not is_valid_rtsp_url(rtsp_url):
-        return {"status": "error"}
+        return {
+            "event": "cameraAddResult",
+            "status": "error",
+            "message": "Invalid camera name or RTSP URL"
+        }
 
     go2_ok = go2rtc_set_stream(cam_id, rtsp_url)
     fr_ok = ensure_camera_in_frigate(cam_id, rtsp_url, record)
     restart_ok = restart_frigate() if fr_ok else False
 
     return {
+        "event": "cameraAddResult",
         "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
+        "message": f"Camera {cam_id} added",
         "go2rtc": go2_ok,
         "frigate_restart": restart_ok
     }
@@ -306,14 +310,20 @@ def edit_camera(cam_id, rtsp_url):
     print(f"[camera_manager] edit_camera {cam_id}")
 
     if not is_valid_camera_name(cam_id) or not is_valid_rtsp_url(rtsp_url):
-        return {"status": "error"}
+        return {
+            "event": "cameraEditResult",
+            "status": "error",
+            "message": "Invalid camera name or RTSP URL"
+        }
 
     go2_ok = go2rtc_set_stream(cam_id, rtsp_url)
     fr_ok = ensure_camera_in_frigate(cam_id, rtsp_url, True)
     restart_ok = restart_frigate() if fr_ok else False
 
     return {
+        "event": "cameraEditResult",
         "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
+        "message": f"Camera {cam_id} edited",
         "go2rtc": go2_ok,
         "frigate_restart": restart_ok
     }
@@ -322,14 +332,20 @@ def remove_camera(cam_id):
     print(f"[camera_manager] remove_camera {cam_id}")
 
     if not is_valid_camera_name(cam_id):
-        return {"status": "error"}
+        return {
+            "event": "cameraRemoveResult",
+            "status": "error",
+            "message": "Invalid camera name"
+        }
 
     go2_ok = go2rtc_remove_stream(cam_id)
     fr_ok = remove_camera_from_frigate(cam_id)
     restart_ok = restart_frigate() if fr_ok else False
 
     return {
+        "event": "cameraRemoveResult",
         "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
+        "message": f"Camera {cam_id} removed",
         "go2rtc": go2_ok,
         "frigate_restart": restart_ok
     }

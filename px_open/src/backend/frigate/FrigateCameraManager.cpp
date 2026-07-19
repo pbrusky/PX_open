@@ -67,18 +67,12 @@ void FrigateCameraManager::loadCameras()
                 QString id = it.key();
                 QJsonObject camObj = it.value().toObject();
 
-                //
-                // Base entry used by QML (CameraTile / Sidebar)
-                //
                 QVariantMap entry;
                 entry["id"]        = id;
                 entry["name"]      = id;
                 entry["streamUrl"] = QString("rtsp://%1:8554/%2")
                                         .arg(m_serverIp, id);
 
-                //
-                // Default metadata (will be replaced by FFmpeg probe)
-                //
                 entry["resolution"]  = "";
                 entry["fps"]         = 0;
                 entry["codec"]       = "";
@@ -87,15 +81,9 @@ void FrigateCameraManager::loadCameras()
 
                 m_cameraList.append(entry);
 
-                //
-                // Mark camera online by default
-                //
                 m_cameraOnline[id] = true;
                 emit cameraOnline(id);
 
-                //
-                // ⭐ FFmpeg PROBE — extract real metadata
-                //
                 QString rtspUrl = entry["streamUrl"].toString();
 
                 QProcess* ff = new QProcess(this);
@@ -108,35 +96,25 @@ void FrigateCameraManager::loadCameras()
                      << "-f" << "null"
                      << "-";
 
-                //
-                // Parse FFmpeg stderr output
-                //
                 connect(ff, &QProcess::readyReadStandardError, this, [this, ff, id]() {
                     QString output = ff->readAllStandardError();
 
-                    // Resolution
                     QRegularExpression reRes("(\\d{3,4})x(\\d{3,4})");
                     auto resMatch = reRes.match(output);
                     QString resolution = resMatch.hasMatch() ? resMatch.captured(0) : "";
 
-                    // FPS
                     QRegularExpression reFps("(\\d+(?:\\.\\d+)?)\\s?fps");
                     auto fpsMatch = reFps.match(output);
                     double fps = fpsMatch.hasMatch() ? fpsMatch.captured(1).toDouble() : 0;
 
-                    // Codec
                     QRegularExpression reCodec("Video:\\s*(\\w+)");
                     auto codecMatch = reCodec.match(output);
                     QString codec = codecMatch.hasMatch() ? codecMatch.captured(1) : "";
 
-                    // Bitrate
                     QRegularExpression reBitrate("(\\d+)\\s?kb/s");
                     auto brMatch = reBitrate.match(output);
                     int bitrate = brMatch.hasMatch() ? brMatch.captured(1).toInt() : 0;
 
-                    //
-                    // Store metadata
-                    //
                     QVariantMap meta;
                     meta["resolution"]  = resolution;
                     meta["fps"]         = fps;
@@ -147,9 +125,6 @@ void FrigateCameraManager::loadCameras()
                     m_cameraMetadata[id] = meta;
                 });
 
-                //
-                // Merge metadata into cameraList entry
-                //
                 connect(ff, &QProcess::finished, this, [this, ff, id](int, QProcess::ExitStatus) {
                     ff->deleteLater();
 
@@ -164,9 +139,6 @@ void FrigateCameraManager::loadCameras()
                         }
                     }
 
-                    //
-                    // Emit updated list so QML refreshes the i-popup
-                    //
                     emit camerasLoaded(m_cameraList);
                 });
 
@@ -174,9 +146,6 @@ void FrigateCameraManager::loadCameras()
             }
         }
 
-        //
-        // Initial emit (before FFmpeg probes complete)
-        //
         emit camerasLoaded(m_cameraList);
     });
 }
@@ -209,8 +178,19 @@ void FrigateCameraManager::addCamera(const QString& id, const QString& url, bool
         QJsonDocument doc = QJsonDocument::fromJson(data);
         QJsonObject root  = doc.object();
 
+        //
+        // ⭐ NEW: Parse event "cameraAddResult"
+        //
+        QString event = root.value("event").toString();
         bool ok = root.value("status").toString() == "ok";
-        emit cameraAddResult(ok, ok ? "Camera added" : "Failed to add camera");
+        QString msg = root.value("message").toString();
+
+        if (event == "cameraAddResult") {
+            emit cameraAddResult(ok, msg);
+        } else {
+            // fallback for older module versions
+            emit cameraAddResult(ok, ok ? "Camera added" : "Failed to add camera");
+        }
 
         if (ok)
             loadCameras();
@@ -242,9 +222,17 @@ void FrigateCameraManager::editCamera(const QString& id, const QString& url)
         reply->deleteLater();
 
         QJsonDocument doc = QJsonDocument::fromJson(data);
-        bool ok = doc.object()["status"].toString() == "ok";
+        QJsonObject root  = doc.object();
 
-        emit cameraEditResult(ok, ok ? "OK" : "Failed to update camera");
+        QString event = root.value("event").toString();
+        bool ok = root.value("status").toString() == "ok";
+        QString msg = root.value("message").toString();
+
+        if (event == "cameraEditResult") {
+            emit cameraEditResult(ok, msg);
+        } else {
+            emit cameraEditResult(ok, ok ? "OK" : "Failed to update camera");
+        }
 
         if (ok)
             loadCameras();
@@ -275,9 +263,17 @@ void FrigateCameraManager::removeCamera(const QString& id)
         reply->deleteLater();
 
         QJsonDocument doc = QJsonDocument::fromJson(data);
-        bool ok = doc.object()["status"].toString() == "ok";
+        QJsonObject root  = doc.object();
 
-        emit cameraRemoveResult(ok, ok ? "Camera removed" : "Failed to remove camera");
+        QString event = root.value("event").toString();
+        bool ok = root.value("status").toString() == "ok";
+        QString msg = root.value("message").toString();
+
+        if (event == "cameraRemoveResult") {
+            emit cameraRemoveResult(ok, msg);
+        } else {
+            emit cameraRemoveResult(ok, ok ? "Camera removed" : "Failed to remove camera");
+        }
 
         if (ok)
             loadCameras();

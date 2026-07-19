@@ -66,6 +66,7 @@ Popup {
                 onClicked: {
                     statusText.text = "Removing..."
                     statusText.color = "yellow"
+
                     if (frigateRef)
                         frigateRef.removeCamera(removePopup.cameraId)
                     else {
@@ -96,8 +97,15 @@ Popup {
             if (ok) {
                 removePopup.close()
                 removePopup.cameraRemoved()
+
+                //
+                // ⭐ NEW — show restart popup + begin polling
+                //
+                if (mainWindow && mainWindow.restartPopup) {
+                    mainWindow.restartPopup.visible = true
+                    mainWindow.frigatePollTimer.start()
+                }
             }
         }
     }
 }
-

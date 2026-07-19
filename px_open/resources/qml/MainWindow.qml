@@ -14,11 +14,7 @@ ApplicationWindow {
 
     flags: Qt.FramelessWindowHint
 
-    //
-    // REAL backend from main.cpp
-    //
     property var frigateRef: frigate
-
     property var cameraList: []
     property string selectedCameraId: ""
     property string serverName: ""
@@ -27,6 +23,28 @@ ApplicationWindow {
     signal cameraOnline(string name)
     signal cameraOffline(string name)
     signal camerasLoaded(var list)
+
+    RestartPopup {
+        id: restartPopup
+        visible: false
+        z: 999999
+    }
+
+    Timer {
+        id: frigatePollTimer
+        interval: 1500
+        repeat: true
+
+        onTriggered: {
+            if (frigateRef)
+                frigateRef.loadCameras()
+        }
+    }
+
+    function loadCameras() {
+        if (frigateRef)
+            frigateRef.loadCameras()
+    }
 
     Loader {
         id: fullscreenLoader
@@ -118,9 +136,6 @@ ApplicationWindow {
         id: sidebarWrapper
         objectName: "Sidebar"
 
-        //
-        // FIX: one-way binding, no loop
-        //
         frigateRef: mainWindow.frigateRef
 
         width: 260
@@ -177,15 +192,7 @@ ApplicationWindow {
             }
 
             if (page === "reloadCameras") {
-                if (contentLoader.item &&
-                    contentLoader.item.objectName === "ServerView") {
-                    if (contentLoader.item.reloadCameras)
-                        contentLoader.item.reloadCameras()
-                    else
-                        frigateRef.loadCameras()
-                } else {
-                    frigateRef.loadCameras()
-                }
+                mainWindow.loadCameras()
                 return
             }
 
@@ -271,10 +278,26 @@ ApplicationWindow {
         }
     }
 
+    AddCameraPopup {
+        id: addCameraPopup
+        frigateRef: mainWindow.frigateRef
+    }
+
+    RemoveCameraPopup {
+        id: removePopup
+        frigateRef: mainWindow.frigateRef
+    }
+
     Connections {
         target: frigateRef
 
         function onCamerasLoaded(list) {
+
+            if (!list || list.length === 0) {
+                console.log("Frigate still restarting… camera list empty");
+                return;
+            }
+
             mainWindow.cameraList = list
             sidebarWrapper.cameraList = list
 
@@ -284,6 +307,11 @@ ApplicationWindow {
                 contentLoader.item.updateCameras(list)
 
             mainWindow.camerasLoaded(list)
+
+            if (frigatePollTimer.running)
+                frigatePollTimer.stop()
+
+            restartPopup.visible = false
         }
 
         function onCameraOffline(name) {
@@ -304,12 +332,22 @@ ApplicationWindow {
             mainWindow.cameraOnline(name)
         }
 
-        function onCameraEditResult(ok, message) {
-            if (ok) frigateRef.loadCameras()
+        function onCameraAddResult(ok, message) {
+            restartPopup.visible = true
+            frigatePollTimer.start()
+            frigateRef.loadCameras()
         }
 
-        function onCameraAddResult(ok, message) {
-            if (ok) frigateRef.loadCameras()
+        function onCameraEditResult(ok, message) {
+            restartPopup.visible = true
+            frigatePollTimer.start()
+            frigateRef.loadCameras()
+        }
+
+        function onCameraRemoveResult(ok, message) {
+            restartPopup.visible = true
+            frigatePollTimer.start()
+            frigateRef.loadCameras()
         }
     }
 

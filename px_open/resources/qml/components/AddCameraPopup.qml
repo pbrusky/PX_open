@@ -20,6 +20,11 @@ Popup {
         popup.focus = false
     }
 
+    //
+    // ⭐ REQUIRED BY MainWindow (but no longer used for timing)
+    //
+    signal cameraAdded()
+
     property var frigateRef
 
     property string cameraId: ""
@@ -63,6 +68,8 @@ Popup {
 
         rtspStatus.text = ""
         rtspStatus.color = "white"
+
+        saveButton.enabled = true
     }
 
     ColumnLayout {
@@ -190,8 +197,10 @@ Popup {
             spacing: 10
 
             Button {
+                id: saveButton
                 text: "Save"
                 Layout.fillWidth: true
+
                 onClicked: {
                     if (popup.cameraId.length === 0) {
                         rtspStatus.text = "Camera ID required"
@@ -200,9 +209,18 @@ Popup {
                     }
 
                     let url = getFinalRtspUrl()
+
+                    rtspStatus.text = "Adding camera…"
+                    rtspStatus.color = "yellow"
+                    saveButton.enabled = false
+
                     if (frigateRef)
                         frigateRef.addCamera(popup.cameraId, url, enableRecording)
-                    popup.close()
+                    else {
+                        rtspStatus.text = "Backend not ready"
+                        rtspStatus.color = "red"
+                        saveButton.enabled = true
+                    }
                 }
             }
 
@@ -223,6 +241,27 @@ Popup {
                 } else {
                     rtspStatus.text = "RTSP Test Failed: " + message
                     rtspStatus.color = "red"
+                }
+            }
+
+            //
+            // ⭐ Backend confirms camera added
+            //
+            function onCameraAddResult(ok, message) {
+                if (ok) {
+                    rtspStatus.text = "Camera added successfully"
+                    rtspStatus.color = "lightgreen"
+
+                    // Close popup AFTER backend confirms
+                    popup.close()
+
+                    // Notify MainWindow (optional)
+                    popup.cameraAdded()
+
+                } else {
+                    rtspStatus.text = "Failed: " + message
+                    rtspStatus.color = "red"
+                    saveButton.enabled = true
                 }
             }
         }

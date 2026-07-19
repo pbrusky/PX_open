@@ -2,6 +2,7 @@
 #define FRIGATECAMERAMANAGER_H
 
 #include <QObject>
+#include <QString>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QHash>
