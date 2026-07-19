@@ -12,7 +12,11 @@ from config import (
     FRIGATE_CONFIG_PATH,
     GO2RTC_CONFIG_PATH,
     FRIGATE_BASE,
-    GO2RTC_BASE
+    GO2RTC_BASE,
+    FRIGATE_CONTAINER_NAME,
+    GO2RTC_CONTAINER_NAME,
+    FRIGATE_INSTALL_TYPE,
+    FRIGATE_SERVICE_NAME
 )
 
 # ---------------------------------------------------------
@@ -23,17 +27,16 @@ def backup_file(path):
     if not path or not os.path.exists(path):
         return
     try:
-        path_str = str(path)
-        backup_path = path_str + f".bak_{int(time.time())}"
-        shutil.copy2(path_str, backup_path)
+        backup_path = f"{path}.bak_{int(time.time())}"
+        shutil.copy2(path, backup_path)
         print(f"[backup] Created {os.path.basename(backup_path)}")
     except Exception as e:
         print("[backup] ERROR:", e)
 
 def load_yaml(path):
-    if not os.path.exists(path):
-        return {}
     try:
+        if not os.path.exists(path):
+            return {}
         with open(path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
@@ -56,26 +59,71 @@ def is_valid_rtsp_url(url):
     return isinstance(url, str) and url.lower().startswith("rtsp://")
 
 # ---------------------------------------------------------
-# GO2RTC RESTART
+# INSTALL‑TYPE AWARE RESTART LOGIC
 # ---------------------------------------------------------
 
-def restart_go2rtc():
-    """
-    Restart the go2rtc Docker container so it reloads go2rtc.yaml.
-    """
+def restart_docker(container_name):
     try:
-        print("[go2rtc] Restarting container...")
+        print(f"[restart] Docker restart → {container_name}")
         result = subprocess.run(
-            ["docker", "restart", "go2rtc"],
+            ["docker", "restart", container_name],
             capture_output=True,
             text=True
         )
-        print("[go2rtc] Restart output:", result.stdout.strip())
-        print("[go2rtc] Restart complete")
+        print("[restart] Output:", result.stdout.strip())
         return True
     except Exception as e:
-        print(f"[go2rtc] restart ERROR: {e}")
+        print("[restart] Docker ERROR:", e)
         return False
+
+def restart_systemd(service_name):
+    try:
+        print(f"[restart] systemctl restart → {service_name}")
+        result = subprocess.run(
+            ["systemctl", "restart", service_name],
+            capture_output=True,
+            text=True
+        )
+        print("[restart] Output:", result.stdout.strip())
+        return True
+    except Exception as e:
+        print("[restart] systemd ERROR:", e)
+        return False
+
+def restart_hassio():
+    try:
+        print("[restart] Home Assistant add‑on restart → frigate")
+        result = subprocess.run(
+            ["ha", "addons", "restart", "frigate"],
+            capture_output=True,
+            text=True
+        )
+        print("[restart] Output:", result.stdout.strip())
+        return True
+    except Exception as e:
+        print("[restart] hassio ERROR:", e)
+        return False
+
+def restart_frigate():
+    print(f"[frigate] Restart requested (install type: {FRIGATE_INSTALL_TYPE})")
+
+    if FRIGATE_INSTALL_TYPE == "docker":
+        return restart_docker(FRIGATE_CONTAINER_NAME)
+
+    if FRIGATE_INSTALL_TYPE == "hassio":
+        return restart_hassio()
+
+    if FRIGATE_INSTALL_TYPE == "baremetal":
+        return restart_systemd(FRIGATE_SERVICE_NAME)
+
+    print("[frigate] Unknown install type → using Docker fallback")
+    return restart_docker(FRIGATE_CONTAINER_NAME)
+
+def restart_go2rtc():
+    print("[go2rtc] Restart requested")
+
+    # go2rtc is always Docker in your environment
+    return restart_docker(GO2RTC_CONTAINER_NAME)
 
 # ---------------------------------------------------------
 # GO2RTC STREAM MANAGEMENT
@@ -86,17 +134,12 @@ def go2rtc_set_stream(cam_id, rtsp_url):
         backup_file(GO2RTC_CONFIG_PATH)
         cfg = load_yaml(GO2RTC_CONFIG_PATH)
 
-        if not cfg:
-            cfg = dict(GO2RTC_BASE)
+        cfg.setdefault("streams", {})
 
-        if 'streams' not in cfg or not isinstance(cfg['streams'], dict):
-            cfg['streams'] = {}
+        clean_url = rtsp_url.split("?")[0]
+        cfg["streams"][cam_id] = f"ffmpeg:{clean_url}#tcp"
 
-        # Clean URL and wrap in ffmpeg proxy
-        clean_url = rtsp_url.split('?')[0]
-        cfg['streams'][cam_id] = f"ffmpeg:{clean_url}#tcp"
-
-        print(f"[go2rtc] Added/Updated {cam_id} in go2rtc.yaml")
+        print(f"[go2rtc] Added/Updated {cam_id}")
 
         if save_yaml(GO2RTC_CONFIG_PATH, cfg):
             restart_go2rtc()
@@ -112,13 +155,14 @@ def go2rtc_remove_stream(cam_id):
         backup_file(GO2RTC_CONFIG_PATH)
         cfg = load_yaml(GO2RTC_CONFIG_PATH)
 
-        if 'streams' in cfg and cam_id in cfg['streams']:
-            del cfg['streams'][cam_id]
-            print(f"[go2rtc] Removed {cam_id} from go2rtc.yaml")
+        if "streams" in cfg and cam_id in cfg["streams"]:
+            del cfg["streams"][cam_id]
+            print(f"[go2rtc] Removed {cam_id}")
             if save_yaml(GO2RTC_CONFIG_PATH, cfg):
                 restart_go2rtc()
                 return True
         return True
+
     except Exception as e:
         print("[go2rtc] remove_stream ERROR:", e)
         return False
@@ -128,41 +172,12 @@ def go2rtc_remove_stream(cam_id):
 # ---------------------------------------------------------
 
 def _ensure_frigate_base(cfg):
-    """
-    Ensure cfg has the required Frigate structure.
-    Preserve all existing global values.
-    Only fill missing required sections.
-    """
-    # If config is empty, use the base template
-    if not cfg:
-        return {
-            "mqtt": {"enabled": False},
-            "detectors": {"cpu1": {"type": "cpu"}},
-            "record": {"enabled": False},
-            "snapshots": {"enabled": False},
-            "cameras": {},
-            "version": "0.17-0"
-        }
-
-    # Ensure required top-level keys exist
-    if "mqtt" not in cfg:
-        cfg["mqtt"] = {"enabled": False}
-
-    if "detectors" not in cfg:
-        cfg["detectors"] = {"cpu1": {"type": "cpu"}}
-
-    if "record" not in cfg:
-        cfg["record"] = {"enabled": False}
-
-    if "snapshots" not in cfg:
-        cfg["snapshots"] = {"enabled": False}
-
-    if "cameras" not in cfg or not isinstance(cfg["cameras"], dict):
-        cfg["cameras"] = {}
-
-    if "version" not in cfg:
-        cfg["version"] = "0.17-0"
-
+    cfg.setdefault("mqtt", {"enabled": False})
+    cfg.setdefault("detectors", {"cpu1": {"type": "cpu"}})
+    cfg.setdefault("record", {"enabled": False})
+    cfg.setdefault("snapshots", {"enabled": False})
+    cfg.setdefault("cameras", {})
+    cfg.setdefault("version", "0.17-0")
     return cfg
 
 def ensure_camera_in_frigate(cam_id, rtsp_url, record=True):
@@ -171,19 +186,14 @@ def ensure_camera_in_frigate(cam_id, rtsp_url, record=True):
         cfg = load_yaml(FRIGATE_CONFIG_PATH)
         cfg = _ensure_frigate_base(cfg)
 
-        # Enable global recording if user wants recording on this camera
         if record:
-            if "record" not in cfg:
-                cfg["record"] = {}
             cfg["record"]["enabled"] = True
 
-        global_record_enabled = bool(cfg.get("record", {}).get("enabled", False))
-
         roles = ["detect"]
-        if global_record_enabled and record:
+        if cfg["record"]["enabled"] and record:
             roles.append("record")
 
-        camera_block = {
+        cfg["cameras"][cam_id] = {
             "enabled": True,
             "ffmpeg": {
                 "inputs": [
@@ -194,23 +204,12 @@ def ensure_camera_in_frigate(cam_id, rtsp_url, record=True):
                     }
                 ]
             },
-            "live": {
-                "streams": {
-                    "Main Stream": cam_id
-                }
-            },
-            "detect": {
-                "width": 1280,
-                "height": 720
-            }
+            "live": {"streams": {"Main Stream": cam_id}},
+            "detect": {"width": 1280, "height": 720},
+            "record": {"enabled": cfg["record"]["enabled"] and record}
         }
 
-        if global_record_enabled and record:
-            camera_block["record"] = {"enabled": True}
-
-        cfg["cameras"][cam_id] = camera_block
-
-        print(f"[frigate] Added/Updated {cam_id} - Recording: {'ENABLED' if record else 'DISABLED'}")
+        print(f"[frigate] Added/Updated {cam_id}")
         return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
     except Exception as e:
@@ -221,11 +220,11 @@ def remove_camera_from_frigate(cam_id):
     try:
         backup_file(FRIGATE_CONFIG_PATH)
         cfg = load_yaml(FRIGATE_CONFIG_PATH)
-
         cfg = _ensure_frigate_base(cfg)
 
-        if "cameras" in cfg and cam_id in cfg["cameras"]:
+        if cam_id in cfg["cameras"]:
             del cfg["cameras"][cam_id]
+            print(f"[frigate] Removed {cam_id}")
             return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
         return False
@@ -233,10 +232,6 @@ def remove_camera_from_frigate(cam_id):
     except Exception as e:
         print("[frigate] remove_camera_from_frigate ERROR:", e)
         return False
-
-def frigate_reload():
-    print("[frigate] reload skipped (Frigate has no HTTP reload API)")
-    return True
 
 # ---------------------------------------------------------
 # RTSP RESOLUTION
@@ -251,7 +246,7 @@ def get_rtsp_url(ip, username="", password=""):
 
     for token in tokens:
         try:
-            SOAP = f'''<?xml version="1.0"?>
+            SOAP = f"""<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
   <s:Body>
     <GetStreamUri xmlns="http://www.onvif.org/ver10/media/wsdl">
@@ -264,21 +259,18 @@ def get_rtsp_url(ip, username="", password=""):
       <ProfileToken>{token}</ProfileToken>
     </GetStreamUri>
   </s:Body>
-</s:Envelope>'''
+</s:Envelope>"""
 
             r = requests.post(endpoint, data=SOAP, timeout=2.5, auth=auth)
 
             if r.status_code == 200:
                 xml = ET.fromstring(r.text)
                 uri = xml.find(".//{*}Uri")
-
                 if uri is not None and uri.text:
                     rtsp = uri.text.strip()
                     print(f"[RTSP] SUCCESS with token '{token}'")
-
-                    if username and password and "rtsp://" in rtsp:
+                    if username and password:
                         rtsp = rtsp.replace("rtsp://", f"rtsp://{username}:{password}@")
-
                     return rtsp
 
         except Exception:
@@ -288,63 +280,56 @@ def get_rtsp_url(ip, username="", password=""):
 
     if username:
         return f"rtsp://{username}:{password}@{ip}:554/Streaming/Channels/101"
-    else:
-        return f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
+    return f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
 
 # ---------------------------------------------------------
-# CAMERA CRUD
+# CAMERA CRUD (INSTALL‑TYPE AWARE)
 # ---------------------------------------------------------
 
 def add_camera(cam_id, rtsp_url, record=True):
-    print(f"[camera_manager] add_camera {cam_id} -> {rtsp_url}")
+    print(f"[camera_manager] add_camera {cam_id}")
 
     if not is_valid_camera_name(cam_id) or not is_valid_rtsp_url(rtsp_url):
-        return {"status": "error", "go2rtc": False, "frigate_reload": False}
+        return {"status": "error"}
 
     go2_ok = go2rtc_set_stream(cam_id, rtsp_url)
     fr_ok = ensure_camera_in_frigate(cam_id, rtsp_url, record)
-    reload_ok = frigate_reload() if fr_ok else False
-
-    status = "ok" if (go2_ok and fr_ok and reload_ok) else "error"
+    restart_ok = restart_frigate() if fr_ok else False
 
     return {
-        "status": status,
+        "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
         "go2rtc": go2_ok,
-        "frigate_reload": reload_ok
+        "frigate_restart": restart_ok
     }
 
 def edit_camera(cam_id, rtsp_url):
-    print(f"[camera_manager] edit_camera {cam_id} -> {rtsp_url}")
+    print(f"[camera_manager] edit_camera {cam_id}")
 
     if not is_valid_camera_name(cam_id) or not is_valid_rtsp_url(rtsp_url):
-        return {"status": "error", "go2rtc": False, "frigate_reload": False}
+        return {"status": "error"}
 
     go2_ok = go2rtc_set_stream(cam_id, rtsp_url)
-    fr_ok = ensure_camera_in_frigate(cam_id, rtsp_url, record=True)
-    reload_ok = frigate_reload() if fr_ok else False
-
-    status = "ok" if (go2_ok and fr_ok and reload_ok) else "error"
+    fr_ok = ensure_camera_in_frigate(cam_id, rtsp_url, True)
+    restart_ok = restart_frigate() if fr_ok else False
 
     return {
-        "status": status,
+        "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
         "go2rtc": go2_ok,
-        "frigate_reload": reload_ok
+        "frigate_restart": restart_ok
     }
 
 def remove_camera(cam_id):
     print(f"[camera_manager] remove_camera {cam_id}")
 
     if not is_valid_camera_name(cam_id):
-        return {"status": "error", "go2rtc": False, "frigate_reload": False}
+        return {"status": "error"}
 
     go2_ok = go2rtc_remove_stream(cam_id)
     fr_ok = remove_camera_from_frigate(cam_id)
-    reload_ok = frigate_reload() if fr_ok else False
-
-    status = "ok" if (go2_ok and fr_ok and reload_ok) else "error"
+    restart_ok = restart_frigate() if fr_ok else False
 
     return {
-        "status": status,
+        "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
         "go2rtc": go2_ok,
-        "frigate_reload": reload_ok
+        "frigate_restart": restart_ok
     }

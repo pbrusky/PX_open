@@ -3,19 +3,17 @@ import socket
 import struct
 import psutil
 from pathlib import Path
+import subprocess
 
 # ---------------------------------------------------------
 # NETWORK DETECTION
 # ---------------------------------------------------------
 
 def get_local_ip() -> str:
-    """Get best available LAN IP"""
-    # Priority 1: Environment override
     env_ip = os.getenv("HOST_IP") or os.getenv("FRIGATE_SERVER_IP")
     if env_ip:
         return env_ip
 
-    # Priority 2: Standard method
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -26,7 +24,6 @@ def get_local_ip() -> str:
     except:
         pass
 
-    # Priority 3: psutil (more reliable on Windows)
     try:
         for iface, addrs in psutil.net_if_addrs().items():
             if any(x in iface for x in ["Virtual", "VMware", "Hyper-V", "Loopback", "Docker", "vEthernet", "VPN"]):
@@ -41,7 +38,6 @@ def get_local_ip() -> str:
 
 
 def get_ip_and_mask():
-    """Return (ip, subnet_mask)"""
     for iface, addrs in psutil.net_if_addrs().items():
         if any(x in iface for x in ["Virtual", "VMware", "Hyper-V", "Loopback", "Docker", "vEthernet", "VPN"]):
             continue
@@ -91,4 +87,103 @@ SYSTEM_NAME = "Frigate System"
 
 PROGRESS_FILE = Path(r"C:\PX\onvif_progress.log")
 
+# ---------------------------------------------------------
+# DOCKER CONTAINER NAMES (AUTO-DETECT + OVERRIDE)
+# ---------------------------------------------------------
+
+def auto_detect_container(name_hint: str):
+    """Return first container whose name contains the hint."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True
+        )
+        names = result.stdout.strip().splitlines()
+        for n in names:
+            if name_hint.lower() in n.lower():
+                return n
+    except:
+        pass
+    return None
+
+
+AUTO_DETECT_FRIGATE_CONTAINER = True
+AUTO_DETECT_GO2RTC_CONTAINER = True
+
+# Manual override (used if auto-detect fails)
+FRIGATE_CONTAINER_NAME = os.getenv("FRIGATE_CONTAINER_NAME", "frigate")
+GO2RTC_CONTAINER_NAME = os.getenv("GO2RTC_CONTAINER_NAME", "go2rtc")
+
+# Auto-detect if enabled
+if AUTO_DETECT_FRIGATE_CONTAINER:
+    detected = auto_detect_container("frigate")
+    if detected:
+        FRIGATE_CONTAINER_NAME = detected
+
+if AUTO_DETECT_GO2RTC_CONTAINER:
+    detected = auto_detect_container("go2rtc")
+    if detected:
+        GO2RTC_CONTAINER_NAME = detected
+
+# ---------------------------------------------------------
+# INSTALL TYPE DETECTION
+# ---------------------------------------------------------
+
+def detect_install_type():
+    """
+    Detect Frigate install type:
+    - docker
+    - hassio
+    - baremetal
+    - unknown
+    """
+    # Home Assistant add-on
+    if os.path.exists("/data/options.json"):
+        return "hassio"
+
+    # Docker
+    try:
+        result = subprocess.run(
+            ["docker", "ps"],
+            capture_output=True,
+            text=True
+        )
+        if "frigate" in result.stdout.lower():
+            return "docker"
+    except:
+        pass
+
+    # Baremetal (systemd)
+    try:
+        result = subprocess.run(
+            ["systemctl", "status", "frigate"],
+            capture_output=True,
+            text=True
+        )
+        if "Loaded:" in result.stdout:
+            return "baremetal"
+    except:
+        pass
+
+    return "unknown"
+
+
+FRIGATE_INSTALL_TYPE = detect_install_type()
+
+# Systemd service name (for baremetal installs)
+FRIGATE_SERVICE_NAME = os.getenv("FRIGATE_SERVICE_NAME", "frigate")
+
+# ---------------------------------------------------------
+# FRIGATE VERSION (OPTIONAL)
+# ---------------------------------------------------------
+
+FRIGATE_VERSION = os.getenv("FRIGATE_VERSION", "0.17")
+
+# API availability
+FRIGATE_API_ENABLED = True
+
 print(f"[CONFIG] LAN IP: {LAN_IP} | Broadcast: {BROADCAST_IP}")
+print(f"[CONFIG] Frigate container: {FRIGATE_CONTAINER_NAME}")
+print(f"[CONFIG] go2rtc container: {GO2RTC_CONTAINER_NAME}")
+print(f"[CONFIG] Install type: {FRIGATE_INSTALL_TYPE}")

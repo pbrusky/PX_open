@@ -5,7 +5,7 @@ import QtQuick.Layouts 1.15
 Item {
     id: gridContainer
     anchors.fill: parent
-    clip: true
+    clip: false
     z: 1
 
     property var mainWindow
@@ -17,7 +17,6 @@ Item {
     property int cols: 0
     property int rows: 0
 
-    // hover target for drag logic
     property int hoverIndex: -1
     property string hoverCameraName: ""
 
@@ -81,6 +80,7 @@ Item {
             return
 
         cameraNames.splice(index, 1)
+        cameraNames = cameraNames.slice(0)
         updateGridSize()
     }
 
@@ -88,8 +88,7 @@ Item {
         if (gridContainer.frigateRef && gridContainer.frigateRef.removeCamera) {
             try {
                 gridContainer.frigateRef.removeCamera(cameraName)
-            } catch (e) {
-            }
+            } catch (e) {}
             removeCamera(cameraName)
         } else if (serverViewRoot && serverViewRoot.openRemoveCameraPopup) {
             serverViewRoot.openRemoveCameraPopup(cameraName)
@@ -98,7 +97,6 @@ Item {
         }
     }
 
-    // compute hover cell from global coords
     function updateHoverIndex(x, y, cameraName) {
         if (cols <= 0 || rows <= 0)
             return
@@ -119,8 +117,7 @@ Item {
         }
     }
 
-    // swap tiles based on hoverIndex
-    function reorderTilesByTileCenter(oldIndex, tile) {
+    function reorderTilesByTileCenter(oldIndex, tileObj) {
         if (hoverIndex < 0 || hoverIndex >= cameraNames.length)
             return
         if (oldIndex < 0 || oldIndex >= cameraNames.length)
@@ -128,9 +125,12 @@ Item {
         if (hoverIndex === oldIndex)
             return
 
-        let tmp = cameraNames[oldIndex]
-        cameraNames[oldIndex] = cameraNames[hoverIndex]
-        cameraNames[hoverIndex] = tmp
+        let arr = cameraNames.slice(0)
+        let tmp = arr[oldIndex]
+        arr[oldIndex] = arr[hoverIndex]
+        arr[hoverIndex] = tmp
+
+        cameraNames = arr
 
         hoverIndex = -1
         hoverCameraName = ""
@@ -162,6 +162,7 @@ Item {
     Grid {
         id: grid
         anchors.fill: parent
+        clip: false
 
         columns: gridContainer.cols
         rowSpacing: 6
@@ -173,6 +174,7 @@ Item {
 
             Item {
                 id: tileWrapper
+                clip: false
 
                 property real cellWidth: gridContainer.cols > 0
                                          ? grid.width / gridContainer.cols - grid.columnSpacing
@@ -187,11 +189,14 @@ Item {
                 width: targetHeight > cellHeight ? cellHeight * 16 / 9 : targetWidth
                 height: targetHeight > cellHeight ? cellHeight : targetHeight
 
-                property string cameraName: (
-                    index < gridContainer.cameraNames.length
-                    ? gridContainer.cameraNames[index]
-                    : ""
-                )
+                property string cameraName: ""
+                Binding {
+                    target: tileWrapper
+                    property: "cameraName"
+                    value: (index < gridContainer.cameraNames.length
+                            ? gridContainer.cameraNames[index]
+                            : "")
+                }
 
                 property bool isOnline: cameraName !== ""
                                        ? gridContainer.isCameraOnline(cameraName)
@@ -200,12 +205,14 @@ Item {
                 CameraTile {
                     id: tile
 
-                    x: (parent.width - width) / 2
-                    y: (parent.height - height) / 2
-
                     width: tileWrapper.width
                     height: tileWrapper.height
                     z: 1
+
+                    Component.onCompleted: {
+                        tile.x = (tileWrapper.width - tile.width) / 2
+                        tile.y = (tileWrapper.height - tile.height) / 2
+                    }
 
                     cameraName: tileWrapper.cameraName
                     isOnline: tileWrapper.isOnline
@@ -216,9 +223,7 @@ Item {
 
                     tileIndex: index
 
-                    onRemoveRequested: {
-                        gridContainer.removeTile(tileIndex)
-                    }
+                    onRemoveRequested: gridContainer.removeTile(tileIndex)
                 }
             }
         }

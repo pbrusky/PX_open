@@ -83,7 +83,6 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                 
                 print(f"[ONVIF] Discovery requested with user: '{username}'")
                 
-                # Direct call to scanner (NO dependency on camera_manager)
                 try:
                     result = subprocess.run(
                         ["python", "onvif_scan.py", "10.36.24.", username, password],
@@ -109,7 +108,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     print(f"[ONVIF] Error: {e}")
                     return self.send_json({"devices": []})
 
-            # ====================== OTHER ENDPOINTS ======================
+            # ====================== CAMERA & RTSP ENDPOINTS ======================
             if self.path == "/api/getRtsp":
                 from camera_manager import get_rtsp_url
                 rtsp = get_rtsp_url(
@@ -134,6 +133,15 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
             if self.path == "/api/removeCamera":
                 from camera_manager import remove_camera
                 return self.send_json(remove_camera(data.get("id")))
+
+            # ====================== RESTART ENDPOINTS (NEW) ======================
+            if self.path == "/api/restartFrigate":
+                from camera_manager import restart_frigate
+                return self.send_json({"success": restart_frigate()})
+
+            if self.path == "/api/restartGo2rtc":
+                from camera_manager import restart_go2rtc
+                return self.send_json({"success": restart_go2rtc()})
 
             return self.send_json({"status": "ok"})
 

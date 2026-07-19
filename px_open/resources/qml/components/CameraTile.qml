@@ -5,7 +5,7 @@ import "qrc:/app/resources/qml/components"
 
 Item {
     id: tile
-    z: 5
+    z: dragging ? 9999 : 5
 
     property bool dragging: false
     property int tileIndex: -1
@@ -28,15 +28,10 @@ Item {
 
     signal removeRequested()
 
-    Behavior on x { enabled: !dragging; NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
-    Behavior on y { enabled: !dragging; NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
-
+    //
+    // Switch queues when cameraName changes
+    //
     onCameraNameChanged: {
-        if (!cameraName) {
-            frameQueue = null
-            currentFrame = null
-            return
-        }
         frameQueue = frigateRef ? frigateRef.getQueue(cameraName) : null
     }
 
@@ -57,13 +52,16 @@ Item {
         anchors.fill: parent
         color: "#101010"
         radius: 6
-        visible: currentFrame === null
+        visible: currentFrame === null || currentFrame === undefined
     }
 
+    //
+    // ⭐ Video stays visible even while dragging
+    //
     FrameItem {
         id: videoFrame
         anchors.fill: parent
-        visible: currentFrame !== null && isOnline
+        visible: currentFrame !== null && currentFrame !== undefined && isOnline
     }
 
     Rectangle {
@@ -116,18 +114,18 @@ Item {
         }
     }
 
+    //
+    // ⭐ REAL TILE DRAGGING (video moves with the tile)
+    //
     MouseArea {
         anchors.fill: parent
-        z: 50
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        propagateComposedEvents: true
 
         drag.target: tile
         drag.axis: Drag.XAndYAxis
 
         onPressed: {
-            tile.z = 9999
             dragging = true
         }
 
@@ -139,13 +137,9 @@ Item {
         }
 
         onReleased: {
-            tile.z = 5
             dragging = false
 
-            if (!gridRoot)
-                return
-
-            // snap back into its wrapper
+            // ⭐ Snap back inside wrapper (manual, not binding)
             tile.x = (tile.parent.width - tile.width) / 2
             tile.y = (tile.parent.height - tile.height) / 2
 
