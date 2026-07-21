@@ -35,8 +35,12 @@ Item {
 
     signal removeRequested()
 
+    //
+    // Update queue when cameraName changes
+    //
     onCameraNameChanged: {
         currentFrame = null
+
         if (frigateRef && cameraName !== "") {
             frameQueue = frigateRef.getQueue(cameraName)
         } else {
@@ -44,8 +48,19 @@ Item {
         }
     }
 
+    //
+    // Reconnect + instant frame pop
+    //
     onFrameQueueChanged: {
         frameConn.target = frameQueue
+
+        if (frameQueue) {
+            var img = frameQueue.popImage()
+            if (img) {
+                currentFrame = img
+                videoFrame.frame = img
+            }
+        }
     }
 
     Connections {
@@ -133,15 +148,13 @@ Item {
 
         onPressed: {
             dragging = true
-            
-            // Save original position and parent
+
             originalParent = tile.parent
             originalX = tile.x
             originalY = tile.y
             originalWidth = tile.width
             originalHeight = tile.height
 
-            // Reparent to gridContainer but keep same size and position
             tile.parent = gridRoot
             tile.width = originalWidth
             tile.height = originalHeight
@@ -159,7 +172,6 @@ Item {
         onReleased: {
             dragging = false
 
-            // Return to original parent and position
             if (originalParent) {
                 var pos = gridRoot.mapToItem(originalParent, tile.x, tile.y)
                 tile.parent = originalParent

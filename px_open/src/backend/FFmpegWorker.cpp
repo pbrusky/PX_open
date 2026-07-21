@@ -21,7 +21,6 @@ FFmpegWorker::FFmpegWorker(QObject* parent)
 
 FFmpegWorker::~FFmpegWorker()
 {
-    // graceful shutdown
     m_abort = true;
 }
 
@@ -48,7 +47,6 @@ void FFmpegWorker::startDecoding()
 
 void FFmpegWorker::stopDecoding()
 {
-    // graceful shutdown trigger
     m_abort = true;
 }
 
@@ -93,6 +91,10 @@ void FFmpegWorker::decodeLoop()
 
     AVDictionary* opts = nullptr;
     av_dict_set(&opts, "rtsp_transport", "tcp", 0);
+
+    // Low-latency input tuning
+    av_dict_set(&opts, "probesize", "32768", 0);
+    av_dict_set(&opts, "analyzeduration", "0", 0);
 
     int ret = avformat_open_input(&fmtCtx, m_url.toUtf8().constData(), nullptr, &opts);
     av_dict_free(&opts);
@@ -145,8 +147,14 @@ void FFmpegWorker::decodeLoop()
     codecCtx = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(codecCtx, videoStream->codecpar);
 
+    // Low-latency but HEVC-safe
     codecCtx->flags |= AV_CODEC_FLAG_LOW_DELAY;
-    codecCtx->skip_frame = AVDISCARD_NONREF;
+
+    // Tolerate minor bitstream errors (helps with imperfect HEVC streams)
+    codecCtx->err_recognition = AV_EF_IGNORE_ERR;
+
+    // Do NOT force max_b_frames = 0 here; it breaks HEVC
+    // codecCtx->max_b_frames = 0;  // removed
 
     ret = avcodec_open2(codecCtx, codec, nullptr);
     if (ret < 0) {
@@ -246,7 +254,6 @@ void FFmpegWorker::decodeLoop()
         }
     }
 
-    // graceful shutdown cleanup
     if (sws) sws_freeContext(sws);
     if (frame) av_frame_free(&frame);
     if (outFrame) av_frame_free(&outFrame);

@@ -10,7 +10,7 @@ Item {
 
     property var mainWindow
     property var frigateRef: null
-    property var cameraList: []          // Required by ServerView.qml
+    property var cameraList: []
     property var serverViewRoot
 
     property var cameraNames: []
@@ -24,7 +24,6 @@ Item {
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
 
-    // Force update when cameraNames changes
     onCameraNamesChanged: updateGridSize()
 
     function getCamera(name) {
@@ -58,10 +57,10 @@ Item {
         if (!cameraName || cameraName === "") return
         if (cameraNames.indexOf(cameraName) !== -1) return
 
-        console.log("Dropping camera:", cameraName)  // Debug
+        console.log("Dropping camera:", cameraName)
 
         cameraNames.push(cameraName)
-        cameraNames = cameraNames.slice()   // Critical: force QML to detect change
+        cameraNames = cameraNames.slice()
 
         updateGridSize()
 
@@ -70,14 +69,14 @@ Item {
     }
 
     function removeCamera(cameraName) {
-        cameraNames = cameraNames.filter(function(n) { return n !== cameraName })
+        cameraNames = cameraNames.filter(n => n !== cameraName)
         updateGridSize()
     }
 
     function removeTile(index) {
         if (index < 0 || index >= cameraNames.length) return
         cameraNames.splice(index, 1)
-        cameraNames = cameraNames.slice()   // Critical force update
+        cameraNames = cameraNames.slice()
         updateGridSize()
     }
 
@@ -109,12 +108,17 @@ Item {
         hoverCameraName = ""
     }
 
+    //
+    // ⭐ FULLSCREEN FIX — use dedicated queues
+    //
     function enterFullscreen(cameraName, liveQueue) {
         let cam = getCamera(cameraName)
         if (!cam) return
 
         fullscreenCamera = cam
-        fullscreenLiveQueue = liveQueue
+
+        // ⭐ DO NOT USE liveQueue (shared with grid)
+        fullscreenLiveQueue = frigateRef ? frigateRef.getQueue(cameraName) : null
         fullscreenPlaybackQueue = frigateRef ? frigateRef.getPlaybackQueue(cameraName) : null
 
         fullscreenLoader.source = "qrc:/app/resources/qml/FullscreenCamera.qml"
