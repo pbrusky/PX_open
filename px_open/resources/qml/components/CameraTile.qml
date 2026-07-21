@@ -5,7 +5,7 @@ import "qrc:/app/resources/qml/components"
 
 Item {
     id: tile
-    z: dragging ? 9999 : 5
+    z: dragging ? 99999 : 0
 
     property bool dragging: false
     property int tileIndex: -1
@@ -23,28 +23,43 @@ Item {
     property string codec: ""
     property string streamType: ""
 
-    property var frameQueue
+    property var frameQueue: null
     property var currentFrame
+
+    // For dragging
+    property var originalParent: null
+    property real originalX: 0
+    property real originalY: 0
+    property real originalWidth: 0
+    property real originalHeight: 0
 
     signal removeRequested()
 
-    //
-    // Switch queues when cameraName changes
-    //
     onCameraNameChanged: {
-        frameQueue = frigateRef ? frigateRef.getQueue(cameraName) : null
+        currentFrame = null
+        if (frigateRef && cameraName !== "") {
+            frameQueue = frigateRef.getQueue(cameraName)
+        } else {
+            frameQueue = null
+        }
+    }
+
+    onFrameQueueChanged: {
+        frameConn.target = frameQueue
     }
 
     Connections {
+        id: frameConn
         target: frameQueue
         ignoreUnknownSignals: true
 
         function onFrameReady() {
+            if (!frameQueue) return
             var img = frameQueue.popImage()
-            if (!img)
-                return
-            currentFrame = img
-            videoFrame.frame = img
+            if (img) {
+                currentFrame = img
+                videoFrame.frame = img
+            }
         }
     }
 
@@ -55,9 +70,6 @@ Item {
         visible: currentFrame === null || currentFrame === undefined
     }
 
-    //
-    // ⭐ Video stays visible even while dragging
-    //
     FrameItem {
         id: videoFrame
         anchors.fill: parent
@@ -70,13 +82,6 @@ Item {
         color: "#000000AA"
         visible: cameraName !== "" && !isOnline
         z: 50
-
-        Column {
-            anchors.centerIn: parent
-            spacing: 6
-            Text { text: "Camera Offline"; color: "white"; font.pixelSize: 18 }
-            Text { text: cameraName; color: "#CCCCCC"; font.pixelSize: 14 }
-        }
     }
 
     CameraTileOverlay {
@@ -114,9 +119,6 @@ Item {
         }
     }
 
-    //
-    // ⭐ REAL TILE DRAGGING (video moves with the tile)
-    //
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true
@@ -124,9 +126,27 @@ Item {
 
         drag.target: tile
         drag.axis: Drag.XAndYAxis
+        drag.minimumX: 0
+        drag.minimumY: 0
+        drag.maximumX: gridRoot ? gridRoot.width - tile.width : 9999
+        drag.maximumY: gridRoot ? gridRoot.height - tile.height : 9999
 
         onPressed: {
             dragging = true
+            
+            // Save original position and parent
+            originalParent = tile.parent
+            originalX = tile.x
+            originalY = tile.y
+            originalWidth = tile.width
+            originalHeight = tile.height
+
+            // Reparent to gridContainer but keep same size and position
+            tile.parent = gridRoot
+            tile.width = originalWidth
+            tile.height = originalHeight
+            tile.x = originalParent.mapToItem(gridRoot, originalX, originalY).x
+            tile.y = originalParent.mapToItem(gridRoot, originalX, originalY).y
         }
 
         onPositionChanged: {
@@ -139,11 +159,17 @@ Item {
         onReleased: {
             dragging = false
 
-            // ⭐ Snap back inside wrapper (manual, not binding)
-            tile.x = (tile.parent.width - tile.width) / 2
-            tile.y = (tile.parent.height - tile.height) / 2
+            // Return to original parent and position
+            if (originalParent) {
+                var pos = gridRoot.mapToItem(originalParent, tile.x, tile.y)
+                tile.parent = originalParent
+                tile.x = originalX
+                tile.y = originalY
+                tile.width = originalWidth
+                tile.height = originalHeight
+            }
 
-            if (gridRoot.reorderTilesByTileCenter)
+            if (gridRoot && gridRoot.reorderTilesByTileCenter)
                 gridRoot.reorderTilesByTileCenter(tileIndex, tile)
         }
 

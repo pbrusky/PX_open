@@ -10,12 +10,12 @@ Item {
 
     property var mainWindow
     property var frigateRef: null
-    property var cameraList: []
+    property var cameraList: []          // Required by ServerView.qml
     property var serverViewRoot
 
     property var cameraNames: []
-    property int cols: 0
-    property int rows: 0
+    property int cols: 2
+    property int rows: 2
 
     property int hoverIndex: -1
     property string hoverCameraName: ""
@@ -23,6 +23,9 @@ Item {
     property var fullscreenCamera: null
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
+
+    // Force update when cameraNames changes
+    onCameraNamesChanged: updateGridSize()
 
     function getCamera(name) {
         if (!mainWindow || !mainWindow.cameraList)
@@ -36,19 +39,14 @@ Item {
 
     function updateGridSize() {
         let count = cameraNames.length
-
-        if (count <= 0) {
-            cols = 0; rows = 0
-        } else if (count === 1) {
+        if (count <= 1) {
             cols = 1; rows = 1
-        } else if (count === 2) {
+        } else if (count <= 2) {
             cols = 2; rows = 1
         } else if (count <= 4) {
             cols = 2; rows = 2
         } else if (count <= 9) {
             cols = 3; rows = 3
-        } else if (count <= 16) {
-            cols = 4; rows = 4
         } else {
             let side = Math.ceil(Math.sqrt(count))
             cols = side
@@ -57,13 +55,14 @@ Item {
     }
 
     function dropAt(x, y, cameraName) {
-        if (!cameraName || cameraName === "")
-            return
+        if (!cameraName || cameraName === "") return
+        if (cameraNames.indexOf(cameraName) !== -1) return
 
-        if (cameraNames.indexOf(cameraName) !== -1)
-            return
+        console.log("Dropping camera:", cameraName)  // Debug
 
         cameraNames.push(cameraName)
+        cameraNames = cameraNames.slice()   // Critical: force QML to detect change
+
         updateGridSize()
 
         if (mainWindow && mainWindow.selectedCameraId !== cameraName)
@@ -76,30 +75,14 @@ Item {
     }
 
     function removeTile(index) {
-        if (index < 0 || index >= cameraNames.length)
-            return
-
+        if (index < 0 || index >= cameraNames.length) return
         cameraNames.splice(index, 1)
-        cameraNames = cameraNames.slice(0)
+        cameraNames = cameraNames.slice()   // Critical force update
         updateGridSize()
     }
 
-    function requestRemoveCamera(cameraName) {
-        if (gridContainer.frigateRef && gridContainer.frigateRef.removeCamera) {
-            try {
-                gridContainer.frigateRef.removeCamera(cameraName)
-            } catch (e) {}
-            removeCamera(cameraName)
-        } else if (serverViewRoot && serverViewRoot.openRemoveCameraPopup) {
-            serverViewRoot.openRemoveCameraPopup(cameraName)
-        } else {
-            removeCamera(cameraName)
-        }
-    }
-
     function updateHoverIndex(x, y, cameraName) {
-        if (cols <= 0 || rows <= 0)
-            return
+        if (cols <= 0 || rows <= 0) return
 
         let cellW = grid.width / cols
         let cellH = grid.height / rows
@@ -108,44 +91,31 @@ Item {
         let row = Math.floor(y / cellH)
         let idx = row * cols + col
 
-        if (idx < 0 || idx >= cameraNames.length) {
-            hoverIndex = -1
-            hoverCameraName = ""
-        } else {
-            hoverIndex = idx
-            hoverCameraName = cameraName
-        }
+        hoverIndex = (idx >= 0 && idx < cameraNames.length) ? idx : -1
+        hoverCameraName = cameraName
     }
 
     function reorderTilesByTileCenter(oldIndex, tileObj) {
-        if (hoverIndex < 0 || hoverIndex >= cameraNames.length)
-            return
-        if (oldIndex < 0 || oldIndex >= cameraNames.length)
-            return
-        if (hoverIndex === oldIndex)
+        if (hoverIndex < 0 || hoverIndex >= cameraNames.length || hoverIndex === oldIndex)
             return
 
-        let arr = cameraNames.slice(0)
+        let arr = cameraNames.slice()
         let tmp = arr[oldIndex]
         arr[oldIndex] = arr[hoverIndex]
         arr[hoverIndex] = tmp
 
         cameraNames = arr
-
         hoverIndex = -1
         hoverCameraName = ""
     }
 
     function enterFullscreen(cameraName, liveQueue) {
         let cam = getCamera(cameraName)
-        if (!cam)
-            return
+        if (!cam) return
 
         fullscreenCamera = cam
         fullscreenLiveQueue = liveQueue
-        fullscreenPlaybackQueue = frigateRef
-                                  ? frigateRef.getPlaybackQueue(cameraName)
-                                  : null
+        fullscreenPlaybackQueue = frigateRef ? frigateRef.getPlaybackQueue(cameraName) : null
 
         fullscreenLoader.source = "qrc:/app/resources/qml/FullscreenCamera.qml"
         fullscreenLoader.visible = true
@@ -163,56 +133,32 @@ Item {
         id: grid
         anchors.fill: parent
         clip: false
-
         columns: gridContainer.cols
         rowSpacing: 6
         columnSpacing: 6
 
         Repeater {
-            id: gridRepeater
-            model: gridContainer.cols * gridContainer.rows
+            model: gridContainer.cameraNames
 
-            Item {
+            delegate: Item {
                 id: tileWrapper
-                clip: false
+                z: index
 
-                property real cellWidth: gridContainer.cols > 0
-                                         ? grid.width / gridContainer.cols - grid.columnSpacing
-                                         : 0
-                property real cellHeight: gridContainer.rows > 0
-                                          ? grid.height / gridContainer.rows - grid.rowSpacing
-                                          : 0
+                property string cameraName: modelData
+                property bool isOnline: gridContainer.isCameraOnline(cameraName)
 
-                property real targetWidth: cellWidth
-                property real targetHeight: targetWidth * 9 / 16
+                property real cellW: grid.width / gridContainer.cols - grid.columnSpacing
+                property real cellH: grid.height / gridContainer.rows - grid.rowSpacing
 
-                width: targetHeight > cellHeight ? cellHeight * 16 / 9 : targetWidth
-                height: targetHeight > cellHeight ? cellHeight : targetHeight
-
-                property string cameraName: ""
-                Binding {
-                    target: tileWrapper
-                    property: "cameraName"
-                    value: (index < gridContainer.cameraNames.length
-                            ? gridContainer.cameraNames[index]
-                            : "")
-                }
-
-                property bool isOnline: cameraName !== ""
-                                       ? gridContainer.isCameraOnline(cameraName)
-                                       : false
+                width:  Math.min(cellW, cellH * 16 / 9)
+                height: Math.min(cellH, cellW * 9 / 16)
 
                 CameraTile {
                     id: tile
-
-                    width: tileWrapper.width
-                    height: tileWrapper.height
-                    z: 1
-
-                    Component.onCompleted: {
-                        tile.x = (tileWrapper.width - tile.width) / 2
-                        tile.y = (tileWrapper.height - tile.height) / 2
-                    }
+                    width: parent.width
+                    height: parent.height
+                    x: (parent.width - width) / 2
+                    y: (parent.height - height) / 2
 
                     cameraName: tileWrapper.cameraName
                     isOnline: tileWrapper.isOnline
@@ -220,8 +166,17 @@ Item {
                     gridRoot: gridContainer
                     frigateRef: gridContainer.frigateRef
                     mainWindow: gridContainer.mainWindow
-
                     tileIndex: index
+
+                    Component.onCompleted: refreshQueue()
+                    onCameraNameChanged: refreshQueue()
+
+                    function refreshQueue() {
+                        if (frigateRef && cameraName !== "")
+                            frameQueue = frigateRef.getQueue(cameraName)
+                        else
+                            frameQueue = null
+                    }
 
                     onRemoveRequested: gridContainer.removeTile(tileIndex)
                 }
@@ -236,29 +191,18 @@ Item {
         z: 9999
 
         onLoaded: {
-            if (!item || !fullscreenCamera)
-                return
-
+            if (!item || !fullscreenCamera) return
             item.cameraId = fullscreenCamera.id || fullscreenCamera.name
             item.cameraName = fullscreenCamera.name || fullscreenCamera.id
-
             item.frigateRef = gridContainer.frigateRef
-            item.isOnline = gridContainer.frigateRef
-                            ? gridContainer.frigateRef.isCameraOnline(item.cameraName)
-                            : false
-
+            item.isOnline = gridContainer.frigateRef ? gridContainer.frigateRef.isCameraOnline(item.cameraName) : false
             item.liveQueue = gridContainer.fullscreenLiveQueue
             item.playbackQueue = gridContainer.fullscreenPlaybackQueue
-
-            if (item.open)
-                item.open()
+            if (item.open) item.open()
         }
 
         Keys.onEscapePressed: gridContainer.exitFullscreen()
     }
 
-    Component.onCompleted: {
-        cameraNames = []
-        updateGridSize()
-    }
+    Component.onCompleted: updateGridSize()
 }

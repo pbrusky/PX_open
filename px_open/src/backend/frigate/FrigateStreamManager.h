@@ -27,8 +27,10 @@ public:
 
     void startStream(const QString& cameraName);
     void stopStream(const QString& cameraName);
-    void stopAllStreams();
     void restartStream(const QString& cameraName);
+
+    // ⭐ Allow QML to stop everything cleanly
+    Q_INVOKABLE void stopAllStreams();
 
     // Worker access for QML
     Q_INVOKABLE QObject* getWorker(const QString& cameraName);
