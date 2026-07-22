@@ -13,6 +13,9 @@ from config import (
     PROGRESS_FILE, MODULE_ID, SYSTEM_ID, SYSTEM_NAME
 )
 
+# Import HTTPS module
+from https_server import start_https_server
+
 HOST = "0.0.0.0"
 DISCOVERY_PORT = 3666
 
@@ -134,7 +137,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                 from camera_manager import remove_camera
                 return self.send_json(remove_camera(data.get("id")))
 
-            # ====================== RESTART ENDPOINTS (NEW) ======================
+            # ====================== RESTART ENDPOINTS ======================
             if self.path == "/api/restartFrigate":
                 from camera_manager import restart_frigate
                 return self.send_json({"success": restart_frigate()})
@@ -189,16 +192,8 @@ if __name__ == "__main__":
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(f"[*] HTTP server running → http://{LAN_IP}:{HTTP_PORT}")
 
-    # HTTPS Server
-    try:
-        httpsd = http.server.HTTPServer((HOST, HTTPS_PORT), VMSHandler)
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(certfile="combined.pem")
-        httpsd.socket = context.wrap_socket(httpsd.socket, server_side=True)
-        threading.Thread(target=httpsd.serve_forever, daemon=True).start()
-        print(f"[*] HTTPS server running → https://{LAN_IP}:{HTTPS_PORT}")
-    except Exception as e:
-        print(f"[HTTPS] Failed to start: {e}")
+    # HTTPS Server (now in separate file)
+    start_https_server(HOST, HTTPS_PORT, VMSHandler)
 
     print("[MAIN] All services started. Press Ctrl+C to stop.")
 
