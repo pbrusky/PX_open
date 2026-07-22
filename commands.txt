@@ -1,6 +1,0 @@
-"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
-cd c:\
-cd PX
-cd px_open
-cmake --build build
-c:\PX\px_open\build\px_open.exe
