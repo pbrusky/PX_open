@@ -1,33 +1,18 @@
-# PX Open
+# PX Open Client
 
-PX Open is a Windows application for viewing and managing Frigate camera streams.  
-It includes a standalone Qt-based viewer (`px_open.exe`) and optional helper tools packaged as standalone executables.
+PX Open is the main desktop application for managing cameras, Frigate integration, ONVIF discovery, RTSP testing, and system configuration.
 
-This project is designed to be easy for end users to install and run without requiring Python, Qt, or development tools.
+## Folders
 
----
+### PX Open Client
+Contains the full source code for the PX Open desktop application.
 
-## 📦 What’s Included
+### Server Module
+Contains the Frigate Server Module, which must run on the device hosting Frigate.
 
-### **PX Open (Qt Application)**
-- `px_open.exe`
-- Required Qt libraries
-- FFmpeg runtime
-- QML resources
-
-### **PX Tools (Optional Python Utilities)**
-Packaged as `.exe` files using PyInstaller/Nuitka:
-- `tool1.exe`
-- `tool2.exe`
-- Additional helper utilities
-
-No Python installation is required.
-
----
-
-## 🚀 Installation
-
-### **Option A — Standalone Executables**
-1. Download the latest release ZIP from the GitHub Releases page.
-2. Extract the ZIP to any folder (e.g., Desktop or Program Files).
-3. Run:
+## Features
+- ONVIF camera discovery
+- RTSP stream testing via go2rtc
+- Frigate camera configuration
+- Automatic Frigate/go2rtc restart
+- HTTPS API for PX Open
