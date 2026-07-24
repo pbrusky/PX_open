@@ -68,10 +68,8 @@ Popup {
                 devices = []
                 discoveryRunning = true
 
-                if (!frigateRef) {
-                    console.log("ONVIF: frigateRef is NULL")
+                if (!frigateRef)
                     return
-                }
 
                 frigateRef.discoverOnvif(userField.text, passField.text)
             }
@@ -145,19 +143,15 @@ Popup {
                             font.pixelSize: 15
 
                             onClicked: {
-                                if (!addCameraPopupRef) {
-                                    console.log("ONVIF: addCameraPopupRef is NULL")
+                                if (!addCameraPopupRef)
                                     return
-                                }
 
                                 let ip = modelData.address
                                 let user = userField.text
                                 let pass = passField.text
 
-                                if (!frigateRef) {
-                                    console.log("ONVIF: frigateRef is NULL")
+                                if (!frigateRef)
                                     return
-                                }
 
                                 frigateRef.getRtsp(ip, user, pass)
                             }
@@ -185,23 +179,17 @@ Popup {
         }
 
         function onRtspResolved(rtsp) {
-            if (!addCameraPopupRef) {
-                console.log("ONVIF: addCameraPopupRef is NULL")
+            if (!addCameraPopupRef)
                 return
-            }
 
             addCameraPopupRef.rtspField.text = rtsp
             addCameraPopupRef.streamUrl = rtsp
-
-            // ✅ Do NOT reopen; AddCameraPopup is already open
-            // addCameraPopupRef.open()
 
             popup.close()
         }
 
         function onOnvifError(message) {
             discoveryRunning = false
-            console.log("ONVIF error:", message)
         }
     }
 }

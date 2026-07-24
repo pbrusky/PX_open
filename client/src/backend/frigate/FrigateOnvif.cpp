@@ -7,7 +7,6 @@
 #include <QNetworkReply>
 #include <QSslConfiguration>
 #include <QSslSocket>
-#include <QDebug>
 
 FrigateOnvif::FrigateOnvif(QObject* parent)
     : QObject(parent),
@@ -26,12 +25,11 @@ QVariantList FrigateOnvif::getOnvifProgress() const
 }
 
 //
-// ⭐ ONVIF DISCOVERY
+// ⭐ ONVIF DISCOVERY (silent)
 //
 void FrigateOnvif::discoverOnvif(const QString& username, const QString& password)
 {
     if (m_moduleServer.isEmpty()) {
-        qWarning() << "[Onvif] discoverOnvif: moduleServer is empty";
         emit onvifDevicesDiscovered(QVariantList());
         return;
     }
@@ -39,7 +37,6 @@ void FrigateOnvif::discoverOnvif(const QString& username, const QString& passwor
     m_onvifProgress.clear();
 
     const QUrl url(m_moduleServer + "/api/onvifDiscover");
-    qDebug() << "[Onvif] discoverOnvif: calling" << url.toString();
 
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
@@ -56,15 +53,13 @@ void FrigateOnvif::discoverOnvif(const QString& username, const QString& passwor
     QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
 
     connect(reply, &QNetworkReply::sslErrors, reply,
-            [reply](const QList<QSslError>& errors) {
-        qDebug() << "[Onvif] discoverOnvif: ignoring SSL errors:" << errors;
+            [reply](const QList<QSslError>&) {
         reply->ignoreSslErrors();
     });
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
 
         if (reply->error() != QNetworkReply::NoError) {
-            qWarning() << "[Onvif] discoverOnvif: network error:" << reply->errorString();
             reply->deleteLater();
             emit onvifDevicesDiscovered(QVariantList());
             return;
@@ -73,11 +68,8 @@ void FrigateOnvif::discoverOnvif(const QString& username, const QString& passwor
         QByteArray data = reply->readAll();
         reply->deleteLater();
 
-        qDebug() << "[Onvif] discoverOnvif: raw response:" << data;
-
         QJsonDocument doc = QJsonDocument::fromJson(data);
         if (!doc.isObject()) {
-            qWarning() << "[Onvif] discoverOnvif: invalid JSON";
             emit onvifDevicesDiscovered(QVariantList());
             return;
         }
@@ -99,24 +91,21 @@ void FrigateOnvif::discoverOnvif(const QString& username, const QString& passwor
             finalList.append(dev);
         }
 
-        qDebug() << "[Onvif] discoverOnvif: received" << finalList.size() << "devices";
         emit onvifDevicesDiscovered(finalList);
     });
 }
 
 //
-// ⭐ GET RTSP FROM ONVIF
+// ⭐ GET RTSP FROM ONVIF (silent)
 //
 void FrigateOnvif::getRtsp(const QString& ip, const QString& username, const QString& password)
 {
     if (m_moduleServer.isEmpty()) {
-        qWarning() << "[Onvif] getRtsp: moduleServer is empty";
         emit rtspResolved("");
         return;
     }
 
     const QUrl url(m_moduleServer + "/api/getRtsp");
-    qDebug() << "[Onvif] getRtsp: calling" << url.toString();
 
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
@@ -134,8 +123,7 @@ void FrigateOnvif::getRtsp(const QString& ip, const QString& username, const QSt
     QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
 
     connect(reply, &QNetworkReply::sslErrors, reply,
-            [reply](const QList<QSslError>& errors) {
-        qDebug() << "[Onvif] getRtsp: ignoring SSL errors:" << errors;
+            [reply](const QList<QSslError>&) {
         reply->ignoreSslErrors();
     });
 
@@ -144,11 +132,8 @@ void FrigateOnvif::getRtsp(const QString& ip, const QString& username, const QSt
         QByteArray data = reply->readAll();
         reply->deleteLater();
 
-        qDebug() << "[Onvif] getRtsp: raw response:" << data;
-
         QJsonDocument doc = QJsonDocument::fromJson(data);
         if (!doc.isObject()) {
-            qWarning() << "[Onvif] getRtsp: invalid JSON";
             emit rtspResolved("");
             return;
         }
