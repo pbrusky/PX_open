@@ -23,7 +23,7 @@ Rectangle {
     signal serverSelected(string name, string ip, int apiPort, int modulePort)
 
     Component.onCompleted: {
-        // removed logs
+        // logs removed
     }
 
     Component.onDestruction: {

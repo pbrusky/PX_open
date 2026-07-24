@@ -96,6 +96,9 @@ void FFmpegWorker::decodeLoop()
     av_dict_set(&opts, "probesize", "32768", 0);
     av_dict_set(&opts, "analyzeduration", "0", 0);
 
+    // Discard corrupt packets at demuxer level
+    av_dict_set(&opts, "fflags", "discardcorrupt", 0);
+
     int ret = avformat_open_input(&fmtCtx, m_url.toUtf8().constData(), nullptr, &opts);
     av_dict_free(&opts);
 
@@ -108,6 +111,8 @@ void FFmpegWorker::decodeLoop()
     }
 
     fmtCtx->flags |= AVFMT_FLAG_GENPTS;
+    fmtCtx->flags |= AVFMT_FLAG_DISCARD_CORRUPT;
+
     emit openInputOk();
 
     if (m_testMode) {
@@ -147,14 +152,8 @@ void FFmpegWorker::decodeLoop()
     codecCtx = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(codecCtx, videoStream->codecpar);
 
-    // Low-latency but HEVC-safe
     codecCtx->flags |= AV_CODEC_FLAG_LOW_DELAY;
-
-    // Tolerate minor bitstream errors (helps with imperfect HEVC streams)
-    codecCtx->err_recognition = AV_EF_IGNORE_ERR;
-
-    // Do NOT force max_b_frames = 0 here; it breaks HEVC
-    // codecCtx->max_b_frames = 0;  // removed
+    codecCtx->err_recognition = AV_EF_CAREFUL;
 
     ret = avcodec_open2(codecCtx, codec, nullptr);
     if (ret < 0) {
@@ -185,6 +184,7 @@ void FFmpegWorker::decodeLoop()
     emit streamStarted();
 
     qint64 lastStatsMs = QDateTime::currentMSecsSinceEpoch();
+    static QImage lastGood;  // last good frame for HEVC fallback
 
     while (!m_abort) {
 
@@ -205,14 +205,36 @@ void FFmpegWorker::decodeLoop()
         ret = avcodec_send_packet(codecCtx, &pkt);
         av_packet_unref(&pkt);
 
-        if (ret < 0)
-            continue;
+        if (ret < 0) {
+            if (ret == AVERROR_INVALIDDATA)
+                continue;
+            break;
+        }
 
         while (!m_abort) {
 
             ret = avcodec_receive_frame(codecCtx, frame);
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;
+
+            if (ret < 0)
+                continue;
+
+            if (frame->width <= 0 || frame->height <= 0)
+                continue;
+
+            if (frame->width != outFrame->width || frame->height != outFrame->height) {
+                outFrame->width  = frame->width;
+                outFrame->height = frame->height;
+                av_frame_get_buffer(outFrame, 32);
+
+                if (sws)
+                    sws_freeContext(sws);
+
+                sws = sws_getContext(frame->width, frame->height, codecCtx->pix_fmt,
+                                     frame->width, frame->height, AV_PIX_FMT_NV12,
+                                     SWS_BILINEAR, nullptr, nullptr, nullptr);
+            }
 
             qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
             if (nowMs - lastStatsMs > 1000) {
@@ -228,11 +250,11 @@ void FFmpegWorker::decodeLoop()
                       outFrame->data,
                       outFrame->linesize);
 
-            QImage img(codecCtx->width, codecCtx->height, QImage::Format_RGB32);
+            QImage img(outFrame->width, outFrame->height, QImage::Format_RGB32);
 
             SwsContext* rgbSws = sws_getContext(
-                codecCtx->width, codecCtx->height, AV_PIX_FMT_NV12,
-                codecCtx->width, codecCtx->height, AV_PIX_FMT_BGRA,
+                outFrame->width, outFrame->height, AV_PIX_FMT_NV12,
+                outFrame->width, outFrame->height, AV_PIX_FMT_BGRA,
                 SWS_BILINEAR, nullptr, nullptr, nullptr
             );
 
@@ -248,6 +270,15 @@ void FFmpegWorker::decodeLoop()
                       destStride);
 
             sws_freeContext(rgbSws);
+
+            // HEVC hardening: drop obviously bad frames, reuse last good
+            if (img.width() <= 16 || img.height() <= 16) {
+                if (!lastGood.isNull() && m_queue)
+                    m_queue->pushImage(lastGood);
+                continue;
+            }
+
+            lastGood = img;
 
             if (m_queue)
                 m_queue->pushImage(img);
