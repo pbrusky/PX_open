@@ -12,7 +12,7 @@ ApplicationWindow {
     visible: true
     color: "black"
 
-    flags: Qt.FramelessWindowHint
+    flags: Qt.Window | Qt.FramelessWindowHint
 
     property var frigateRef: frigate
     property var cameraList: []
@@ -103,6 +103,8 @@ ApplicationWindow {
         width: parent.width
         height: 48
         z: 9999
+
+        // ⭐ REMOVED the click‑stealing MouseArea here
 
         property bool collapsed: false
 
@@ -254,8 +256,7 @@ ApplicationWindow {
                     contentLoader.startupDone = true
                     contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
 
-                    mainWindow.visibility = Window.FullScreen
-                    mainWindow.showFullScreen()
+                    mainWindow.showMaximized()
                     topbar.isMaximized = true
                 })
             }
@@ -294,8 +295,8 @@ ApplicationWindow {
         function onCamerasLoaded(list) {
 
             if (!list || list.length === 0) {
-                console.log("Frigate still restarting… camera list empty");
-                return;
+                console.log("Frigate still restarting… camera list empty")
+                return
             }
 
             mainWindow.cameraList = list
@@ -363,7 +364,6 @@ ApplicationWindow {
             frigateRef.serverIp = ""
 
             mainWindow.showNormal()
-            mainWindow.visibility = Window.Windowed
 
             mainWindow.width = 1400
             mainWindow.height = 900
@@ -390,14 +390,12 @@ ApplicationWindow {
         }
 
         function onMaximizeRequested() {
-            mainWindow.visibility = Window.FullScreen
-            mainWindow.showFullScreen()
+            mainWindow.showMaximized()
             topbar.isMaximized = true
         }
 
         function onRestoreRequested() {
             mainWindow.showNormal()
-            mainWindow.visibility = Window.Windowed
 
             mainWindow.width = 1400
             mainWindow.height = 900

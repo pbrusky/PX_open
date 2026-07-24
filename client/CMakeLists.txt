@@ -23,17 +23,6 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
 qt_standard_project_setup()
 
 #
-# Include directories
-#
-include_directories(
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/ui          # ⭐ REQUIRED for FrameItem.h
-    ${CMAKE_SOURCE_DIR}/src/backend
-    ${CMAKE_SOURCE_DIR}/src/backend/frigate
-    C:/ffmpeg/include
-)
-
-#
 # FFmpeg library directory
 #
 link_directories(C:/ffmpeg/lib)
@@ -41,13 +30,11 @@ link_directories(C:/ffmpeg/lib)
 #
 # Resources
 #
-qt_add_resources(APP_RESOURCES
-    resources.qrc
-)
+qt_add_resources(APP_RESOURCES resources.qrc)
 
-#
-# Main executable
-#
+# ---------------------------------------------------------
+# 1. Create the executable FIRST
+# ---------------------------------------------------------
 qt_add_executable(px_open
     src/main.cpp
 
@@ -70,9 +57,20 @@ qt_add_executable(px_open
     ${APP_RESOURCES}
 )
 
-#
-# Frigate backend module
-#
+# ---------------------------------------------------------
+# 2. NOW attach include directories
+# ---------------------------------------------------------
+target_include_directories(px_open PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/frigate
+    C:/ffmpeg/include
+)
+
+# ---------------------------------------------------------
+# 3. Frigate backend library
+# ---------------------------------------------------------
 add_library(frigate_backend
     src/backend/frigate/FrigateAPI.cpp
     src/backend/frigate/FrigateAPI.h
@@ -93,36 +91,40 @@ add_library(frigate_backend
     src/backend/frigate/FrigateOnvif.h
 )
 
-#
-# ⭐ Critical fix — link QtGui + QtMultimedia + QtNetwork
-#
-target_link_libraries(frigate_backend
-    PRIVATE
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Network
-        Qt6::Multimedia
+# ⭐ THIS FIXES THE MISSING HEADER ERRORS
+target_include_directories(frigate_backend PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/frigate
+    C:/ffmpeg/include
 )
 
-#
-# Link everything together
-#
-target_link_libraries(px_open
-    PRIVATE
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Network
-        Qt6::Quick
-        Qt6::Qml
-        Qt6::QuickControls2
-        Qt6::WebEngineQuick
-        Qt6::WebEngineCore
-        Qt6::Multimedia
+target_link_libraries(frigate_backend PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Multimedia
+)
 
-        frigate_backend
+# ---------------------------------------------------------
+# 4. Link everything together
+# ---------------------------------------------------------
+target_link_libraries(px_open PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Qt6::Quick
+    Qt6::Qml
+    Qt6::QuickControls2
+    Qt6::WebEngineQuick
+    Qt6::WebEngineCore
+    Qt6::Multimedia
 
-        avcodec
-        avformat
-        avutil
-        swscale
+    frigate_backend
+
+    avcodec
+    avformat
+    avutil
+    swscale
 )

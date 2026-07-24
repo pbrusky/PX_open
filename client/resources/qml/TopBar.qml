@@ -10,25 +10,11 @@ Item {
     height: collapsed ? 0 : 48
     Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
 
-    //
-    // Page state flags (set by MainWindow)
-    //
     property bool isStartupPage: false
     property bool isCameraPage: false
-
-    //
-    // Server name shown on the right
-    //
     property string serverName: ""
-
-    //
-    // Maximize state (MainWindow reads/writes this)
-    //
     property bool isMaximized: false
 
-    //
-    // Signals to MainWindow
-    //
     signal disconnectRequested()
     signal exitRequested()
     signal minimizeRequested()
@@ -36,9 +22,6 @@ Item {
     signal maximizeRequested()
     signal addCameraRequested()
 
-    //
-    // Context menu for server name
-    //
     Menu {
         id: serverNameContextMenu
         x: serverNameContainer.x
@@ -60,9 +43,16 @@ Item {
         color: "#1E1E1E"
     }
 
-    //
-    // Hamburger menu (left side)
-    //
+    MouseArea {
+        id: dragArea
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: buttonRow.left
+        z: -1
+        onPressed: mainWindow.startSystemMove()
+    }
+
     Rectangle {
         id: menuButton
         width: 36
@@ -109,18 +99,13 @@ Item {
         }
     }
 
-    //
-    // Right-side controls (server name + window buttons)
-    //
     Row {
+        id: buttonRow
         anchors.right: parent.right
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         spacing: 16
 
-        //
-        // Server name display
-        //
         Rectangle {
             id: serverNameContainer
             width: serverNameText.paintedWidth + 24
@@ -149,9 +134,6 @@ Item {
             }
         }
 
-        //
-        // Minimize button
-        //
         Rectangle {
             id: minimizeButton
             width: 28
@@ -177,9 +159,6 @@ Item {
             }
         }
 
-        //
-        // Maximize / Restore button
-        //
         Rectangle {
             id: maximizeRestoreButton
             width: 28
@@ -201,7 +180,6 @@ Item {
                 hoverEnabled: true
                 onEntered: maximizeRestoreButton.hovered = true
                 onExited: maximizeRestoreButton.hovered = false
-
                 onClicked: {
                     if (topbarWrapper.isMaximized) {
                         topbarWrapper.restoreRequested()
@@ -212,9 +190,6 @@ Item {
             }
         }
 
-        //
-        // Exit button
-        //
         Rectangle {
             id: exitButton
             width: 28
