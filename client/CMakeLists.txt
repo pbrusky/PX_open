@@ -57,6 +57,13 @@ qt_add_executable(px_open
     ${APP_RESOURCES}
 )
 
+# ⭐ Embed Windows icon resource (taskbar icon)
+if (WIN32)
+    target_sources(px_open PRIVATE
+        appicon.rc
+    )
+endif()
+
 # ---------------------------------------------------------
 # 2. NOW attach include directories
 # ---------------------------------------------------------
@@ -91,7 +98,7 @@ add_library(frigate_backend
     src/backend/frigate/FrigateOnvif.h
 )
 
-# ⭐ THIS FIXES THE MISSING HEADER ERRORS
+# ⭐ Fix includes for frigate_backend
 target_include_directories(frigate_backend PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui

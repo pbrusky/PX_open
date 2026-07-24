@@ -21,6 +21,10 @@
 #include "CameraVideoItem.h"
 #include "FrameItem.h"
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 // ---------------------------------------------------------
 // GPU Detection (AMD → force software OpenGL)
 // ---------------------------------------------------------
@@ -56,7 +60,7 @@ int main(int argc, char *argv[])
     // Create application
     QGuiApplication app(argc, argv);
 
-    // Set application icon (embedded via resources.qrc)
+    // Qt internal icon (used for dialogs, etc.)
     app.setWindowIcon(QIcon(":/assets/icon.ico"));
 
     QQmlApplicationEngine engine;
@@ -100,8 +104,44 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty())
         return -1;
 
-    QObject* mainWindow = engine.rootObjects().first();
-    engine.rootContext()->setContextProperty("mainWindow", mainWindow);
+    //
+    // ⭐ Set icon on the actual Win32 window (required for frameless windows)
+    //
+    QObject* mainWindowObj = engine.rootObjects().first();
+    QWindow* mainWindow = qobject_cast<QWindow*>(mainWindowObj);
+
+#ifdef Q_OS_WIN
+    if (mainWindow) {
+        HWND hwnd = (HWND)mainWindow->winId();
+
+        // Load icon from your actual filesystem path
+        HICON hIcon = (HICON)LoadImageW(
+            nullptr,
+            L"C:\\PX\\px_open\\client\\assets\\icon.ico",   // ⭐ YOUR REAL PATH
+            IMAGE_ICON,
+            32, 32,
+            LR_LOADFROMFILE
+        );
+
+        if (hIcon) {
+            // Apply icon to small + large Win32 slots
+            SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIcon);
+            SendMessage(hwnd, WM_SETICON, ICON_BIG,   (LPARAM)hIcon);
+
+            // Force Windows to treat this as a normal app window
+            LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+            exStyle &= ~WS_EX_TOOLWINDOW;
+            exStyle |= WS_EX_APPWINDOW;
+            SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
+
+            // Refresh window frame so icon appears immediately
+            SetWindowPos(hwnd, nullptr, 0,0,0,0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        }
+    }
+#endif
+
+    engine.rootContext()->setContextProperty("mainWindow", mainWindowObj);
 
     return app.exec();
 }

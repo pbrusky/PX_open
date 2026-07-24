@@ -12,6 +12,9 @@ ApplicationWindow {
     visible: true
     color: "black"
 
+    // ❌ icon: "..."  (QtQuick Controls 2 does NOT support this)
+    // Icon is now set from main.cpp using mainWindow->setIcon()
+
     flags: Qt.Window | Qt.FramelessWindowHint
 
     property var frigateRef: frigate
@@ -103,8 +106,6 @@ ApplicationWindow {
         width: parent.width
         height: 48
         z: 9999
-
-        // ⭐ REMOVED the click‑stealing MouseArea here
 
         property bool collapsed: false
 
@@ -295,7 +296,6 @@ ApplicationWindow {
         function onCamerasLoaded(list) {
 
             if (!list || list.length === 0) {
-                console.log("Frigate still restarting… camera list empty")
                 return
             }
 
