@@ -6,6 +6,9 @@
 
 #include <QtWebEngineQuick>
 #include <QQuickStyle>
+#include <QIcon>
+#include <QProcess>
+#include <QDebug>
 
 #include "FrigateAPI.h"
 #include "FrigateCameraManager.h"
@@ -18,13 +21,44 @@
 #include "CameraVideoItem.h"
 #include "FrameItem.h"
 
+// ---------------------------------------------------------
+// GPU Detection (AMD → force software OpenGL)
+// ---------------------------------------------------------
+bool isAmdGpuPresent()
+{
+    QProcess p;
+    p.start("wmic path win32_VideoController get Name");
+    p.waitForFinished();
+    QString output = p.readAllStandardOutput().toLower();
+
+    return output.contains("amd") || output.contains("radeon");
+}
+
 int main(int argc, char *argv[])
 {
+    // GPU detection BEFORE creating QGuiApplication
+    if (isAmdGpuPresent()) {
+        qputenv("QT_OPENGL", "software");
+        qDebug() << "AMD GPU detected — forcing software OpenGL";
+    } else {
+        qDebug() << "Non-AMD GPU detected — using default OpenGL";
+    }
+
+    // Force D3D11 for stability
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
+
+    // Initialize WebEngine
     QtWebEngineQuick::initialize();
+
+    // Use Fusion style
     QQuickStyle::setStyle("Fusion");
 
+    // Create application
     QGuiApplication app(argc, argv);
+
+    // Set application icon (embedded via resources.qrc)
+    app.setWindowIcon(QIcon(":/assets/icon.ico"));
+
     QQmlApplicationEngine engine;
 
     //

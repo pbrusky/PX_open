@@ -53,6 +53,9 @@
 
         <!-- Assets -->
         <file>assets/icon.png</file>
+       
+        <!-- Logo Icon Assets -->
+        <file>assets/icon.ico</file>
 
         <!-- Icon Assets -->
         <file>assets/icons/play.svg</file>
