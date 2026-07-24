@@ -273,15 +273,17 @@ void FFmpegWorker::decodeLoop()
 
             // HEVC hardening: drop obviously bad frames, reuse last good
             if (img.width() <= 16 || img.height() <= 16) {
-                if (!lastGood.isNull() && m_queue)
+                if (!lastGood.isNull() && m_queue) {
                     m_queue->pushImage(lastGood);
+                }
                 continue;
             }
 
             lastGood = img;
 
-            if (m_queue)
+            if (m_queue) {
                 m_queue->pushImage(img);
+            }
         }
     }
 

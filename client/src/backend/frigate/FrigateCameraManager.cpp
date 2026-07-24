@@ -5,8 +5,6 @@
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QNetworkReply>
-#include <QProcess>
-#include <QRegularExpression>
 #include <QDebug>
 
 FrigateCameraManager::FrigateCameraManager(QObject* parent)
@@ -65,11 +63,12 @@ void FrigateCameraManager::loadCameras()
 
             for (auto it = cams.begin(); it != cams.end(); ++it) {
                 QString id = it.key();
-                QJsonObject camObj = it.value().toObject();
 
                 QVariantMap entry;
                 entry["id"]        = id;
                 entry["name"]      = id;
+
+                // ⭐ Version 1 RTSP endpoint (WORKING)
                 entry["streamUrl"] = QString("rtsp://%1:8554/%2")
                                         .arg(m_serverIp, id);
 
@@ -84,65 +83,14 @@ void FrigateCameraManager::loadCameras()
                 m_cameraOnline[id] = true;
                 emit cameraOnline(id);
 
-                QString rtspUrl = entry["streamUrl"].toString();
-
-                QProcess* ff = new QProcess(this);
-
-                QStringList args;
-                args << "-hide_banner"
-                     << "-rtsp_transport" << "tcp"
-                     << "-i" << rtspUrl
-                     << "-t" << "1"
-                     << "-f" << "null"
-                     << "-";
-
-                connect(ff, &QProcess::readyReadStandardError, this, [this, ff, id]() {
-                    QString output = ff->readAllStandardError();
-
-                    QRegularExpression reRes("(\\d{3,4})x(\\d{3,4})");
-                    auto resMatch = reRes.match(output);
-                    QString resolution = resMatch.hasMatch() ? resMatch.captured(0) : "";
-
-                    QRegularExpression reFps("(\\d+(?:\\.\\d+)?)\\s?fps");
-                    auto fpsMatch = reFps.match(output);
-                    double fps = fpsMatch.hasMatch() ? fpsMatch.captured(1).toDouble() : 0;
-
-                    QRegularExpression reCodec("Video:\\s*(\\w+)");
-                    auto codecMatch = reCodec.match(output);
-                    QString codec = codecMatch.hasMatch() ? codecMatch.captured(1) : "";
-
-                    QRegularExpression reBitrate("(\\d+)\\s?kb/s");
-                    auto brMatch = reBitrate.match(output);
-                    int bitrate = brMatch.hasMatch() ? brMatch.captured(1).toInt() : 0;
-
-                    QVariantMap meta;
-                    meta["resolution"]  = resolution;
-                    meta["fps"]         = fps;
-                    meta["codec"]       = codec;
-                    meta["bitrateKbps"] = bitrate;
-                    meta["streamType"]  = "rtsp";
-
-                    m_cameraMetadata[id] = meta;
-                });
-
-                connect(ff, &QProcess::finished, this, [this, ff, id](int, QProcess::ExitStatus) {
-                    ff->deleteLater();
-
-                    for (int i = 0; i < m_cameraList.size(); ++i) {
-                        QVariantMap cam = m_cameraList[i].toMap();
-                        if (cam["id"].toString() == id) {
-                            QVariantMap meta = m_cameraMetadata[id];
-                            for (auto it = meta.begin(); it != meta.end(); ++it)
-                                cam[it.key()] = it.value();
-                            m_cameraList[i] = cam;
-                            break;
-                        }
-                    }
-
-                    emit camerasLoaded(m_cameraList);
-                });
-
-                ff->start("ffmpeg", args);
+                // Minimal metadata (v1 behavior)
+                QVariantMap meta;
+                meta["resolution"]  = "";
+                meta["fps"]         = 0;
+                meta["codec"]       = "";
+                meta["bitrateKbps"] = 0;
+                meta["streamType"]  = "rtsp";
+                m_cameraMetadata[id] = meta;
             }
         }
 
@@ -178,9 +126,6 @@ void FrigateCameraManager::addCamera(const QString& id, const QString& url, bool
         QJsonDocument doc = QJsonDocument::fromJson(data);
         QJsonObject root  = doc.object();
 
-        //
-        // ⭐ NEW: Parse event "cameraAddResult"
-        //
         QString event = root.value("event").toString();
         bool ok = root.value("status").toString() == "ok";
         QString msg = root.value("message").toString();
@@ -188,7 +133,6 @@ void FrigateCameraManager::addCamera(const QString& id, const QString& url, bool
         if (event == "cameraAddResult") {
             emit cameraAddResult(ok, msg);
         } else {
-            // fallback for older module versions
             emit cameraAddResult(ok, ok ? "Camera added" : "Failed to add camera");
         }
 

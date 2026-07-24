@@ -4,6 +4,7 @@
 
 #include <QThread>
 #include <QVariant>
+#include <QDebug>
 
 FrigateStreamManager::FrigateStreamManager(QObject* parent)
     : QObject(parent)
@@ -25,6 +26,7 @@ void FrigateStreamManager::setServerIp(const QString& ip)
     m_serverIp = ip;
 }
 
+// ⭐ Version 1 RTSP endpoint (WORKING)
 static QString buildRtspUrl(const QString& serverIp, const QString& cameraName)
 {
     return QString("rtsp://%1:8554/%2").arg(serverIp, cameraName);
@@ -45,6 +47,7 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
     m_queues.insert(cameraName, queue);
 
     const QString url = buildRtspUrl(m_serverIp, cameraName);
+    qDebug() << "FrigateStreamManager: starting RTSP stream for" << cameraName << "URL:" << url;
 
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
@@ -169,7 +172,6 @@ void FrigateStreamManager::stopStream(const QString& cameraName)
 
 void FrigateStreamManager::stopAllStreams()
 {
-    // graceful shutdown of all workers
     for (auto w : m_workers)
         if (w && !w->property("isProbe").toBool())
             w->stopDecoding();

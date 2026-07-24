@@ -6,6 +6,7 @@
 #include "FrigatePlayback.h"
 #include "FrigateOnvif.h"
 #include <QProcess>
+#include <QDebug>
 
 FrigateAPI::FrigateAPI(QObject* parent)
     : QObject(parent)
@@ -190,6 +191,9 @@ void FrigateAPI::stopAllStreams()
     m_streamManager->stopAllStreams();
 }
 
+//
+// ⭐ NEW — expose FFmpegWorker to QML
+//
 QObject* FrigateAPI::getWorker(const QString& cameraName)
 {
     return m_streamManager->getWorker(cameraName);
@@ -250,10 +254,12 @@ void FrigateAPI::loadModuleInformation()
 }
 
 //
-// RTSP TESTING (cleaned)
+// RTSP TESTING
 //
 void FrigateAPI::testRtsp(const QString& url)
 {
+    qDebug() << "FrigateAPI::testRtsp REAL TEST for URL:" << url;
+
     QString program = "ffmpeg";
 
     QStringList args;
