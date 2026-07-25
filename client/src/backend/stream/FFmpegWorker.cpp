@@ -6,6 +6,24 @@
 
 extern "C" {
 #include <libavutil/error.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/pixfmt.h>
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libswscale/swscale.h>
+}
+
+static enum AVPixelFormat g_hwPixFmt = AV_PIX_FMT_NONE;
+
+static enum AVPixelFormat get_hw_format(AVCodecContext *ctx,
+                                        const enum AVPixelFormat *pix_fmts)
+{
+    Q_UNUSED(ctx);
+    for (const enum AVPixelFormat *p = pix_fmts; *p != AV_PIX_FMT_NONE; ++p) {
+        if (*p == g_hwPixFmt)
+            return *p;
+    }
+    return AV_PIX_FMT_NONE;
 }
 
 FFmpegWorker::FFmpegWorker(QObject* parent)
@@ -37,6 +55,39 @@ void FFmpegWorker::setTestMode(bool enabled)
 void FFmpegWorker::setFrameQueue(FrameQueue* queue)
 {
     m_queue = queue;
+}
+
+bool FFmpegWorker::initHwDevice(AVCodecContext* ctx, AVCodecID codecId)
+{
+    Q_UNUSED(codecId);
+
+    AVHWDeviceType type = av_hwdevice_find_type_by_name("d3d11va");
+    if (type == AV_HWDEVICE_TYPE_NONE) {
+        return false;
+    }
+
+    int ret = av_hwdevice_ctx_create(&m_hwDeviceCtx, type, nullptr, nullptr, 0);
+    if (ret < 0) {
+        return false;
+    }
+
+    ctx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
+
+    for (int i = 0;; ++i) {
+        const AVCodecHWConfig* config = avcodec_get_hw_config(ctx->codec, i);
+        if (!config)
+            break;
+
+        if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
+            config->device_type == type)
+        {
+            g_hwPixFmt = config->pix_fmt;
+            ctx->get_format = get_hw_format;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void FFmpegWorker::startDecoding()
@@ -85,18 +136,14 @@ void FFmpegWorker::decodeLoop()
 {
     AVFormatContext* fmtCtx = nullptr;
     AVCodecContext* codecCtx = nullptr;
-    SwsContext* sws = nullptr;
     AVFrame* frame = nullptr;
-    AVFrame* outFrame = nullptr;
+    AVFrame* swFrame = nullptr;
+    SwsContext* rgbSws = nullptr;
 
     AVDictionary* opts = nullptr;
     av_dict_set(&opts, "rtsp_transport", "tcp", 0);
-
-    // Low-latency input tuning
     av_dict_set(&opts, "probesize", "32768", 0);
     av_dict_set(&opts, "analyzeduration", "0", 0);
-
-    // Discard corrupt packets at demuxer level
     av_dict_set(&opts, "fflags", "discardcorrupt", 0);
 
     int ret = avformat_open_input(&fmtCtx, m_url.toUtf8().constData(), nullptr, &opts);
@@ -154,6 +201,10 @@ void FFmpegWorker::decodeLoop()
 
     codecCtx->flags |= AV_CODEC_FLAG_LOW_DELAY;
     codecCtx->err_recognition = AV_EF_CAREFUL;
+    codecCtx->thread_count = 0;
+    codecCtx->thread_type = FF_THREAD_FRAME;
+
+    bool hwOk = initHwDevice(codecCtx, videoStream->codecpar->codec_id);
 
     ret = avcodec_open2(codecCtx, codec, nullptr);
     if (ret < 0) {
@@ -169,22 +220,13 @@ void FFmpegWorker::decodeLoop()
     updateStats(fmtCtx, codecCtx, videoStream);
 
     frame = av_frame_alloc();
-    outFrame = av_frame_alloc();
-
-    outFrame->format = AV_PIX_FMT_NV12;
-    outFrame->width  = codecCtx->width;
-    outFrame->height = codecCtx->height;
-
-    av_frame_get_buffer(outFrame, 32);
-
-    sws = sws_getContext(codecCtx->width, codecCtx->height, codecCtx->pix_fmt,
-                         codecCtx->width, codecCtx->height, AV_PIX_FMT_NV12,
-                         SWS_BILINEAR, nullptr, nullptr, nullptr);
+    swFrame = av_frame_alloc();
 
     emit streamStarted();
 
     qint64 lastStatsMs = QDateTime::currentMSecsSinceEpoch();
-    static QImage lastGood;  // last good frame for HEVC fallback
+    int lastW = 0;
+    int lastH = 0;
 
     while (!m_abort) {
 
@@ -220,21 +262,16 @@ void FFmpegWorker::decodeLoop()
             if (ret < 0)
                 continue;
 
-            if (frame->width <= 0 || frame->height <= 0)
-                continue;
+            AVFrame* srcFrame = frame;
 
-            if (frame->width != outFrame->width || frame->height != outFrame->height) {
-                outFrame->width  = frame->width;
-                outFrame->height = frame->height;
-                av_frame_get_buffer(outFrame, 32);
-
-                if (sws)
-                    sws_freeContext(sws);
-
-                sws = sws_getContext(frame->width, frame->height, codecCtx->pix_fmt,
-                                     frame->width, frame->height, AV_PIX_FMT_NV12,
-                                     SWS_BILINEAR, nullptr, nullptr, nullptr);
+            if (hwOk && frame->format == g_hwPixFmt) {
+                if (av_hwframe_transfer_data(swFrame, frame, 0) < 0)
+                    continue;
+                srcFrame = swFrame;
             }
+
+            if (srcFrame->width <= 0 || srcFrame->height <= 0)
+                continue;
 
             qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
             if (nowMs - lastStatsMs > 1000) {
@@ -242,44 +279,33 @@ void FFmpegWorker::decodeLoop()
                 updateStats(fmtCtx, codecCtx, videoStream);
             }
 
-            sws_scale(sws,
-                      frame->data,
-                      frame->linesize,
-                      0,
-                      frame->height,
-                      outFrame->data,
-                      outFrame->linesize);
+            if (!rgbSws || lastW != srcFrame->width || lastH != srcFrame->height) {
+                if (rgbSws)
+                    sws_freeContext(rgbSws);
 
-            QImage img(outFrame->width, outFrame->height, QImage::Format_RGB32);
+                rgbSws = sws_getContext(
+                    srcFrame->width, srcFrame->height,
+                    (AVPixelFormat)srcFrame->format,
+                    srcFrame->width, srcFrame->height,
+                    AV_PIX_FMT_BGRA,
+                    SWS_BILINEAR, nullptr, nullptr, nullptr
+                );
 
-            SwsContext* rgbSws = sws_getContext(
-                outFrame->width, outFrame->height, AV_PIX_FMT_NV12,
-                outFrame->width, outFrame->height, AV_PIX_FMT_BGRA,
-                SWS_BILINEAR, nullptr, nullptr, nullptr
-            );
-
-            uint8_t* dest[4] = { img.bits(), nullptr, nullptr, nullptr };
-            int destStride[4] = { img.bytesPerLine(), 0, 0, 0 };
-
-            sws_scale(rgbSws,
-                      outFrame->data,
-                      outFrame->linesize,
-                      0,
-                      outFrame->height,
-                      dest,
-                      destStride);
-
-            sws_freeContext(rgbSws);
-
-            // HEVC hardening: drop obviously bad frames, reuse last good
-            if (img.width() <= 16 || img.height() <= 16) {
-                if (!lastGood.isNull() && m_queue) {
-                    m_queue->pushImage(lastGood);
-                }
-                continue;
+                lastW = srcFrame->width;
+                lastH = srcFrame->height;
             }
 
-            lastGood = img;
+            QImage img(srcFrame->width, srcFrame->height, QImage::Format_RGB32);
+            uint8_t* dest[4] = { img.bits(), nullptr, nullptr, nullptr };
+            int destStride[4] = { int(img.bytesPerLine()), 0, 0, 0 };
+
+            sws_scale(rgbSws,
+                      srcFrame->data,
+                      srcFrame->linesize,
+                      0,
+                      srcFrame->height,
+                      dest,
+                      destStride);
 
             if (m_queue) {
                 m_queue->pushImage(img);
@@ -287,11 +313,12 @@ void FFmpegWorker::decodeLoop()
         }
     }
 
-    if (sws) sws_freeContext(sws);
+    if (rgbSws) sws_freeContext(rgbSws);
     if (frame) av_frame_free(&frame);
-    if (outFrame) av_frame_free(&outFrame);
+    if (swFrame) av_frame_free(&swFrame);
     if (codecCtx) avcodec_free_context(&codecCtx);
     if (fmtCtx) avformat_close_input(&fmtCtx);
+    if (m_hwDeviceCtx) av_buffer_unref(&m_hwDeviceCtx);
 
     emit streamStopped();
     emit finished();

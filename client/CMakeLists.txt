@@ -29,9 +29,11 @@ qt_add_executable(px_open
 
     # Backend: render
     src/backend/render/CameraVideoItem.cpp
-
+    src/backend/render/CameraVideoItemTexture.cpp
+   
     # UI
     src/ui/FrameItem.cpp
+    src/ui/FullscreenHelper.cpp   # ⭐ REQUIRED
 
     ${APP_RESOURCES}
 )

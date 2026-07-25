@@ -1,12 +1,13 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Window 2.15
 import PxOpen 1.0
 
-Rectangle {
+Window {
     id: root
-    anchors.fill: parent
+    visible: false
     color: "black"
-    z: 10000
+    flags: Qt.FramelessWindowHint | Qt.Window
 
     property string cameraId: ""
     property string cameraName: ""
@@ -21,6 +22,21 @@ Rectangle {
     opacity: 0.0
     Behavior on opacity { NumberAnimation { duration: 200 } }
 
+    //
+    // ⭐ ESC handler — must be inside an Item, not the Window
+    //
+    FocusScope {
+        id: keyHandler
+        anchors.fill: parent
+        focus: true
+
+        Keys.onReleased: {
+            if (event.key === Qt.Key_Escape)
+                root.close()
+            event.accepted = true
+        }
+    }
+
     Rectangle {
         id: videoArea
         anchors.fill: parent
@@ -29,25 +45,25 @@ Rectangle {
         CameraVideoItem {
             id: liveVideo
             anchors.fill: parent
-            visible: isOnline && !isPlayback
+            visible: !isPlayback && liveQueue !== null
             queue: liveQueue
         }
 
         CameraVideoItem {
             id: playbackVideo
             anchors.fill: parent
-            visible: isPlayback
+            visible: isPlayback && playbackQueue !== null
             queue: playbackQueue
         }
 
         Rectangle {
             anchors.fill: parent
             color: "#222"
-            visible: !isOnline && !isPlayback
+            visible: liveQueue === null && playbackQueue === null
 
             Text {
                 anchors.centerIn: parent
-                text: "Camera Offline"
+                text: "No video queue"
                 color: "white"
                 font.pixelSize: 24
                 font.bold: true
@@ -59,11 +75,6 @@ Rectangle {
             acceptedButtons: Qt.LeftButton
             onDoubleClicked: root.close()
         }
-    }
-
-    Keys.onReleased: {
-        if (event.key === Qt.Key_Escape)
-            root.close()
     }
 
     Rectangle {
@@ -88,8 +99,8 @@ Rectangle {
             }
 
             Text {
-                text: isOnline ? (isPlayback ? "PLAYBACK" : "LIVE") : "OFFLINE"
-                color: isOnline ? (isPlayback ? "#FFC107" : "#00C853") : "#00C853"
+                text: isPlayback ? "PLAYBACK" : "LIVE"
+                color: isPlayback ? "#FFC107" : "#00C853"
                 font.pixelSize: 14
             }
 
@@ -134,9 +145,6 @@ Rectangle {
         }
     }
 
-    //
-    // ⭐ TIMELINE (NX-style auto-hide)
-    //
     Rectangle {
         id: timelineContainer
         anchors.left: parent.left
@@ -255,10 +263,12 @@ Rectangle {
     }
 
     function open() {
-        root.visible = true
-        root.opacity = 1.0
+        visible = true
+        opacity = 1.0
         topOverlay.opacity = 1.0
         exitButton.opacity = 1.0
+
+        showFullScreen()
 
         isPlayback = false
         playbackPositionMs = 0
@@ -279,13 +289,14 @@ Rectangle {
     }
 
     function close() {
-        root.opacity = 0.0
+        showNormal()
+
+        opacity = 0.0
         topOverlay.opacity = 0.0
         exitButton.opacity = 0.0
 
         Qt.callLater(() => {
-            root.visible = false
-            root.parent.source = ""
+            visible = false
         })
     }
 }

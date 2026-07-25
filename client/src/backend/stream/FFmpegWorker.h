@@ -8,6 +8,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>
+#include <libavutil/hwcontext.h>
 }
 
 class FrameQueue;
@@ -16,7 +17,7 @@ class FFmpegWorker : public QObject
 {
     Q_OBJECT
 
-    // ⭐ QML-visible metadata (must be at the top)
+    // QML-visible metadata
     Q_PROPERTY(QString resolution READ resolution NOTIFY statsChanged)
     Q_PROPERTY(double fps READ fps NOTIFY statsChanged)
     Q_PROPERTY(int bitrateKbps READ bitrateKbps NOTIFY statsChanged)
@@ -30,7 +31,7 @@ public:
     void setTestMode(bool enabled);
     void setFrameQueue(FrameQueue* queue);
 
-    // ⭐ QML reads these
+    // QML reads these
     QString resolution() const { return m_resolution; }
     double fps() const { return m_fps; }
     int bitrateKbps() const { return m_bitrateKbps; }
@@ -48,7 +49,7 @@ signals:
     void streamError(const QString& reason);
     void finished();
 
-    // ⭐ QML listens for this
+    // QML listens for this
     void statsChanged();
 
 private:
@@ -56,6 +57,7 @@ private:
     void updateStats(AVFormatContext* fmtCtx,
                      AVCodecContext* codecCtx,
                      AVStream* videoStream);
+    bool initHwDevice(AVCodecContext* ctx, AVCodecID codecId);
 
     QString m_url;
     bool m_abort = false;
@@ -63,9 +65,12 @@ private:
 
     FrameQueue* m_queue = nullptr;
 
-    // ⭐ Actual metadata storage
+    // Metadata storage
     QString m_resolution;
     double m_fps = 0.0;
     int m_bitrateKbps = 0;
     QString m_codec;
+
+    // Hardware device context
+    AVBufferRef* m_hwDeviceCtx = nullptr;
 };

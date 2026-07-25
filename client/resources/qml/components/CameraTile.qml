@@ -15,7 +15,9 @@ Item {
     property var frigateRef
 
     property string cameraName: ""
-    property bool isOnline: frigateRef ? frigateRef.isCameraOnline(cameraName) : false
+
+    // ⭐ Updated online logic
+    property bool isOnline: frameQueue !== null && cameraName !== ""
 
     property string resolution: ""
     property real fps: 0
@@ -26,7 +28,6 @@ Item {
     property var frameQueue: null
     property var currentFrame
 
-    // For dragging
     property var originalParent: null
     property real originalX: 0
     property real originalY: 0
@@ -35,22 +36,15 @@ Item {
 
     signal removeRequested()
 
-    //
-    // Update queue when cameraName changes
-    //
     onCameraNameChanged: {
         currentFrame = null
 
-        if (frigateRef && cameraName !== "") {
+        if (frigateRef && cameraName !== "")
             frameQueue = frigateRef.getQueue(cameraName)
-        } else {
+        else
             frameQueue = null
-        }
     }
 
-    //
-    // Reconnect + instant frame pop
-    //
     onFrameQueueChanged: {
         frameConn.target = frameQueue
 
@@ -58,7 +52,6 @@ Item {
             var img = frameQueue.popImage()
             if (img) {
                 currentFrame = img
-                videoFrame.frame = img
             }
         }
     }
@@ -73,7 +66,6 @@ Item {
             var img = frameQueue.popImage()
             if (img) {
                 currentFrame = img
-                videoFrame.frame = img
             }
         }
     }
@@ -85,10 +77,12 @@ Item {
         visible: currentFrame === null || currentFrame === undefined
     }
 
-    FrameItem {
+    // ⭐ Correct renderer — now always visible when online
+    CameraVideoItem {
         id: videoFrame
         anchors.fill: parent
-        visible: currentFrame !== null && currentFrame !== undefined && isOnline
+        queue: frameQueue
+        visible: isOnline
     }
 
     Rectangle {
@@ -141,13 +135,9 @@ Item {
 
         drag.target: tile
         drag.axis: Drag.XAndYAxis
-        drag.minimumX: 0
-        drag.minimumY: 0
-        drag.maximumX: gridRoot ? gridRoot.width - tile.width : 9999
-        drag.maximumY: gridRoot ? gridRoot.height - tile.height : 9999
 
         onPressed: {
-            dragging = true
+            dragging = false
 
             originalParent = tile.parent
             originalX = tile.x
@@ -163,7 +153,10 @@ Item {
         }
 
         onPositionChanged: {
-            if (drag.active && gridRoot && gridRoot.updateHoverIndex) {
+            if (!dragging && drag.active)
+                dragging = true
+
+            if (dragging && gridRoot && gridRoot.updateHoverIndex) {
                 var global = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
                 gridRoot.updateHoverIndex(global.x, global.y, cameraName)
             }
@@ -173,7 +166,6 @@ Item {
             dragging = false
 
             if (originalParent) {
-                var pos = gridRoot.mapToItem(originalParent, tile.x, tile.y)
                 tile.parent = originalParent
                 tile.x = originalX
                 tile.y = originalY
@@ -181,8 +173,8 @@ Item {
                 tile.height = originalHeight
             }
 
-            if (gridRoot && gridRoot.reorderTilesByTileCenter)
-                gridRoot.reorderTilesByTileCenter(tileIndex, tile)
+            if (mainWindow && mainWindow.dropHandler)
+                mainWindow.dropHandler.reorderTile(tileIndex, tile)
         }
 
         onDoubleClicked: {
@@ -217,6 +209,7 @@ Item {
     }
 
     function handleRemove() {
-        removeRequested()
+        if (mainWindow && mainWindow.dropHandler)
+            mainWindow.dropHandler.removeCamera(cameraName)
     }
 }

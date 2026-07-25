@@ -20,6 +20,7 @@ Item {
     property int hoverIndex: -1
     property string hoverCameraName: ""
 
+    // fullscreen state
     property var fullscreenCamera: null
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
@@ -56,8 +57,6 @@ Item {
     function dropAt(x, y, cameraName) {
         if (!cameraName || cameraName === "") return
         if (cameraNames.indexOf(cameraName) !== -1) return
-
-        console.log("Dropping camera:", cameraName)
 
         cameraNames.push(cameraName)
         cameraNames = cameraNames.slice()
@@ -109,32 +108,33 @@ Item {
     }
 
     //
-    // ⭐ FULLSCREEN FIX — use dedicated queues
+    // ⭐ CLEAN FULLSCREEN ENTRY — no spam
     //
     function enterFullscreen(cameraName, liveQueue) {
         let cam = getCamera(cameraName)
-        if (!cam) return
+        fullscreenCamera = cam ? cam : { id: cameraName, name: cameraName }
 
-        fullscreenCamera = cam
-
-        fullscreenLiveQueue = frigateRef ? frigateRef.getQueue(cameraName) : null
+        fullscreenLiveQueue = liveQueue || (frigateRef ? frigateRef.getQueue(cameraName) : null)
         fullscreenPlaybackQueue = frigateRef ? frigateRef.getPlaybackQueue(cameraName) : null
 
         fullscreenLoader.source = "qrc:/app/resources/qml/FullscreenCamera.qml"
         fullscreenLoader.visible = true
+
+        // update existing fullscreen item
+        if (fullscreenLoader.item) {
+            let item = fullscreenLoader.item
+            item.cameraId = fullscreenCamera.id || fullscreenCamera.name
+            item.cameraName = fullscreenCamera.name || fullscreenCamera.id
+            item.frigateRef = gridContainer.frigateRef
+            item.isOnline = gridContainer.frigateRef
+                            ? gridContainer.frigateRef.isCameraOnline(item.cameraName)
+                            : false
+            item.liveQueue = fullscreenLiveQueue
+            item.playbackQueue = fullscreenPlaybackQueue
+            if (item.open) item.open()
+        }
     }
 
-    function exitFullscreen() {
-        fullscreenLoader.visible = false
-        fullscreenLoader.source = ""
-        fullscreenCamera = null
-        fullscreenLiveQueue = null
-        fullscreenPlaybackQueue = null
-    }
-
-    //
-    // ⭐ GRID LAYOUT FIX — force layout when size changes
-    //
     Connections {
         target: grid
 
@@ -202,6 +202,9 @@ Item {
         }
     }
 
+    //
+    // ⭐ CLEAN FULLSCREEN LOADER
+    //
     Loader {
         id: fullscreenLoader
         anchors.fill: parent
@@ -213,18 +216,23 @@ Item {
             item.cameraId = fullscreenCamera.id || fullscreenCamera.name
             item.cameraName = fullscreenCamera.name || fullscreenCamera.id
             item.frigateRef = gridContainer.frigateRef
-            item.isOnline = gridContainer.frigateRef ? gridContainer.frigateRef.isCameraOnline(item.cameraName) : false
-            item.liveQueue = gridContainer.fullscreenLiveQueue
-            item.playbackQueue = gridContainer.fullscreenPlaybackQueue
+            item.isOnline = gridContainer.frigateRef
+                            ? gridContainer.frigateRef.isCameraOnline(item.cameraName)
+                            : false
+            item.liveQueue = fullscreenLiveQueue
+            item.playbackQueue = fullscreenPlaybackQueue
             if (item.open) item.open()
         }
 
-        Keys.onEscapePressed: gridContainer.exitFullscreen()
+        Keys.onEscapePressed: {
+            fullscreenLoader.visible = false
+            fullscreenLoader.source = ""
+            fullscreenCamera = null
+            fullscreenLiveQueue = null
+            fullscreenPlaybackQueue = null
+        }
     }
 
-    //
-    // ⭐ FINAL FIX — force layout after component creation
-    //
     Component.onCompleted: {
         updateGridSize()
         Qt.callLater(() => grid.forceLayout())
