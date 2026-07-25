@@ -16,7 +16,8 @@ Item {
 
     property string cameraName: ""
 
-    property bool isOnline: currentFrame !== null && currentFrame !== undefined
+    // ⭐ Updated online logic
+    property bool isOnline: frameQueue !== null && cameraName !== ""
 
     property string resolution: ""
     property real fps: 0
@@ -51,7 +52,6 @@ Item {
             var img = frameQueue.popImage()
             if (img) {
                 currentFrame = img
-                videoFrame.frame = img
             }
         }
     }
@@ -66,7 +66,6 @@ Item {
             var img = frameQueue.popImage()
             if (img) {
                 currentFrame = img
-                videoFrame.frame = img
             }
         }
     }
@@ -78,10 +77,12 @@ Item {
         visible: currentFrame === null || currentFrame === undefined
     }
 
-    FrameItem {
+    // ⭐ Correct renderer — now always visible when online
+    CameraVideoItem {
         id: videoFrame
         anchors.fill: parent
-        visible: currentFrame !== null && currentFrame !== undefined && isOnline
+        queue: frameQueue
+        visible: isOnline
     }
 
     Rectangle {

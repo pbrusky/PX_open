@@ -1,17 +1,17 @@
-#include "CameraVideoItem.h"
+#include "CameraVideoItemTexture.h"
 #include "FrameQueue.h"
 
 #include <QSGSimpleTextureNode>
 #include <QQuickWindow>
 #include <QDebug>
 
-CameraVideoItem::CameraVideoItem(QQuickItem* parent)
+CameraVideoItemTexture::CameraVideoItemTexture(QQuickItem* parent)
     : QQuickItem(parent)
 {
     setFlag(ItemHasContents, true);
 }
 
-void CameraVideoItem::setQueue(QObject* q)
+void CameraVideoItemTexture::setQueue(QObject* q)
 {
     if (m_queue)
         disconnect(m_queue, nullptr, this, nullptr);
@@ -28,21 +28,24 @@ void CameraVideoItem::setQueue(QObject* q)
     update();
 }
 
-QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
-                                          UpdatePaintNodeData*)
+QSGNode* CameraVideoItemTexture::updatePaintNode(QSGNode* oldNode,
+                                                 UpdatePaintNodeData*)
 {
     QSGSimpleTextureNode* node = static_cast<QSGSimpleTextureNode*>(oldNode);
 
-    // Pop latest QImage frame
-    if (m_queue) {
-        QImage img = m_queue->popImage();
-        if (!img.isNull()) {
-            m_lastImage = img;
-            // qDebug() << "CameraVideoItem: got image" << img.size();
-        }
-    }
+    if (!window() || !m_queue)
+        return oldNode;
 
-    if (!window() || m_lastImage.isNull())
+    // Try to pop a GPU texture (not yet used with Qt 6.5)
+    ID3D11Texture2D* tex2d = m_queue->popTexture();
+    Q_UNUSED(tex2d); // Qt 6.5 has no public API to bind this directly
+
+    // Fallback: CPU image path
+    QImage img = m_queue->popImage();
+    if (!img.isNull())
+        m_lastImage = img;
+
+    if (m_lastImage.isNull())
         return oldNode;
 
     if (!node)
@@ -50,7 +53,7 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
 
     QSGTexture* tex = window()->createTextureFromImage(m_lastImage);
     if (!tex)
-        return node;
+        return oldNode;
 
     node->setTexture(tex);
     node->setOwnsTexture(true);
