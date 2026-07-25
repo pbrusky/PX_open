@@ -117,7 +117,7 @@ Item {
         fullscreenLiveQueue = liveQueue || (frigateRef ? frigateRef.getQueue(cameraName) : null)
         fullscreenPlaybackQueue = frigateRef ? frigateRef.getPlaybackQueue(cameraName) : null
 
-        fullscreenLoader.source = "qrc:/app/resources/qml/FullscreenCamera.qml"
+        fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
         fullscreenLoader.visible = true
 
         // update existing fullscreen item

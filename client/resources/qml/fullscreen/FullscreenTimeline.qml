@@ -60,23 +60,8 @@ Rectangle {
         onTriggered: currentTimeMs = Date.now()
     }
 
-    //
-    // ⭐ Reset timeline when switching cameras
-    //
-    onCameraIdChanged: {
-        recordings = []
-        events = []
-        startTs = 0
-        endTs = 0
-        playbackPositionMs = 0
-        position = 0
-
-        if (scrubber)
-            scrubber.x = 0
-    }
-
     Connections {
-        target: frigateRef || null
+        target: frigateRef ? frigateRef : null
         ignoreUnknownSignals: true
 
         function onRecordingsLoaded(id, segments) {
@@ -97,18 +82,8 @@ Rectangle {
             if (id !== cameraId) return
             playbackPositionMs = posMs
             timeline.position = timeline.timestampToRatio(posMs)
-
             if (scrubber)
                 scrubber.x = timeline.timestampToX(posMs) - scrubber.width/2
-        }
-    }
-
-    //
-    // ⭐ Re-apply scrubber position when timeline expands
-    //
-    onCollapsedChanged: {
-        if (!collapsed && scrubber) {
-            scrubber.x = timeline.timestampToX(playbackPositionMs) - scrubber.width/2
         }
     }
 

@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
 import "qrc:/app/resources/qml"
+import "qrc:/app/resources/qml/fullscreen"
 
 Item {
     id: root

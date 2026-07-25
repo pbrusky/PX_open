@@ -26,7 +26,7 @@ Item {
 
         fullscreenWindow = FullscreenHelper.openFullscreen(
             Qt.application.engine,
-            "qrc:/app/resources/qml/FullscreenCamera.qml"
+            "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
         )
 
         fullscreenWindow.cameraId = cameraKey

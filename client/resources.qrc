@@ -5,8 +5,9 @@
         <file>resources/qml/MainWindow.qml</file>
         <file>resources/qml/MainWindowConnections.qml</file>
         <file>resources/qml/fullscreen/FullscreenManager.qml</file>
-        <file>resources/qml/FullscreenCamera.qml</file>
-        <file>resources/qml/FullscreenTimeline.qml</file>
+        <file>resources/qml/fullscreen/FullscreenCamera.qml</file>
+        <file>resources/qml/fullscreen/FullscreenTimeline.qml</file>
+        <file>resources/qml/fullscreen/FullscreenToolbar.qml</file>
         <file>resources/qml/EventList.qml</file>
 
         <!-- Settings / Pages -->
@@ -34,7 +35,6 @@
         <file>resources/qml/components/EditCameraPopup.qml</file>
         <file>resources/qml/components/RemoveCameraPopup.qml</file>
         <file>resources/qml/components/OnvifDiscoveryPopup.qml</file>
-        <file>resources/qml/components/FullscreenToolbar.qml</file>
         <file>resources/qml/components/RestartPopup.qml</file>
         <file>resources/qml/components/CameraDropHandler.qml</file>
 
