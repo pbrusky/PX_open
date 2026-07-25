@@ -12,95 +12,98 @@ ApplicationWindow {
     visible: true
     color: "black"
 
-    // ❌ icon: "..."  (QtQuick Controls 2 does NOT support this)
-    // Icon is now set from main.cpp using mainWindow->setIcon()
-
     flags: Qt.Window | Qt.FramelessWindowHint
 
+    //
+    // Global state
+    //
     property var frigateRef: frigate
     property var cameraList: []
     property string selectedCameraId: ""
     property string serverName: ""
     property string _fullscreenCameraKey: ""
 
+    property var fullscreenManager
+    property var dropHandler
+
     signal cameraOnline(string name)
     signal cameraOffline(string name)
     signal camerasLoaded(var list)
 
+    //
+    // Popups
+    //
     RestartPopup {
         id: restartPopup
         visible: false
         z: 999999
     }
 
+    //
+    // Poll timer
+    //
     Timer {
         id: frigatePollTimer
         interval: 1500
         repeat: true
-
         onTriggered: {
             if (frigateRef)
                 frigateRef.loadCameras()
         }
     }
 
-    function loadCameras() {
-        if (frigateRef)
-            frigateRef.loadCameras()
-    }
-
+    //
+    // Fullscreen loader
+    //
     Loader {
         id: fullscreenLoader
         anchors.fill: parent
         z: 99999
         visible: false
+    }
+
+    //
+    // Fullscreen manager loader
+    //
+    Loader {
+        id: fullscreenManagerLoader
+        source: "qrc:/app/resources/qml/fullscreen/FullscreenManager.qml"
+        asynchronous: false
+        visible: false
 
         onLoaded: {
-            if (!item) return
+            var fm = fullscreenManagerLoader.item
+            fm.mainWindow = mainWindow
+            fm.frigateRef = frigateRef
+            fm.fullscreenLoader = fullscreenLoader
 
-            item.cameraId = _fullscreenCameraKey
-            item.cameraName = _fullscreenCameraKey
-            item.frigateRef = frigateRef
-            item.isOnline = frigateRef.isCameraOnline(_fullscreenCameraKey)
-
-            if (item.open)
-                item.open()
+            mainWindow.fullscreenManager = fm
+            // console.log removed
         }
     }
 
-    function openFullscreen(cameraKey) {
-        if (!cameraKey) return
-        _fullscreenCameraKey = cameraKey
-        fullscreenLoader.source = "qrc:/app/resources/qml/FullscreenCamera.qml"
-        fullscreenLoader.visible = true
-    }
+    //
+    // Drop handler loader
+    //
+    Loader {
+        id: dropHandlerLoader
+        source: "qrc:/app/resources/qml/components/CameraDropHandler.qml"
+        asynchronous: false
+        visible: false
 
-    function closeFullscreen() {
-        if (fullscreenLoader.item && fullscreenLoader.item.close)
-            fullscreenLoader.item.close()
-        fullscreenLoader.visible = false
-    }
+        onLoaded: {
+            var dh = dropHandlerLoader.item
+            dh.mainWindow = mainWindow
+            dh.contentLoader = contentLoader
 
-    function handleCameraDrop(x, y, cameraName) {
-        let sv = contentLoader.item
-        if (!sv || sv.objectName !== "ServerView")
-            return
-
-        let grid = sv.cameraGrid
-        if (!grid || !grid.dropAt) {
-            sv.gridReady.connect(function() {
-                let g = sv.cameraGrid
-                if (!g || !g.dropAt) return
-                let p2 = g.mapFromGlobal(x, y)
-                g.dropAt(p2.x, p2.y, cameraName)
-            })
-            return
+            mainWindow.dropHandler = dh
+            // console.log removed
         }
-
-        let p = grid.mapFromGlobal(x, y)
-        grid.dropAt(p.x, p.y, cameraName)
     }
 
+    //
+    // Top bar
+    //
     TopBar {
         id: topbar
         width: parent.width
@@ -135,6 +138,9 @@ ApplicationWindow {
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
     }
 
+    //
+    // Sidebar
+    //
     Sidebar {
         id: sidebarWrapper
         objectName: "Sidebar"
@@ -164,13 +170,15 @@ ApplicationWindow {
         onRequestRemoveCamera: function(id) {
             if (contentLoader.item &&
                 contentLoader.item.objectName === "ServerView" &&
-                contentLoader.item.openRemoveCameraPopup) {
+                contentLoader.item.openRemoveCameraPopup)
+            {
                 contentLoader.item.openRemoveCameraPopup(id)
             }
         }
 
         onCameraDropped: function(x, y, cameraName) {
-            mainWindow.handleCameraDrop(x, y, cameraName)
+            if (mainWindow.dropHandler)
+                mainWindow.dropHandler.dropCamera(x, y, cameraName)
         }
 
         onNavigate: function(page) {
@@ -188,14 +196,15 @@ ApplicationWindow {
             if (page === "addCamera") {
                 if (contentLoader.item &&
                     contentLoader.item.objectName === "ServerView" &&
-                    contentLoader.item.openAddCameraPopup) {
+                    contentLoader.item.openAddCameraPopup)
+                {
                     contentLoader.item.openAddCameraPopup()
                 }
                 return
             }
 
             if (page === "reloadCameras") {
-                mainWindow.loadCameras()
+                frigateRef.loadCameras()
                 return
             }
 
@@ -226,6 +235,9 @@ ApplicationWindow {
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
     }
 
+    //
+    // Main content loader
+    //
     Loader {
         id: contentLoader
         anchors.fill: parent
@@ -280,6 +292,9 @@ ApplicationWindow {
         }
     }
 
+    //
+    // Popups
+    //
     AddCameraPopup {
         id: addCameraPopup
         frigateRef: mainWindow.frigateRef
@@ -290,119 +305,24 @@ ApplicationWindow {
         frigateRef: mainWindow.frigateRef
     }
 
-    Connections {
-        target: frigateRef
+    //
+    // Modular connections file
+    //
+    Loader {
+        id: connectionsLoader
+        source: "qrc:/app/resources/qml/MainWindowConnections.qml"
+        asynchronous: false
+        visible: false
 
-        function onCamerasLoaded(list) {
-
-            if (!list || list.length === 0) {
-                return
-            }
-
-            mainWindow.cameraList = list
-            sidebarWrapper.cameraList = list
-
-            if (contentLoader.item &&
-                contentLoader.item.objectName === "ServerView" &&
-                contentLoader.item.updateCameras)
-                contentLoader.item.updateCameras(list)
-
-            mainWindow.camerasLoaded(list)
-
-            if (frigatePollTimer.running)
-                frigatePollTimer.stop()
-
-            restartPopup.visible = false
-        }
-
-        function onCameraOffline(name) {
-            for (var i = 0; i < mainWindow.cameraList.length; ++i)
-                if (mainWindow.cameraList[i].name === name)
-                    mainWindow.cameraList[i].isOnline = false
-
-            sidebarWrapper.cameraList = mainWindow.cameraList
-            mainWindow.cameraOffline(name)
-        }
-
-        function onCameraOnline(name) {
-            for (var i = 0; i < mainWindow.cameraList.length; ++i)
-                if (mainWindow.cameraList[i].name === name)
-                    mainWindow.cameraList[i].isOnline = true
-
-            sidebarWrapper.cameraList = mainWindow.cameraList
-            mainWindow.cameraOnline(name)
-        }
-
-        function onCameraAddResult(ok, message) {
-            restartPopup.visible = true
-            frigatePollTimer.start()
-            frigateRef.loadCameras()
-        }
-
-        function onCameraEditResult(ok, message) {
-            restartPopup.visible = true
-            frigatePollTimer.start()
-            frigateRef.loadCameras()
-        }
-
-        function onCameraRemoveResult(ok, message) {
-            restartPopup.visible = true
-            frigatePollTimer.start()
-            frigateRef.loadCameras()
-        }
-    }
-
-    Connections {
-        target: topbar
-
-        function onDisconnectRequested() {
-            contentLoader.startupDone = false
-            contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
-
-            mainWindow.serverName = ""
-            frigateRef.server = ""
-            frigateRef.serverIp = ""
-
-            mainWindow.showNormal()
-
-            mainWindow.width = 1400
-            mainWindow.height = 900
-            mainWindow.x = (mainWindow.screen.width - mainWindow.width) / 2
-            mainWindow.y = (mainWindow.screen.height - mainWindow.height) / 2
-
-            topbar.isMaximized = false
-        }
-
-        function onAddCameraRequested() {
-            if (contentLoader.item &&
-                contentLoader.item.objectName === "ServerView" &&
-                contentLoader.item.openAddCameraPopup) {
-                contentLoader.item.openAddCameraPopup()
-            }
-        }
-
-        function onExitRequested() {
-            Qt.quit()
-        }
-
-        function onMinimizeRequested() {
-            mainWindow.showMinimized()
-        }
-
-        function onMaximizeRequested() {
-            mainWindow.showMaximized()
-            topbar.isMaximized = true
-        }
-
-        function onRestoreRequested() {
-            mainWindow.showNormal()
-
-            mainWindow.width = 1400
-            mainWindow.height = 900
-            mainWindow.x = (mainWindow.screen.width - mainWindow.width) / 2
-            mainWindow.y = (mainWindow.screen.height - mainWindow.height) / 2
-
-            topbar.isMaximized = false
+        onLoaded: {
+            var c = connectionsLoader.item
+            c.mainWindow = mainWindow
+            c.frigateRef = frigateRef
+            c.topbar = topbar
+            c.sidebarWrapper = sidebarWrapper
+            c.contentLoader = contentLoader
+            c.restartPopup = restartPopup
+            c.frigatePollTimer = frigatePollTimer
         }
     }
 }

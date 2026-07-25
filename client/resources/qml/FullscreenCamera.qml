@@ -29,25 +29,25 @@ Rectangle {
         CameraVideoItem {
             id: liveVideo
             anchors.fill: parent
-            visible: isOnline && !isPlayback
+            visible: !isPlayback && liveQueue !== null
             queue: liveQueue
         }
 
         CameraVideoItem {
             id: playbackVideo
             anchors.fill: parent
-            visible: isPlayback
+            visible: isPlayback && playbackQueue !== null
             queue: playbackQueue
         }
 
         Rectangle {
             anchors.fill: parent
             color: "#222"
-            visible: !isOnline && !isPlayback
+            visible: liveQueue === null && playbackQueue === null
 
             Text {
                 anchors.centerIn: parent
-                text: "Camera Offline"
+                text: "No video queue"
                 color: "white"
                 font.pixelSize: 24
                 font.bold: true
@@ -88,8 +88,8 @@ Rectangle {
             }
 
             Text {
-                text: isOnline ? (isPlayback ? "PLAYBACK" : "LIVE") : "OFFLINE"
-                color: isOnline ? (isPlayback ? "#FFC107" : "#00C853") : "#00C853"
+                text: isPlayback ? "PLAYBACK" : "LIVE"
+                color: isPlayback ? "#FFC107" : "#00C853"
                 font.pixelSize: 14
             }
 
@@ -134,9 +134,6 @@ Rectangle {
         }
     }
 
-    //
-    // ⭐ TIMELINE (NX-style auto-hide)
-    //
     Rectangle {
         id: timelineContainer
         anchors.left: parent.left
@@ -260,6 +257,12 @@ Rectangle {
         topOverlay.opacity = 1.0
         exitButton.opacity = 1.0
 
+        var win = root.window
+        if (win) {
+            win.flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+            win.showFullScreen()
+        }
+
         isPlayback = false
         playbackPositionMs = 0
 
@@ -279,13 +282,17 @@ Rectangle {
     }
 
     function close() {
+        var win = root.window
+        if (win) {
+            win.showNormal()
+        }
+
         root.opacity = 0.0
         topOverlay.opacity = 0.0
         exitButton.opacity = 0.0
 
         Qt.callLater(() => {
             root.visible = false
-            root.parent.source = ""
         })
     }
 }

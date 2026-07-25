@@ -8,7 +8,6 @@
 #include <QQuickStyle>
 #include <QIcon>
 #include <QProcess>
-#include <QDebug>
 
 #include "FrigateAPI.h"
 #include "FrigateCameraManager.h"
@@ -38,9 +37,6 @@ int main(int argc, char *argv[])
 {
     if (isAmdGpuPresent()) {
         qputenv("QT_OPENGL", "software");
-        qDebug() << "AMD GPU detected — forcing software OpenGL";
-    } else {
-        qDebug() << "Non-AMD GPU detected — using default OpenGL";
     }
 
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
@@ -71,7 +67,7 @@ int main(int argc, char *argv[])
     FrigateStreamManager* frigateStream = new FrigateStreamManager(&engine);
 
     //
-    // ⭐ Correct camera loading pipeline
+    // Correct camera loading pipeline
     //
     frigateApi->setServer("http://10.36.24.104:5000");
     frigateApi->loadCameras();
@@ -120,6 +116,13 @@ int main(int argc, char *argv[])
         }
     }
 #endif
+
+    //
+    // Fullscreen-capable main window
+    //
+    if (mainWindow) {
+        mainWindow->setFlags(Qt::FramelessWindowHint | Qt::Window);
+    }
 
     engine.rootContext()->setContextProperty("mainWindow", mainWindowObj);
 

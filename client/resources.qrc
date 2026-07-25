@@ -3,6 +3,8 @@
 
         <!-- Main UI -->
         <file>resources/qml/MainWindow.qml</file>
+        <file>resources/qml/MainWindowConnections.qml</file>
+        <file>resources/qml/fullscreen/FullscreenManager.qml</file>
         <file>resources/qml/FullscreenCamera.qml</file>
         <file>resources/qml/FullscreenTimeline.qml</file>
         <file>resources/qml/EventList.qml</file>
@@ -34,6 +36,7 @@
         <file>resources/qml/components/OnvifDiscoveryPopup.qml</file>
         <file>resources/qml/components/FullscreenToolbar.qml</file>
         <file>resources/qml/components/RestartPopup.qml</file>
+        <file>resources/qml/components/CameraDropHandler.qml</file>
 
         <!-- NEW Timeline Components -->
         <file>resources/qml/components/timeline/index.qml</file>
