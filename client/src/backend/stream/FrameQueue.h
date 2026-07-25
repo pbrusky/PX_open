@@ -1,9 +1,8 @@
 #pragma once
-
 #include <QObject>
+#include <QImage>
 #include <QMutex>
 #include <QQueue>
-#include <QImage>
 
 class FrameQueue : public QObject
 {
@@ -11,11 +10,9 @@ class FrameQueue : public QObject
 
 public:
     explicit FrameQueue(QObject* parent = nullptr);
-    ~FrameQueue() override;
 
-    void pushImage(const QImage& img);
     Q_INVOKABLE QImage popImage();
-    void clear();
+    void pushImage(const QImage& img);
 
 signals:
     void frameReady();
@@ -23,5 +20,4 @@ signals:
 private:
     QMutex m_mutex;
     QQueue<QImage> m_queue;
-    int m_maxSize = 3;
 };

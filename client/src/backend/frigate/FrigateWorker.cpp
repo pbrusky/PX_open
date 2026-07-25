@@ -22,10 +22,8 @@ void FrigateWorker::setServer(const QString& url)
     qDebug() << "[Worker] Server set to:" << m_serverUrl;
 }
 
-//
-// ⭐ Module information is handled entirely in FrigateAPI.
+// Module information is handled entirely in FrigateAPI.
 // This prevents QML from calling a missing function.
-//
 void FrigateWorker::loadModuleInformation()
 {
     // No-op
@@ -45,7 +43,7 @@ void FrigateWorker::loadCameras()
     QUrl url(endpoint);
     QNetworkRequest req(url);
 
-    // ⭐ MSVC-safe explicit call
+    // MSVC-safe explicit call
     QNetworkReply* reply = m_net->QNetworkAccessManager::get(req);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -70,7 +68,7 @@ void FrigateWorker::loadCameras()
 
         qDebug() << "[Worker] Loaded config JSON (" << data.size() << " bytes )";
 
-        // ⭐ Send RAW JSON to FrigateAPI (FrigateAPI does all parsing)
+        // Send RAW JSON to FrigateAPI (FrigateAPI does all parsing)
         emit camerasLoaded(data);
     });
 }

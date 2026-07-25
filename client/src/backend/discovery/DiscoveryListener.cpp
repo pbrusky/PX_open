@@ -45,7 +45,7 @@ void DiscoveryListener::processPendingDatagrams()
         QNetworkDatagram datagram = m_socket->receiveDatagram();
         QByteArray data = datagram.data();
 
-        qDebug() << "[Discovery] RAW datagram:" << data;
+        //qDebug() << "[Discovery] RAW datagram:" << data;
 
         QJsonDocument doc = QJsonDocument::fromJson(data);
         if (!doc.isObject())
@@ -67,9 +67,9 @@ void DiscoveryListener::processPendingDatagrams()
 
         QString address = senderIp;
 
-        qDebug() << "[Discovery] Emitting serverFound:"
-                 << name << address << port << container
-                 << systemId << moduleId << type;
+        //qDebug() << "[Discovery] Emitting serverFound:"
+       //          << name << address << port << container
+       //          << systemId << moduleId << type;
 
         emit serverFound(name,
                          address,

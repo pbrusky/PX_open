@@ -117,7 +117,6 @@ Item {
 
         fullscreenCamera = cam
 
-        // ⭐ DO NOT USE liveQueue (shared with grid)
         fullscreenLiveQueue = frigateRef ? frigateRef.getQueue(cameraName) : null
         fullscreenPlaybackQueue = frigateRef ? frigateRef.getPlaybackQueue(cameraName) : null
 
@@ -131,6 +130,21 @@ Item {
         fullscreenCamera = null
         fullscreenLiveQueue = null
         fullscreenPlaybackQueue = null
+    }
+
+    //
+    // ⭐ GRID LAYOUT FIX — force layout when size changes
+    //
+    Connections {
+        target: grid
+
+        function onWidthChanged() {
+            Qt.callLater(() => grid.forceLayout())
+        }
+
+        function onHeightChanged() {
+            Qt.callLater(() => grid.forceLayout())
+        }
     }
 
     Grid {
@@ -208,5 +222,11 @@ Item {
         Keys.onEscapePressed: gridContainer.exitFullscreen()
     }
 
-    Component.onCompleted: updateGridSize()
+    //
+    // ⭐ FINAL FIX — force layout after component creation
+    //
+    Component.onCompleted: {
+        updateGridSize()
+        Qt.callLater(() => grid.forceLayout())
+    }
 }

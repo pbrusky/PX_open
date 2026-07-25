@@ -5,124 +5,79 @@ project(px_open LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-#
-# Qt modules
-#
 find_package(Qt6 6.5 REQUIRED COMPONENTS
-    Core
-    Gui
-    Network
-    Quick
-    Qml
-    QuickControls2
-    WebEngineQuick
-    WebEngineCore
-    Multimedia
+    Core Gui Network Quick Qml QuickControls2
+    WebEngineQuick WebEngineCore Multimedia
 )
 
 qt_standard_project_setup()
 
-#
-# Include directories
-#
-include_directories(
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/ui          # ⭐ REQUIRED for FrameItem.h
-    ${CMAKE_SOURCE_DIR}/src/backend
-    ${CMAKE_SOURCE_DIR}/src/backend/frigate
-    C:/ffmpeg/include
-)
-
-#
-# FFmpeg library directory
-#
 link_directories(C:/ffmpeg/lib)
 
-#
-# Resources
-#
-qt_add_resources(APP_RESOURCES
-    resources.qrc
-)
+qt_add_resources(APP_RESOURCES resources.qrc)
 
-#
-# Main executable
-#
 qt_add_executable(px_open
     src/main.cpp
 
-    # Backend (non-Frigate)
-    src/backend/FrigateWorker.cpp
-    src/backend/FrigateWorker.h
-    src/backend/DiscoveryListener.cpp
-    src/backend/DiscoveryListener.h
+    # Backend: discovery
+    src/backend/discovery/DiscoveryListener.cpp
 
-    # Video pipeline
-    src/backend/FrameQueue.cpp
-    src/backend/FrameQueue.h
-    src/backend/FFmpegWorker.cpp
-    src/backend/FFmpegWorker.h
-    src/backend/CameraVideoItem.cpp
-    src/backend/CameraVideoItem.h
+    # Backend: stream
+    src/backend/stream/FrameQueue.cpp
+    src/backend/stream/FFmpegWorker.cpp
+    src/backend/stream/FrameData.cpp
+
+    # Backend: render
+    src/backend/render/CameraVideoItem.cpp
+
+    # UI
     src/ui/FrameItem.cpp
-    src/ui/FrameItem.h
 
     ${APP_RESOURCES}
 )
 
-#
-# Frigate backend module
-#
+if (WIN32)
+    target_sources(px_open PRIVATE appicon.rc)
+endif()
+
+# ⭐ px_open must see ALL backend folders + ui
+target_include_directories(px_open PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/discovery
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/stream
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/frigate
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/render
+    C:/ffmpeg/include
+)
+
 add_library(frigate_backend
     src/backend/frigate/FrigateAPI.cpp
-    src/backend/frigate/FrigateAPI.h
-
     src/backend/frigate/FrigateCameraManager.cpp
-    src/backend/frigate/FrigateCameraManager.h
-
     src/backend/frigate/FrigateStreamManager.cpp
-    src/backend/frigate/FrigateStreamManager.h
-
     src/backend/frigate/FrigateTimeline.cpp
-    src/backend/frigate/FrigateTimeline.h
-
     src/backend/frigate/FrigatePlayback.cpp
-    src/backend/frigate/FrigatePlayback.h
-
     src/backend/frigate/FrigateOnvif.cpp
-    src/backend/frigate/FrigateOnvif.h
+    src/backend/frigate/FrigateWorker.cpp
 )
 
-#
-# ⭐ Critical fix — link QtGui + QtMultimedia + QtNetwork
-#
-target_link_libraries(frigate_backend
-    PRIVATE
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Network
-        Qt6::Multimedia
+# ⭐ frigate_backend must see stream folder too
+target_include_directories(frigate_backend PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/stream
+    C:/ffmpeg/include
 )
 
-#
-# Link everything together
-#
-target_link_libraries(px_open
-    PRIVATE
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Network
-        Qt6::Quick
-        Qt6::Qml
-        Qt6::QuickControls2
-        Qt6::WebEngineQuick
-        Qt6::WebEngineCore
-        Qt6::Multimedia
+target_link_libraries(frigate_backend PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Multimedia
+)
 
-        frigate_backend
+target_link_libraries(px_open PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Quick Qt6::Qml
+    Qt6::QuickControls2 Qt6::WebEngineQuick Qt6::WebEngineCore
+    Qt6::Multimedia
 
-        avcodec
-        avformat
-        avutil
-        swscale
+    frigate_backend
+
+    avcodec avformat avutil swscale
 )

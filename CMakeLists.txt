@@ -5,13 +5,13 @@ project(PX_open LANGUAGES CXX)
 #
 # Add the client (Qt/C++) project
 #
-add_subdirectory("PX Open Client")
+add_subdirectory("client")
 
 #
 # Install / package the Python server module
 #
 install(
-    DIRECTORY "Server Module/"
+    DIRECTORY "server_module/"
     DESTINATION server_module
     FILES_MATCHING PATTERN "*.py"
 )
@@ -20,7 +20,7 @@ install(
 # Optional: include non-Python files (config, assets)
 #
 install(
-    DIRECTORY "Server Module/"
+    DIRECTORY "server_module/"
     DESTINATION server_module
     PATTERN "*.py" EXCLUDE
 )

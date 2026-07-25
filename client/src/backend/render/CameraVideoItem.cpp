@@ -1,4 +1,6 @@
 #include "CameraVideoItem.h"
+#include "FrameQueue.h"
+
 #include <QSGSimpleTextureNode>
 #include <QQuickWindow>
 #include <QDebug>
@@ -17,7 +19,7 @@ void CameraVideoItem::setQueue(QObject* q)
     m_queue = q ? qobject_cast<FrameQueue*>(q) : nullptr;
 
     if (m_queue) {
-        // Ensure GUI-thread update
+        // GUI-thread update when a new frame arrives
         connect(m_queue, &FrameQueue::frameReady,
                 this, &QQuickItem::update,
                 Qt::QueuedConnection);
@@ -32,7 +34,9 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
 {
     QSGSimpleTextureNode* node = static_cast<QSGSimpleTextureNode*>(oldNode);
 
-    // Pop one frame per update
+    //
+    // ⭐ Version‑1: Pop QImage directly
+    //
     if (m_queue) {
         QImage img = m_queue->popImage();
         if (!img.isNull())
@@ -40,7 +44,7 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
     }
 
     if (!window() || m_lastImage.isNull()) {
-        return oldNode;   // Keep node stable
+        return oldNode;   // keep node stable
     }
 
     // Reuse node if possible
