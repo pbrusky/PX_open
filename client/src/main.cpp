@@ -20,6 +20,8 @@
 #include "CameraVideoItem.h"
 #include "FrameItem.h"
 
+#include "FullscreenHelper.h"   // ⭐ REQUIRED for true fullscreen
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -48,7 +50,9 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
 
+    //
     // Register QML types
+    //
     qmlRegisterType<FrigateAPI>("PxOpen", 1, 0, "FrigateAPI");
     qmlRegisterType<FrigateCameraManager>("PxOpen", 1, 0, "FrigateCameraManager");
     qmlRegisterType<FrigateStreamManager>("PxOpen", 1, 0, "FrigateStreamManager");
@@ -58,6 +62,14 @@ int main(int argc, char *argv[])
 
     qmlRegisterType<CameraVideoItem>("PxOpen", 1, 0, "CameraVideoItem");
     qmlRegisterType<FrameItem>("PxOpen", 1, 0, "FrameItem");
+
+    //
+    // ⭐ Register FullscreenHelper (required for true fullscreen)
+    //
+    qmlRegisterSingletonType<FullscreenHelper>("PxOpen", 1, 0, "FullscreenHelper",
+        [](QQmlEngine* engine, QJSEngine*) -> QObject* {
+            return new FullscreenHelper();
+        });
 
     //
     // Create backend singletons

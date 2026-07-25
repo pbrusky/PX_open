@@ -182,9 +182,11 @@ Item {
                 onExited: maximizeRestoreButton.hovered = false
                 onClicked: {
                     if (topbarWrapper.isMaximized) {
-                        topbarWrapper.restoreRequested()
+                        mainWindow.exitTrueFullscreen()
+                        topbarWrapper.isMaximized = false
                     } else {
-                        topbarWrapper.maximizeRequested()
+                        mainWindow.enterTrueFullscreen()
+                        topbarWrapper.isMaximized = true
                     }
                 }
             }

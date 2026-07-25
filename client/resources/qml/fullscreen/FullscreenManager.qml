@@ -1,20 +1,21 @@
 import QtQuick 2.15
+import QtQuick.Window 2.15
+import PxOpen 1.0
 
 Item {
     id: root
 
     property var mainWindow
     property var frigateRef
-    property var fullscreenLoader
 
-    // camera name from tile
     property string fullscreenCameraKey: ""
-
-    // queue passed from CameraTile
     property var fullscreenLiveQueue: null
 
+    // actual fullscreen window created in C++
+    property var fullscreenWindow: null
+
     //
-    // Open fullscreen
+    // Open fullscreen using native C++ window
     //
     function open(cameraKey, liveQueue) {
         if (!cameraKey)
@@ -23,47 +24,29 @@ Item {
         fullscreenCameraKey = cameraKey
         fullscreenLiveQueue = liveQueue
 
-        fullscreenLoader.source = "qrc:/app/resources/qml/FullscreenCamera.qml"
-        fullscreenLoader.visible = true
+        fullscreenWindow = FullscreenHelper.openFullscreen(
+            Qt.application.engine,
+            "qrc:/app/resources/qml/FullscreenCamera.qml"
+        )
+
+        fullscreenWindow.cameraId = cameraKey
+        fullscreenWindow.cameraName = cameraKey
+        fullscreenWindow.frigateRef = frigateRef
+        fullscreenWindow.liveQueue = liveQueue
+        fullscreenWindow.isOnline = frigateRef.isCameraOnline(cameraKey)
+
+        // ESC and double‑click handled inside FullscreenCamera.qml
+        fullscreenWindow.open()
     }
 
     //
     // Close fullscreen
     //
     function close() {
-        if (fullscreenLoader.item && fullscreenLoader.item.close)
-            fullscreenLoader.item.close()
-
-        fullscreenLoader.visible = false
-    }
-
-    //
-    // Initialize fullscreen camera when loader finishes
-    //
-    Connections {
-        target: fullscreenLoader
-        ignoreUnknownSignals: true
-
-        function onLoaded(item) {
-            if (!item)
-                return
-
-            // pass camera name
-            item.cameraId = root.fullscreenCameraKey
-            item.cameraName = root.fullscreenCameraKey
-
-            // pass frigateRef
-            item.frigateRef = root.frigateRef
-
-            // pass liveQueue
-            item.liveQueue = root.fullscreenLiveQueue
-
-            // online state
-            item.isOnline = root.frigateRef.isCameraOnline(root.fullscreenCameraKey)
-
-            // call fullscreen open()
-            if (item.open)
-                item.open()
+        if (fullscreenWindow) {
+            fullscreenWindow.close()
+            fullscreenWindow.destroy()
+            fullscreenWindow = null
         }
     }
 }

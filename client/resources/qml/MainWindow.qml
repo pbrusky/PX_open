@@ -31,6 +31,22 @@ ApplicationWindow {
     signal camerasLoaded(var list)
 
     //
+    // App fullscreen helpers (NX-style)
+    //
+    property bool isFullscreen: false
+
+    function enterTrueFullscreen() {
+        isFullscreen = true
+        flags = Qt.FramelessWindowHint | Qt.Window
+        showFullScreen()
+    }
+
+    function exitTrueFullscreen() {
+        isFullscreen = false
+        showNormal()
+    }
+
+    //
     // Popups
     //
     RestartPopup {
@@ -53,16 +69,6 @@ ApplicationWindow {
     }
 
     //
-    // Fullscreen loader
-    //
-    Loader {
-        id: fullscreenLoader
-        anchors.fill: parent
-        z: 99999
-        visible: false
-    }
-
-    //
     // Fullscreen manager loader
     //
     Loader {
@@ -75,10 +81,8 @@ ApplicationWindow {
             var fm = fullscreenManagerLoader.item
             fm.mainWindow = mainWindow
             fm.frigateRef = frigateRef
-            fm.fullscreenLoader = fullscreenLoader
 
             mainWindow.fullscreenManager = fm
-            // console.log removed
         }
     }
 
@@ -97,7 +101,6 @@ ApplicationWindow {
             dh.contentLoader = contentLoader
 
             mainWindow.dropHandler = dh
-            // console.log removed
         }
     }
 
@@ -111,6 +114,7 @@ ApplicationWindow {
         z: 9999
 
         property bool collapsed: false
+        property bool isMaximized: false
 
         y: collapsed ? -height : 0
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
@@ -118,6 +122,8 @@ ApplicationWindow {
         isStartupPage: contentLoader.item && contentLoader.item.objectName === "StartupPage"
         isCameraPage: contentLoader.item && contentLoader.item.objectName === "ServerView"
         serverName: mainWindow.serverName
+
+        // ❗ Removed invalid onToggleFullscreen handler
     }
 
     IconButton {
@@ -269,7 +275,8 @@ ApplicationWindow {
                     contentLoader.startupDone = true
                     contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
 
-                    mainWindow.showMaximized()
+                    // NX-style fullscreen (taskbar hidden)
+                    mainWindow.enterTrueFullscreen()
                     topbar.isMaximized = true
                 })
             }
