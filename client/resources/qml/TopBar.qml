@@ -43,13 +43,26 @@ Item {
         color: "#1E1E1E"
     }
 
+    //
+    // ⭐ Double‑click topbar to toggle fullscreen
+    //
     MouseArea {
-        id: dragArea
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.right: buttonRow.left
-        z: -1
+        id: topbarDoubleClickArea
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        propagateComposedEvents: true
+
+        onDoubleClicked: {
+            if (mainWindow.isFullscreen) {
+                mainWindow.exitTrueFullscreen()
+                topbarWrapper.isMaximized = false
+            } else {
+                mainWindow.enterTrueFullscreen()
+                topbarWrapper.isMaximized = true
+            }
+        }
+
+        // Allow dragging window normally
         onPressed: mainWindow.startSystemMove()
     }
 
