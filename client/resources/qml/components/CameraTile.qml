@@ -35,9 +35,6 @@ Item {
 
     signal removeRequested()
 
-    //
-    // ⭐ Collision‑proof helper object
-    //
     QtObject {
         id: helpers
 
@@ -56,14 +53,8 @@ Item {
         }
     }
 
-    //
-    // Rebind queue when camera name changes
-    //
     onCameraNameChanged: helpers.__updateFrameQueueInternal()
 
-    //
-    // When frameQueue changes, bind signals and pop first frame
-    //
     onFrameQueueChanged: {
         frameConn.target = frameQueue
 
@@ -191,17 +182,14 @@ Item {
                 mainWindow.dropHandler.reorderTile(tileIndex, tile)
 
                 tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
-
-                //
-                // ⭐ Rebind queue safely
-                //
-                helpers.__updateFrameQueueInternal()
+                // ❗ Removed helpers.__updateFrameQueueInternal()
+                // cameraNameChanged will trigger it safely
             }
         }
 
         onDoubleClicked: {
             if (gridRoot && gridRoot.enterFullscreen && cameraName !== "")
-                gridRoot.enterFullscreen(cameraName, frameQueue)
+                gridRoot.enterFullscreen(cameraName)
         }
 
         onClicked: function(mouse) {
@@ -219,7 +207,7 @@ Item {
             enabled: cameraName !== ""
             onTriggered: {
                 if (gridRoot && gridRoot.enterFullscreen)
-                    gridRoot.enterFullscreen(cameraName, frameQueue)
+                    gridRoot.enterFullscreen(cameraName)
             }
         }
 
