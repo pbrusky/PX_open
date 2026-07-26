@@ -20,11 +20,9 @@ Window {
     property int playbackPositionMs: 0
 
     opacity: 0.0
-    Behavior on opacity { NumberAnimation { duration: 200 } }
+    Behavior on opacity { NumberAnimation { duration: 150 } }
 
-    //
-    // ⭐ ESC handler — must be inside an Item, not the Window
-    //
+    // ESC handler
     FocusScope {
         id: keyHandler
         anchors.fill: parent
@@ -84,7 +82,7 @@ Window {
         anchors.top: parent.top
         color: "#00000088"
         opacity: 0.0
-        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Behavior on opacity { NumberAnimation { duration: 150 } }
 
         Row {
             anchors.fill: parent
@@ -130,7 +128,7 @@ Window {
         radius: 4
         color: "#000000AA"
         opacity: 0.0
-        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Behavior on opacity { NumberAnimation { duration: 150 } }
 
         Text {
             anchors.centerIn: parent
@@ -158,6 +156,7 @@ Window {
             id: timelineLoader
             anchors.fill: parent
             source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
+            asynchronous: true          // load timeline in background
 
             onLoaded: {
                 if (!timelineLoader.item)
@@ -167,7 +166,6 @@ Window {
                 t.cameraId = cameraId
                 t.cameraName = cameraName
                 t.frigateRef = frigateRef
-
                 t.allowAutoReveal = true
                 t.collapsed = true
             }
@@ -182,7 +180,7 @@ Window {
         anchors.bottomMargin: 10
         color: "#00000088"
         opacity: root.opacity
-        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Behavior on opacity { NumberAnimation { duration: 150 } }
 
         Text {
             anchors.centerIn: parent
@@ -204,7 +202,7 @@ Window {
         color: "#000000AA"
         visible: isPlayback
         opacity: isPlayback ? 1.0 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Behavior on opacity { NumberAnimation { duration: 150 } }
 
         Text {
             anchors.centerIn: parent
@@ -238,7 +236,6 @@ Window {
         function onPlaybackPositionChanged(receivedCameraId, positionMs) {
             if (receivedCameraId !== cameraId)
                 return
-
             playbackPositionMs = positionMs
         }
 
@@ -263,6 +260,7 @@ Window {
     }
 
     function open() {
+        // Show the window immediately
         visible = true
         opacity = 1.0
         topOverlay.opacity = 1.0
@@ -273,19 +271,22 @@ Window {
         isPlayback = false
         playbackPositionMs = 0
 
-        if (frigateRef && cameraId && cameraId !== "") {
-            frigateRef.loadEvents(cameraId)
-            frigateRef.loadRecordings(cameraId)
-        }
+        // Heavy work delayed so the window appears instantly
+        Qt.callLater(function() {
+            if (frigateRef && cameraId && cameraId !== "") {
+                frigateRef.loadEvents(cameraId)
+                frigateRef.loadRecordings(cameraId)
+            }
 
-        if (timelineLoader.item) {
-            var t = timelineLoader.item
-            t.cameraId = cameraId
-            t.cameraName = cameraName
-            t.frigateRef = frigateRef
-            t.allowAutoReveal = true
-            t.collapsed = true
-        }
+            if (timelineLoader.item) {
+                var t = timelineLoader.item
+                t.cameraId = cameraId
+                t.cameraName = cameraName
+                t.frigateRef = frigateRef
+                t.allowAutoReveal = true
+                t.collapsed = true
+            }
+        })
     }
 
     function close() {
@@ -295,7 +296,7 @@ Window {
         topOverlay.opacity = 0.0
         exitButton.opacity = 0.0
 
-        Qt.callLater(() => {
+        Qt.callLater(function() {
             visible = false
         })
     }

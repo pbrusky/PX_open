@@ -60,33 +60,10 @@ void FFmpegWorker::setFrameQueue(FrameQueue* queue)
 bool FFmpegWorker::initHwDevice(AVCodecContext* ctx, AVCodecID codecId)
 {
     Q_UNUSED(codecId);
+    Q_UNUSED(ctx);
 
-    AVHWDeviceType type = av_hwdevice_find_type_by_name("d3d11va");
-    if (type == AV_HWDEVICE_TYPE_NONE) {
-        return false;
-    }
-
-    int ret = av_hwdevice_ctx_create(&m_hwDeviceCtx, type, nullptr, nullptr, 0);
-    if (ret < 0) {
-        return false;
-    }
-
-    ctx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
-
-    for (int i = 0;; ++i) {
-        const AVCodecHWConfig* config = avcodec_get_hw_config(ctx->codec, i);
-        if (!config)
-            break;
-
-        if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
-            config->device_type == type)
-        {
-            g_hwPixFmt = config->pix_fmt;
-            ctx->get_format = get_hw_format;
-            return true;
-        }
-    }
-
+    // Hardware acceleration disabled for stability.
+    // It was causing crashes (d3d11va init failures).
     return false;
 }
 
@@ -295,7 +272,13 @@ void FFmpegWorker::decodeLoop()
                 lastH = srcFrame->height;
             }
 
+            if (!rgbSws)
+                continue;
+
             QImage img(srcFrame->width, srcFrame->height, QImage::Format_RGB32);
+            if (img.isNull())
+                continue;
+
             uint8_t* dest[4] = { img.bits(), nullptr, nullptr, nullptr };
             int destStride[4] = { int(img.bytesPerLine()), 0, 0, 0 };
 
@@ -307,7 +290,8 @@ void FFmpegWorker::decodeLoop()
                       dest,
                       destStride);
 
-            if (m_queue) {
+            // Only push valid frames
+            if (m_queue && !img.isNull() && img.width() > 16 && img.height() > 16) {
                 m_queue->pushImage(img);
             }
         }

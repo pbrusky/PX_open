@@ -1,22 +1,27 @@
 #pragma once
+
 #include <QQuickPaintedItem>
 #include <QImage>
+#include <QMutex>
 
-class FrameItem : public QQuickPaintedItem {
+class FrameItem : public QQuickPaintedItem
+{
     Q_OBJECT
     Q_PROPERTY(QImage frame READ frame WRITE setFrame NOTIFY frameChanged)
 
 public:
-    FrameItem(QQuickItem* parent = nullptr);
+    explicit FrameItem(QQuickItem* parent = nullptr);
 
-    QImage frame() const { return m_frame; }
+    QImage frame() const;
     void setFrame(const QImage& img);
-
-    void paint(QPainter* painter) override;
 
 signals:
     void frameChanged();
 
+protected:
+    void paint(QPainter* painter) override;
+
 private:
     QImage m_frame;
+    mutable QMutex m_mutex;
 };
