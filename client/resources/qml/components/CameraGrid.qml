@@ -25,8 +25,27 @@ Item {
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
 
-    onCameraNamesChanged: updateGridSize()
+    //
+    // ⭐ Online/offline state map
+    //
+    property var cameraOnlineMap: ({})   // { "driveway": true, "frontdoor": false }
 
+    //
+    // ⭐ API called by ServerView.qml to replay camera states
+    //
+    function cameraOnline(name) {
+        cameraOnlineMap[name] = true
+        grid.forceLayout()
+    }
+
+    function cameraOffline(name) {
+        cameraOnlineMap[name] = false
+        grid.forceLayout()
+    }
+
+    //
+    // Helper
+    //
     function getCamera(name) {
         if (!mainWindow || !mainWindow.cameraList)
             return null
@@ -34,8 +53,12 @@ Item {
     }
 
     function isCameraOnline(name) {
+        if (cameraOnlineMap.hasOwnProperty(name))
+            return cameraOnlineMap[name]
         return frigateRef ? frigateRef.isCameraOnline(name) : false
     }
+
+    onCameraNamesChanged: updateGridSize()
 
     function updateGridSize() {
         let count = cameraNames.length
@@ -67,10 +90,10 @@ Item {
             mainWindow.selectedCameraId = cameraName
     }
 
-    function removeCamera(cameraName) {
-        cameraNames = cameraNames.filter(n => n !== cameraName)
-        updateGridSize()
-    }
+    //
+    // ⭐ Removed old name-based removal API
+    // function removeCamera(cameraName) { ... }  ← deleted
+    //
 
     function removeTile(index) {
         if (index < 0 || index >= cameraNames.length) return
@@ -108,7 +131,7 @@ Item {
     }
 
     //
-    // ⭐ CLEAN FULLSCREEN ENTRY — no spam
+    // ⭐ CLEAN FULLSCREEN ENTRY
     //
     function enterFullscreen(cameraName, liveQueue) {
         let cam = getCamera(cameraName)
@@ -120,15 +143,12 @@ Item {
         fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
         fullscreenLoader.visible = true
 
-        // update existing fullscreen item
         if (fullscreenLoader.item) {
             let item = fullscreenLoader.item
             item.cameraId = fullscreenCamera.id || fullscreenCamera.name
             item.cameraName = fullscreenCamera.name || fullscreenCamera.id
             item.frigateRef = gridContainer.frigateRef
-            item.isOnline = gridContainer.frigateRef
-                            ? gridContainer.frigateRef.isCameraOnline(item.cameraName)
-                            : false
+            item.isOnline = isCameraOnline(item.cameraName)
             item.liveQueue = fullscreenLiveQueue
             item.playbackQueue = fullscreenPlaybackQueue
             if (item.open) item.open()
@@ -216,9 +236,7 @@ Item {
             item.cameraId = fullscreenCamera.id || fullscreenCamera.name
             item.cameraName = fullscreenCamera.name || fullscreenCamera.id
             item.frigateRef = gridContainer.frigateRef
-            item.isOnline = gridContainer.frigateRef
-                            ? gridContainer.frigateRef.isCameraOnline(item.cameraName)
-                            : false
+            item.isOnline = isCameraOnline(item.cameraName)
             item.liveQueue = fullscreenLiveQueue
             item.playbackQueue = fullscreenPlaybackQueue
             if (item.open) item.open()

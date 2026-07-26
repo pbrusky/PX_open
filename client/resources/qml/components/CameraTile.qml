@@ -209,7 +209,7 @@ Item {
     }
 
     function handleRemove() {
-        if (mainWindow && mainWindow.dropHandler)
-            mainWindow.dropHandler.removeCamera(cameraName)
-    }
+    if (gridRoot && gridRoot.removeTile)
+        gridRoot.removeTile(tileIndex)
+}
 }

@@ -73,6 +73,23 @@ Item {
         onLoaded: {
             root.cameraGrid = item
             root.gridReady()
+
+            //
+            // ⭐ FIX: Replay camera online/offline states
+            //
+            if (root.frigateRef && root.mainWindow.cameraList) {
+                for (var i = 0; i < root.mainWindow.cameraList.length; i++) {
+                    var cam = root.mainWindow.cameraList[i]
+
+                    if (root.frigateRef.isCameraOnline(cam)) {
+                        if (root.cameraGrid.cameraOnline)
+                            root.cameraGrid.cameraOnline(cam)
+                    } else {
+                        if (root.cameraGrid.cameraOffline)
+                            root.cameraGrid.cameraOffline(cam)
+                    }
+                }
+            }
         }
     }
 
