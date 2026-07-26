@@ -19,46 +19,36 @@ Item {
     signal gridReady()
 
     //
-    // Add Camera Popup (delayed creation)
+    // ⭐ Add Camera via PopupManager
     //
-    Loader {
-        id: addCameraPopupLoader
-        active: root.frigateRef !== undefined
-        source: "qrc:/app/resources/qml/components/popups/AddCameraPopup.qml"
-
-        onLoaded: {
-            item.frigateRef = root.frigateRef
-        }
-    }
-
     function openAddCameraPopup() {
-        if (addCameraPopupLoader.item)
-            addCameraPopupLoader.item.open()
+        if (!mainWindow || !mainWindow.popupManager)
+            return
+
+        mainWindow.popupManager.openPopup(
+            "qrc:/app/resources/qml/components/popups/AddCameraPopup.qml",
+            {
+                frigateRef: root.frigateRef,
+                popupManager: mainWindow.popupManager
+            }
+        )
     }
 
     //
-    // Remove Camera Popup (delayed creation)
+    // ⭐ Remove Camera via PopupManager
     //
-    Loader {
-        id: removeCameraPopupLoader
-        active: root.frigateRef !== undefined
-        source: "qrc:/app/resources/qml/components/popups/RemoveCameraPopup.qml"
-
-        onLoaded: {
-            item.frigateRef = root.frigateRef
-
-            item.cameraRemoved.connect(function(cameraId) {
-                if (root.cameraGrid && root.cameraGrid.removeCamera)
-                    root.cameraGrid.removeCamera(cameraId)
-            })
-        }
-    }
-
     function openRemoveCameraPopup(cameraId) {
-        if (removeCameraPopupLoader.item) {
-            removeCameraPopupLoader.item.cameraId = cameraId
-            removeCameraPopupLoader.item.open()
-        }
+        if (!mainWindow || !mainWindow.popupManager)
+            return
+
+        mainWindow.popupManager.openPopup(
+            "qrc:/app/resources/qml/components/popups/RemoveCameraPopup.qml",
+            {
+                frigateRef: root.frigateRef,
+                cameraId: cameraId,
+                popupManager: mainWindow.popupManager
+            }
+        )
     }
 
     //
@@ -74,9 +64,6 @@ Item {
             root.cameraGrid = item
             root.gridReady()
 
-            //
-            // ⭐ FIX: Replay camera online/offline states
-            //
             if (root.frigateRef && root.mainWindow.cameraList) {
                 for (var i = 0; i < root.mainWindow.cameraList.length; i++) {
                     var cam = root.mainWindow.cameraList[i]
@@ -119,8 +106,18 @@ Item {
             mainWindow: root.mainWindow
             cameraList: root.mainWindow.cameraList
             serverViewRoot: root
-
             frigateRef: root.frigateRef
+
+            //
+            // ⭐ CameraGrid calls ServerView popup functions
+            //
+            function addCamera() {
+                root.openAddCameraPopup()
+            }
+
+            function removeCamera(cameraId) {
+                root.openRemoveCameraPopup(cameraId)
+            }
 
             //
             // Timeline dock

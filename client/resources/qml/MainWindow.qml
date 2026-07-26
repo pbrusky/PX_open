@@ -3,6 +3,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
+
 import "qrc:/app/resources/qml/components"
 import "qrc:/app/resources/qml/components/popups"
 
@@ -45,15 +46,6 @@ ApplicationWindow {
     function exitTrueFullscreen() {
         isFullscreen = false
         showNormal()
-    }
-
-    //
-    // Restart popup
-    //
-    RestartPopup {
-        id: restartPopup
-        visible: false
-        z: 999999
     }
 
     //
@@ -123,10 +115,13 @@ ApplicationWindow {
         serverName: mainWindow.serverName
 
         //
-        // ⭐ About popup handler
+        // ⭐ About popup via PopupManager
         //
         onAboutRequested: {
-            aboutPopupLoader.source = "qrc:/app/resources/qml/components/popups/AboutPopup.qml"
+            popupManager.openPopup(
+                "qrc:/app/resources/qml/components/popups/AboutPopup.qml",
+                { mainWindow: mainWindow }
+            )
         }
 
         onDisconnectRequested: {
@@ -186,12 +181,14 @@ ApplicationWindow {
         }
 
         onRequestRemoveCamera: function(id) {
-            if (contentLoader.item &&
-                contentLoader.item.objectName === "ServerView" &&
-                contentLoader.item.openRemoveCameraPopup)
-            {
-                contentLoader.item.openRemoveCameraPopup(id)
-            }
+            popupManager.openPopup(
+                "qrc:/app/resources/qml/components/popups/RemoveCameraPopup.qml",
+                {
+                    frigateRef: frigateRef,
+                    cameraId: id,
+                    popupManager: popupManager
+                }
+            )
         }
 
         onCameraDropped: function(x, y, cameraName) {
@@ -212,12 +209,13 @@ ApplicationWindow {
             }
 
             if (page === "addCamera") {
-                if (contentLoader.item &&
-                    contentLoader.item.objectName === "ServerView" &&
-                    contentLoader.item.openAddCameraPopup)
-                {
-                    contentLoader.item.openAddCameraPopup()
-                }
+                popupManager.openPopup(
+                    "qrc:/app/resources/qml/components/popups/AddCameraPopup.qml",
+                    {
+                        frigateRef: frigateRef,
+                        popupManager: popupManager
+                    }
+                )
                 return
             }
 
@@ -311,19 +309,6 @@ ApplicationWindow {
     }
 
     //
-    // Popups
-    //
-    AddCameraPopup {
-        id: addCameraPopup
-        frigateRef: mainWindow.frigateRef
-    }
-
-    RemoveCameraPopup {
-        id: removePopup
-        frigateRef: mainWindow.frigateRef
-    }
-
-    //
     // Modular connections
     //
     Loader {
@@ -345,21 +330,21 @@ ApplicationWindow {
     }
 
     //
-    // ⭐ Global About popup loader (centered overlay)
+    // ⭐ Restored RestartPopup (Fix Option A)
     //
-    Loader {
-        id: aboutPopupLoader
-        source: ""
+    RestartPopup {
+        id: restartPopup
+        frigateRef: mainWindow.frigateRef
+        visible: false
         z: 999999
-        visible: source !== ""
+    }
 
-        onLoaded: {
-            if (item) {
-                item.mainWindow = mainWindow   // ⭐ REQUIRED for centering
-                item.closeRequested.connect(function() {
-                    aboutPopupLoader.source = ""
-                })
-            }
-        }
+    //
+    // ⭐ Global Popup Manager
+    //
+    PopupManager {
+        id: popupManager
+        anchors.fill: parent
+        z: 999999
     }
 }

@@ -145,6 +145,19 @@ Item {
         }
     }
 
+    //
+    // ⭐ Popup entry points used by tiles / toolbar
+    //
+    function addCamera() {
+        if (serverViewRoot)
+            serverViewRoot.openAddCameraPopup()
+    }
+
+    function removeCamera(cameraId) {
+        if (serverViewRoot)
+            serverViewRoot.openRemoveCameraPopup(cameraId)
+    }
+
     Connections {
         target: grid
 
@@ -195,9 +208,6 @@ Item {
                     frigateRef: gridContainer.frigateRef
                     mainWindow: gridContainer.mainWindow
                     tileIndex: index
-
-                    // ❌ removed refreshQueue() and its calls
-                    // CameraTile now manages its own queue via its internal logic
 
                     onRemoveRequested: gridContainer.removeTile(tileIndex)
                 }

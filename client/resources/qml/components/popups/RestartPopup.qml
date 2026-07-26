@@ -9,6 +9,8 @@ Popup {
     width: 600
     height: 300
     closePolicy: Popup.NoAutoClose
+    
+    property var frigateRef
 
     anchors.centerIn: Overlay.overlay
 

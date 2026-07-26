@@ -34,6 +34,7 @@
         <file>resources/qml/components/CameraDropHandler.qml</file>
 
         <!--  Popups -->
+        <file>resources/qml/components/popups/PopupManager.qml</file>
         <file>resources/qml/components/popups/EditCameraPopup.qml</file>
         <file>resources/qml/components/popups/RemoveCameraPopup.qml</file>
         <file>resources/qml/components/popups/AddCameraPopup.qml</file>
