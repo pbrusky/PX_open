@@ -4,6 +4,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
 import "qrc:/app/resources/qml/components"
+import "qrc:/app/resources/qml/components/popups"
 
 ApplicationWindow {
     id: mainWindow

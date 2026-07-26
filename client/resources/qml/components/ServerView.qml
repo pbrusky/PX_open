@@ -24,7 +24,7 @@ Item {
     Loader {
         id: addCameraPopupLoader
         active: root.frigateRef !== undefined
-        source: "qrc:/app/resources/qml/components/AddCameraPopup.qml"
+        source: "qrc:/app/resources/qml/components/popups/AddCameraPopup.qml"
 
         onLoaded: {
             item.frigateRef = root.frigateRef
@@ -42,7 +42,7 @@ Item {
     Loader {
         id: removeCameraPopupLoader
         active: root.frigateRef !== undefined
-        source: "qrc:/app/resources/qml/components/RemoveCameraPopup.qml"
+        source: "qrc:/app/resources/qml/components/popups/RemoveCameraPopup.qml"
 
         onLoaded: {
             item.frigateRef = root.frigateRef

@@ -15,10 +15,8 @@ Popup {
         radius: 8
     }
 
-    // injected by ServerView
+    // Set by ServerView before opening
     property var frigateRef: null
-    property var mainWindow: null
-    property var discovery      // ⭐ REQUIRED
     property string cameraId: ""
 
     signal cameraRemoved()
@@ -86,8 +84,11 @@ Popup {
         }
     }
 
+    //
+    // Modern Connections syntax (Qt 6 safe)
+    //
     Connections {
-        target: removePopup.frigateRef || null
+        target: frigate
 
         function onCameraRemoveResult(ok, message) {
             statusText.text = message
@@ -97,8 +98,12 @@ Popup {
                 removePopup.close()
                 removePopup.cameraRemoved()
 
-                if (removePopup.mainWindow && removePopup.mainWindow.restartPopup) {
-                    removePopup.mainWindow.restartPopup.visible = true
+                //
+                // ⭐ NEW — show restart popup + begin polling
+                //
+                if (mainWindow && mainWindow.restartPopup) {
+                    mainWindow.restartPopup.visible = true
+                    mainWindow.frigatePollTimer.start()
                 }
             }
         }

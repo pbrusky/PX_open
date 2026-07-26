@@ -1,4 +1,5 @@
 import QtQuick 2.15
+import "qrc:/app/resources/qml/components/popups"
 
 Item {
     id: root

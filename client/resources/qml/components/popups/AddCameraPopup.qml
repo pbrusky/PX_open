@@ -2,10 +2,6 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
-import "../"
-import "../popups"
-import "../timeline"
-
 Popup {
     id: popup
     modal: true
@@ -19,12 +15,17 @@ Popup {
         radius: 6
     }
 
+    onClosed: {
+        popup.visible = false
+        popup.focus = false
+    }
+
+    //
+    // ⭐ REQUIRED BY MainWindow (but no longer used for timing)
+    //
     signal cameraAdded()
 
-    // injected by ServerView
     property var frigateRef
-    property var mainWindow
-    property var discovery      // ⭐ REQUIRED
 
     property string cameraId: ""
     property string streamUrl: ""
@@ -231,7 +232,7 @@ Popup {
         }
 
         Connections {
-            target: popup.frigateRef || null
+            target: popup.frigateRef ? popup.frigateRef : null
 
             function onRtspTestResult(ok, message) {
                 if (ok) {
@@ -243,12 +244,18 @@ Popup {
                 }
             }
 
+            //
+            // ⭐ Backend confirms camera added
+            //
             function onCameraAddResult(ok, message) {
                 if (ok) {
                     rtspStatus.text = "Camera added successfully"
                     rtspStatus.color = "lightgreen"
 
+                    // Close popup AFTER backend confirms
                     popup.close()
+
+                    // Notify MainWindow (optional)
                     popup.cameraAdded()
 
                 } else {

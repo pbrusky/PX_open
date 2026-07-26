@@ -7,6 +7,11 @@ Item {
     id: tile
     z: dragging ? 99999 : 0
 
+    //
+    // ⭐ NEW — lifecycle flag
+    //
+    property bool destroyed: false
+
     property bool dragging: false
     property int tileIndex: -1
 
@@ -16,7 +21,7 @@ Item {
 
     property string cameraName: ""
 
-    // ⭐ Updated online logic
+    // Online logic
     property bool isOnline: frameQueue !== null && cameraName !== ""
 
     property string resolution: ""
@@ -36,7 +41,11 @@ Item {
 
     signal removeRequested()
 
-    onCameraNameChanged: {
+    //
+    // ⭐ Unified queue refresh helper (lifecycle‑safe)
+    //
+    function refreshQueue() {
+        if (destroyed) return
         currentFrame = null
 
         if (frigateRef && cameraName !== "")
@@ -45,14 +54,13 @@ Item {
             frameQueue = null
     }
 
+    onCameraNameChanged: refreshQueue()
+
     onFrameQueueChanged: {
         frameConn.target = frameQueue
-
         if (frameQueue) {
             var img = frameQueue.popImage()
-            if (img) {
-                currentFrame = img
-            }
+            if (img) currentFrame = img
         }
     }
 
@@ -62,11 +70,9 @@ Item {
         ignoreUnknownSignals: true
 
         function onFrameReady() {
-            if (!frameQueue) return
+            if (!frameQueue || destroyed) return
             var img = frameQueue.popImage()
-            if (img) {
-                currentFrame = img
-            }
+            if (img) currentFrame = img
         }
     }
 
@@ -77,7 +83,6 @@ Item {
         visible: currentFrame === null || currentFrame === undefined
     }
 
-    // ⭐ Correct renderer — now always visible when online
     CameraVideoItem {
         id: videoFrame
         anchors.fill: parent
@@ -173,8 +178,15 @@ Item {
                 tile.height = originalHeight
             }
 
-            if (mainWindow && mainWindow.dropHandler)
+            if (mainWindow && mainWindow.dropHandler) {
                 mainWindow.dropHandler.reorderTile(tileIndex, tile)
+
+                //
+                // ⭐ Safe rebinding — CameraGrid updates cameraName
+                // CameraTile auto-refreshes via onCameraNameChanged
+                //
+                tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
+            }
         }
 
         onDoubleClicked: {
@@ -209,7 +221,12 @@ Item {
     }
 
     function handleRemove() {
-    if (gridRoot && gridRoot.removeTile)
-        gridRoot.removeTile(tileIndex)
-}
+        if (gridRoot && gridRoot.removeTile)
+            gridRoot.removeTile(tileIndex)
+    }
+
+    //
+    // ⭐ NEW — lifecycle flag set on destruction
+    //
+    Component.onDestruction: destroyed = true
 }

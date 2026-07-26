@@ -25,14 +25,9 @@ Item {
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
 
-    //
-    // ⭐ Online/offline state map
-    //
-    property var cameraOnlineMap: ({})   // { "driveway": true, "frontdoor": false }
+    // Online/offline state map
+    property var cameraOnlineMap: ({})
 
-    //
-    // ⭐ API called by ServerView.qml to replay camera states
-    //
     function cameraOnline(name) {
         cameraOnlineMap[name] = true
         grid.forceLayout()
@@ -43,9 +38,6 @@ Item {
         grid.forceLayout()
     }
 
-    //
-    // Helper
-    //
     function getCamera(name) {
         if (!mainWindow || !mainWindow.cameraList)
             return null
@@ -90,11 +82,6 @@ Item {
             mainWindow.selectedCameraId = cameraName
     }
 
-    //
-    // ⭐ Removed old name-based removal API
-    // function removeCamera(cameraName) { ... }  ← deleted
-    //
-
     function removeTile(index) {
         if (index < 0 || index >= cameraNames.length) return
         cameraNames.splice(index, 1)
@@ -116,6 +103,9 @@ Item {
         hoverCameraName = cameraName
     }
 
+    //
+    // ⭐ CLEAN, SAFE REORDER — NO refreshQueue() CALLS
+    //
     function reorderTilesByTileCenter(oldIndex, tileObj) {
         if (hoverIndex < 0 || hoverIndex >= cameraNames.length || hoverIndex === oldIndex)
             return
@@ -128,10 +118,21 @@ Item {
         cameraNames = arr
         hoverIndex = -1
         hoverCameraName = ""
+
+        //
+        // ⭐ NEW — update tileIndex safely
+        //
+        tileObj.tileIndex = arr.indexOf(tileObj.cameraName)
+
+        //
+        // ⭐ NEW — update cameraName binding
+        // CameraTile will auto-refresh queue via onCameraNameChanged
+        //
+        tileObj.cameraName = cameraNames[tileObj.tileIndex]
     }
 
     //
-    // ⭐ CLEAN FULLSCREEN ENTRY
+    // Fullscreen entry
     //
     function enterFullscreen(cameraName, liveQueue) {
         let cam = getCamera(cameraName)
@@ -222,9 +223,6 @@ Item {
         }
     }
 
-    //
-    // ⭐ CLEAN FULLSCREEN LOADER
-    //
     Loader {
         id: fullscreenLoader
         anchors.fill: parent

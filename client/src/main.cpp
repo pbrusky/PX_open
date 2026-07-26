@@ -8,6 +8,7 @@
 #include <QQuickStyle>
 #include <QIcon>
 #include <QProcess>
+#include <QLoggingCategory>
 
 #include "FrigateAPI.h"
 #include "FrigateCameraManager.h"
@@ -20,11 +21,16 @@
 #include "CameraVideoItem.h"
 #include "FrameItem.h"
 
-#include "FullscreenHelper.h"   // ⭐ REQUIRED for true fullscreen
+#include "FullscreenHelper.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
+
+// ⭐ FFmpeg logging control
+extern "C" {
+#include <libavutil/log.h>
+}
 
 bool isAmdGpuPresent()
 {
@@ -48,6 +54,11 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     app.setWindowIcon(QIcon(":/assets/icon.ico"));
 
+    //
+    // ⭐ Silence ALL FFmpeg decoder warnings
+    //
+    av_log_set_level(AV_LOG_QUIET);
+
     QQmlApplicationEngine engine;
 
     //
@@ -64,7 +75,7 @@ int main(int argc, char *argv[])
     qmlRegisterType<FrameItem>("PxOpen", 1, 0, "FrameItem");
 
     //
-    // ⭐ Register FullscreenHelper (required for true fullscreen)
+    // Fullscreen helper
     //
     qmlRegisterSingletonType<FullscreenHelper>("PxOpen", 1, 0, "FullscreenHelper",
         [](QQmlEngine* engine, QJSEngine*) -> QObject* {
@@ -72,14 +83,14 @@ int main(int argc, char *argv[])
         });
 
     //
-    // Create backend singletons
+    // Backend singletons
     //
     FrigateAPI* frigateApi = new FrigateAPI(&engine);
     DiscoveryListener* discovery = new DiscoveryListener(&engine);
     FrigateStreamManager* frigateStream = new FrigateStreamManager(&engine);
 
     //
-    // Correct camera loading pipeline
+    // Load cameras
     //
     frigateApi->setServer("http://10.36.24.104:5000");
     frigateApi->loadCameras();
