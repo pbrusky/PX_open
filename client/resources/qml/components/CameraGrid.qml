@@ -103,9 +103,6 @@ Item {
         hoverCameraName = cameraName
     }
 
-    //
-    // CLEAN, SAFE REORDER — CameraTile handles its own queue via onCameraNameChanged
-    //
     function reorderTilesByTileCenter(oldIndex, tileObj) {
         if (hoverIndex < 0 || hoverIndex >= cameraNames.length || hoverIndex === oldIndex)
             return
@@ -123,31 +120,72 @@ Item {
         tileObj.cameraName = cameraNames[tileObj.tileIndex]
     }
 
+    //
+    // ROBUST FULLSCREEN
+    //
     function enterFullscreen(cameraName, liveQueue) {
-        let cam = getCamera(cameraName)
-        fullscreenCamera = cam ? cam : { id: cameraName, name: cameraName }
+        if (!cameraName || cameraName === "") {
+            console.warn("enterFullscreen: empty cameraName")
+            return
+        }
 
-        fullscreenLiveQueue = liveQueue || (frigateRef ? frigateRef.getQueue(cameraName) : null)
+        console.log("enterFullscreen called for:", cameraName)
+
+        // Always force a live queue
+        if (!liveQueue && frigateRef) {
+            liveQueue = frigateRef.getQueue(cameraName)
+        }
+
+        // Fallback camera object if getCamera fails
+        let cam = getCamera(cameraName)
+        if (!cam) {
+            cam = {
+                id: cameraName,
+                name: cameraName
+            }
+        }
+
+        fullscreenCamera = cam
+        fullscreenLiveQueue = liveQueue
         fullscreenPlaybackQueue = frigateRef ? frigateRef.getPlaybackQueue(cameraName) : null
 
-        fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
+        // Force reload of the Loader every time (most reliable)
+        fullscreenLoader.source = ""
         fullscreenLoader.visible = true
 
-        if (fullscreenLoader.item) {
-            let item = fullscreenLoader.item
-            item.cameraId = fullscreenCamera.id || fullscreenCamera.name
-            item.cameraName = fullscreenCamera.name || fullscreenCamera.id
-            item.frigateRef = gridContainer.frigateRef
-            item.isOnline = isCameraOnline(item.cameraName)
-            item.liveQueue = fullscreenLiveQueue
-            item.playbackQueue = fullscreenPlaybackQueue
-            if (item.open) item.open()
-        }
+        // Small delay then set the real source
+        Qt.callLater(function() {
+            fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
+        })
     }
 
-    //
-    // ⭐ Popup entry points used by tiles / toolbar
-    //
+    function configureAndOpenFullscreen() {
+        if (!fullscreenLoader.item) {
+            console.warn("configureAndOpenFullscreen: no item yet")
+            return
+        }
+        if (!fullscreenCamera) {
+            console.warn("configureAndOpenFullscreen: no fullscreenCamera")
+            return
+        }
+
+        let item = fullscreenLoader.item
+
+        item.cameraId      = fullscreenCamera.id || fullscreenCamera.name || ""
+        item.cameraName    = fullscreenCamera.name || fullscreenCamera.id || ""
+        item.frigateRef    = gridContainer.frigateRef
+        item.isOnline      = isCameraOnline(item.cameraName)
+        item.liveQueue     = fullscreenLiveQueue
+        item.playbackQueue = fullscreenPlaybackQueue
+
+        console.log("Opening fullscreen for", item.cameraName)
+
+        if (typeof item.open === "function")
+            item.open()
+        else
+            console.warn("FullscreenCamera has no open() function")
+    }
+
     function addCamera() {
         if (serverViewRoot)
             serverViewRoot.openAddCameraPopup()
@@ -220,24 +258,27 @@ Item {
         anchors.fill: parent
         visible: false
         z: 9999
+        asynchronous: true
 
         onLoaded: {
-            if (!item || !fullscreenCamera) return
-            item.cameraId = fullscreenCamera.id || fullscreenCamera.name
-            item.cameraName = fullscreenCamera.name || fullscreenCamera.id
-            item.frigateRef = gridContainer.frigateRef
-            item.isOnline = isCameraOnline(item.cameraName)
-            item.liveQueue = fullscreenLiveQueue
-            item.playbackQueue = fullscreenPlaybackQueue
-            if (item.open) item.open()
+            configureAndOpenFullscreen()
+        }
+
+        onStatusChanged: {
+            if (status === Loader.Ready && visible)
+                configureAndOpenFullscreen()
         }
 
         Keys.onEscapePressed: {
-            fullscreenLoader.visible = false
-            fullscreenLoader.source = ""
-            fullscreenCamera = null
-            fullscreenLiveQueue = null
-            fullscreenPlaybackQueue = null
+            if (item && typeof item.close === "function")
+                item.close()
+            else {
+                visible = false
+                source = ""
+                fullscreenCamera = null
+                fullscreenLiveQueue = null
+                fullscreenPlaybackQueue = null
+            }
         }
     }
 

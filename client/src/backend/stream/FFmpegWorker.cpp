@@ -59,11 +59,48 @@ void FFmpegWorker::setFrameQueue(FrameQueue* queue)
 
 bool FFmpegWorker::initHwDevice(AVCodecContext* ctx, AVCodecID codecId)
 {
-    Q_UNUSED(codecId);
-    Q_UNUSED(ctx);
+    // Only try hardware acceleration for HEVC
+    if (codecId != AV_CODEC_ID_HEVC) {
+        qDebug() << "[FFmpegWorker] Not HEVC – using software decoder";
+        return false;
+    }
 
-    // Hardware acceleration disabled for stability.
-    // It was causing crashes (d3d11va init failures).
+    const char* candidates[] = { "d3d11va", "dxva2", nullptr };
+
+    for (int i = 0; candidates[i]; ++i) {
+        AVHWDeviceType type = av_hwdevice_find_type_by_name(candidates[i]);
+        if (type == AV_HWDEVICE_TYPE_NONE)
+            continue;
+
+        if (m_hwDeviceCtx) {
+            av_buffer_unref(&m_hwDeviceCtx);
+            m_hwDeviceCtx = nullptr;
+        }
+
+        int ret = av_hwdevice_ctx_create(&m_hwDeviceCtx, type, nullptr, nullptr, 0);
+        if (ret < 0)
+            continue;
+
+        ctx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
+
+        for (int j = 0; ; ++j) {
+            const AVCodecHWConfig* config = avcodec_get_hw_config(ctx->codec, j);
+            if (!config)
+                break;
+
+            if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
+                config->device_type == type)
+            {
+                g_hwPixFmt = config->pix_fmt;
+                ctx->get_format = get_hw_format;
+
+                qDebug() << "[FFmpegWorker] Using hardware acceleration for HEVC:" << candidates[i];
+                return true;
+            }
+        }
+    }
+
+    qDebug() << "[FFmpegWorker] HEVC hardware acceleration not available – using software";
     return false;
 }
 
@@ -204,6 +241,7 @@ void FFmpegWorker::decodeLoop()
     qint64 lastStatsMs = QDateTime::currentMSecsSinceEpoch();
     int lastW = 0;
     int lastH = 0;
+    int consecutiveErrors = 0;
 
     while (!m_abort) {
 
@@ -225,9 +263,10 @@ void FFmpegWorker::decodeLoop()
         av_packet_unref(&pkt);
 
         if (ret < 0) {
-            if (ret == AVERROR_INVALIDDATA)
-                continue;
-            break;
+            consecutiveErrors++;
+            if (consecutiveErrors > 30)
+                break;
+            continue;
         }
 
         while (!m_abort) {
@@ -236,8 +275,12 @@ void FFmpegWorker::decodeLoop()
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;
 
-            if (ret < 0)
+            if (ret < 0) {
+                consecutiveErrors++;
                 continue;
+            }
+
+            consecutiveErrors = 0;
 
             AVFrame* srcFrame = frame;
 
@@ -247,7 +290,7 @@ void FFmpegWorker::decodeLoop()
                 srcFrame = swFrame;
             }
 
-            if (srcFrame->width <= 0 || srcFrame->height <= 0)
+            if (srcFrame->width <= 16 || srcFrame->height <= 16)
                 continue;
 
             qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
@@ -265,7 +308,7 @@ void FFmpegWorker::decodeLoop()
                     (AVPixelFormat)srcFrame->format,
                     srcFrame->width, srcFrame->height,
                     AV_PIX_FMT_BGRA,
-                    SWS_BILINEAR, nullptr, nullptr, nullptr
+                    SWS_FAST_BILINEAR, nullptr, nullptr, nullptr
                 );
 
                 lastW = srcFrame->width;
@@ -290,7 +333,6 @@ void FFmpegWorker::decodeLoop()
                       dest,
                       destStride);
 
-            // Only push valid frames
             if (m_queue && !img.isNull() && img.width() > 16 && img.height() > 16) {
                 m_queue->pushImage(img);
             }

@@ -19,10 +19,10 @@ Window {
     property bool isPlayback: false
     property int playbackPositionMs: 0
 
+    // Almost instant fade
     opacity: 0.0
-    Behavior on opacity { NumberAnimation { duration: 150 } }
+    Behavior on opacity { NumberAnimation { duration: 80 } }
 
-    // ESC handler
     FocusScope {
         id: keyHandler
         anchors.fill: parent
@@ -75,66 +75,53 @@ Window {
         }
     }
 
+    // Lightweight overlays (appear after window is shown)
     Rectangle {
         id: topOverlay
-        height: 40
+        height: 36
         width: parent.width
         anchors.top: parent.top
-        color: "#00000088"
+        color: "#00000099"
         opacity: 0.0
-        Behavior on opacity { NumberAnimation { duration: 150 } }
+        Behavior on opacity { NumberAnimation { duration: 120 } }
 
         Row {
             anchors.fill: parent
-            anchors.margins: 10
-            spacing: 20
+            anchors.margins: 8
+            spacing: 16
 
             Text {
                 text: cameraName
                 color: "white"
-                font.pixelSize: 16
+                font.pixelSize: 15
                 font.bold: true
             }
 
             Text {
                 text: isPlayback ? "PLAYBACK" : "LIVE"
                 color: isPlayback ? "#FFC107" : "#00C853"
-                font.pixelSize: 14
-            }
-
-            Text {
-                id: fpsText
-                text: "FPS: --"
-                color: "white"
-                font.pixelSize: 14
-            }
-
-            Text {
-                id: resText
-                text: "Resolution: --"
-                color: "white"
-                font.pixelSize: 14
+                font.pixelSize: 13
             }
         }
     }
 
     Rectangle {
         id: exitButton
-        width: 80
-        height: 32
+        width: 70
+        height: 28
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: 12
+        anchors.margins: 10
         radius: 4
         color: "#000000AA"
         opacity: 0.0
-        Behavior on opacity { NumberAnimation { duration: 150 } }
+        Behavior on opacity { NumberAnimation { duration: 120 } }
 
         Text {
             anchors.centerIn: parent
             text: "Exit"
             color: "white"
-            font.pixelSize: 14
+            font.pixelSize: 13
         }
 
         MouseArea {
@@ -143,161 +130,55 @@ Window {
         }
     }
 
-    Rectangle {
-        id: timelineContainer
+    // Timeline loaded asynchronously and only when needed
+    Loader {
+        id: timelineLoader
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: 90
-        color: "transparent"
-        clip: true
-
-        Loader {
-            id: timelineLoader
-            anchors.fill: parent
-            source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
-            asynchronous: true          // load timeline in background
-
-            onLoaded: {
-                if (!timelineLoader.item)
-                    return
-
-                var t = timelineLoader.item
-                t.cameraId = cameraId
-                t.cameraName = cameraName
-                t.frigateRef = frigateRef
-                t.allowAutoReveal = true
-                t.collapsed = true
-            }
-        }
-    }
-
-    Rectangle {
-        id: bottomNameOverlay
-        width: parent.width
-        height: 40
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 10
-        color: "#00000088"
-        opacity: root.opacity
-        Behavior on opacity { NumberAnimation { duration: 150 } }
-
-        Text {
-            anchors.centerIn: parent
-            text: cameraName
-            color: "white"
-            font.pixelSize: 20
-            font.bold: true
-        }
-    }
-
-    Rectangle {
-        id: liveButton
-        width: 100
-        height: 32
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.margins: 12
-        radius: 4
-        color: "#000000AA"
-        visible: isPlayback
-        opacity: isPlayback ? 1.0 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 150 } }
-
-        Text {
-            anchors.centerIn: parent
-            text: "LIVE"
-            color: "white"
-            font.pixelSize: 14
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            onClicked: {
-                if (!cameraId || cameraId === "")
-                    return
-
-                isPlayback = false
-                playbackPositionMs = 0
-
-                if (frigateRef)
-                    frigateRef.switchToLive(cameraId)
-
-                if (timelineLoader.item)
-                    timelineLoader.item.collapsed = true
-            }
-        }
-    }
-
-    Connections {
-        target: frigateRef
-        ignoreUnknownSignals: true
-
-        function onPlaybackPositionChanged(receivedCameraId, positionMs) {
-            if (receivedCameraId !== cameraId)
-                return
-            playbackPositionMs = positionMs
-        }
-
-        function onCameraOnline(id) {
-            if (id === cameraId)
-                isOnline = true
-        }
-
-        function onCameraOffline(id) {
-            if (id === cameraId)
-                isOnline = false
-        }
-
-        function onCameraEditResult(ok, message) {
-            if (!ok) return
-
-            if (isPlayback)
-                playbackVideo.queue = playbackQueue
-            else
-                liveVideo.queue = liveQueue
-        }
+        asynchronous: true
+        active: false          // start inactive
+        source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
     }
 
     function open() {
-        // Show the window immediately
+        // 1. Show window immediately (this is the key for speed)
         visible = true
-        opacity = 1.0
-        topOverlay.opacity = 1.0
-        exitButton.opacity = 1.0
-
         showFullScreen()
+        opacity = 1.0
 
         isPlayback = false
         playbackPositionMs = 0
 
-        // Heavy work delayed so the window appears instantly
+        // 2. Show overlays a tiny bit later
         Qt.callLater(function() {
-            if (frigateRef && cameraId && cameraId !== "") {
+            topOverlay.opacity = 1.0
+            exitButton.opacity = 1.0
+        })
+
+        // 3. Heavy work much later
+        Qt.callLater(function() {
+            // Activate timeline only now
+            timelineLoader.active = true
+
+            if (frigateRef && cameraId !== "") {
                 frigateRef.loadEvents(cameraId)
                 frigateRef.loadRecordings(cameraId)
-            }
-
-            if (timelineLoader.item) {
-                var t = timelineLoader.item
-                t.cameraId = cameraId
-                t.cameraName = cameraName
-                t.frigateRef = frigateRef
-                t.allowAutoReveal = true
-                t.collapsed = true
             }
         })
     }
 
     function close() {
-        showNormal()
-
         opacity = 0.0
         topOverlay.opacity = 0.0
         exitButton.opacity = 0.0
 
+        showNormal()
+
         Qt.callLater(function() {
             visible = false
+            timelineLoader.active = false   // free timeline resources
         })
     }
 }
