@@ -5,7 +5,7 @@ import PxOpen 1.0
 
 Item {
     id: aboutPopup
-    objectName: "AboutPage"
+    objectName: "AboutPopup"
 
     property var mainWindow
     signal closeRequested()
@@ -21,13 +21,12 @@ Item {
     Rectangle {
         id: container
         width: 480
-        height: 360
+        height: 420
         radius: 12
         color: "#111111"
         border.color: "#333333"
         border.width: 1
 
-        // ⭐ Safe centering (no errors)
         x: mainWindow ? (mainWindow.width - width) / 2 : 0
         y: mainWindow ? (mainWindow.height - height) / 2 : 0
 
@@ -44,8 +43,20 @@ Item {
 
             Rectangle { width: 360; height: 1; color: "#333" }
 
+            // Multi-GPU list
             Text {
-                text: "GPU: " + AboutInfo.gpuName
+                text: AboutInfo.gpuList.length > 0
+                      ? "GPUs: " + AboutInfo.gpuList.join(", ")
+                      : "GPUs: Loading..."
+                color: "white"
+                font.pixelSize: 18
+            }
+
+            // Vendor list
+            Text {
+                text: AboutInfo.gpuVendors.length > 0
+                      ? "Vendors: " + AboutInfo.gpuVendors.join(", ")
+                      : "Vendors: Loading..."
                 color: "white"
                 font.pixelSize: 18
             }

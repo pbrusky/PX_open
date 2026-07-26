@@ -2,34 +2,65 @@
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QProcess>
+#include <QtConcurrent>
 
 AboutInfo::AboutInfo(QObject* parent)
     : QObject(parent)
 {
+    // Run GPU detection asynchronously
+    (void) QtConcurrent::run([this]() {
+        QProcess p;
+        p.start("powershell", {
+            "-Command",
+            "(Get-CimInstance Win32_VideoController).Name"
+        });
+        p.waitForFinished();
+
+        QString output = p.readAllStandardOutput().trimmed();
+        QStringList lines = output.split("\n", Qt::SkipEmptyParts);
+
+        for (QString &line : lines)
+            line = line.trimmed();
+
+        m_gpuList = lines;
+        emit gpuListChanged();
+
+        // Vendor detection
+        m_gpuVendors.clear();
+        for (const QString &gpu : m_gpuList) {
+            QString lower = gpu.toLower();
+            if (lower.contains("nvidia"))
+                m_gpuVendors << "NVIDIA";
+            else if (lower.contains("amd") || lower.contains("radeon"))
+                m_gpuVendors << "AMD";
+            else if (lower.contains("intel"))
+                m_gpuVendors << "Intel";
+            else
+                m_gpuVendors << "Unknown";
+        }
+
+        emit gpuVendorsChanged();
+    });
 }
 
-QString AboutInfo::gpuName() const
-{
-    QProcess p;
-    p.start("wmic path win32_VideoController get Name");
-    p.waitForFinished();
-    QString output = p.readAllStandardOutput().trimmed();
-    return output;
+QStringList AboutInfo::gpuList() const {
+    return m_gpuList;
+}
+
+QStringList AboutInfo::gpuVendors() const {
+    return m_gpuVendors;
 }
 
 bool AboutInfo::hardwareDecoding() const
 {
-    // If you forced software OpenGL for AMD, hardware decode is OFF
     QByteArray gl = qgetenv("QT_OPENGL");
     if (gl == "software")
         return false;
 
-    // If you disabled hwaccel explicitly
     QByteArray hw = qgetenv("QT_FFMPEG_HWACCEL");
     if (hw == "none")
         return false;
 
-    // Otherwise assume ON
     return true;
 }
 

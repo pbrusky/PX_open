@@ -126,7 +126,7 @@ ApplicationWindow {
         // ⭐ About popup handler
         //
         onAboutRequested: {
-            aboutPopupLoader.source = "qrc:/app/resources/qml/components/popups/AboutPage.qml"
+            aboutPopupLoader.source = "qrc:/app/resources/qml/components/popups/AboutPopup.qml"
         }
 
         onDisconnectRequested: {

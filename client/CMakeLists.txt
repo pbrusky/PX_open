@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.5 REQUIRED COMPONENTS
     Core Gui Network Quick Qml QuickControls2
     WebEngineQuick WebEngineCore Multimedia
+    Concurrent            # ⭐ ADD THIS
 )
 
 qt_standard_project_setup()
@@ -33,9 +34,9 @@ qt_add_executable(px_open
    
     # UI
     src/ui/FrameItem.cpp
-    src/ui/FullscreenHelper.cpp   # ⭐ REQUIRED
+    src/ui/FullscreenHelper.cpp
     src/ui/AboutInfo.cpp
-    
+
     ${APP_RESOURCES}
 )
 
@@ -43,7 +44,6 @@ if (WIN32)
     target_sources(px_open PRIVATE appicon.rc)
 endif()
 
-# ⭐ px_open must see ALL backend folders + ui
 target_include_directories(px_open PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
@@ -64,7 +64,6 @@ add_library(frigate_backend
     src/backend/frigate/FrigateWorker.cpp
 )
 
-# ⭐ frigate_backend must see stream folder too
 target_include_directories(frigate_backend PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/stream
@@ -79,6 +78,7 @@ target_link_libraries(px_open PRIVATE
     Qt6::Core Qt6::Gui Qt6::Network Qt6::Quick Qt6::Qml
     Qt6::QuickControls2 Qt6::WebEngineQuick Qt6::WebEngineCore
     Qt6::Multimedia
+    Qt6::Concurrent          # ⭐ ADD THIS
 
     frigate_backend
 

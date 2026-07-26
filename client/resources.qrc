@@ -39,7 +39,7 @@
         <file>resources/qml/components/popups/AddCameraPopup.qml</file>
         <file>resources/qml/components/popups/OnvifDiscoveryPopup.qml</file>
         <file>resources/qml/components/popups/RestartPopup.qml</file>
-        <file>resources/qml/components/popups/AboutPage.qml</file>
+        <file>resources/qml/components/popups/AboutPopup.qml</file>
 
         <!-- NEW Timeline Components -->
         <file>resources/qml/components/timeline/index.qml</file>
