@@ -12,22 +12,22 @@ Item {
     signal closeRequested()
     signal cameraRemoved()
 
-    // ⭐ REQUIRED — MainWindow passes popupManager into this popup
     property var popupManager
-
     property var frigateRef: null
     property string cameraId: ""
 
+    // FULLY OPAQUE BLACK BACKGROUND (no camera visible behind)
     Rectangle {
         anchors.fill: parent
-        color: "#000000AA"
+        color: "#000000"    // solid black
     }
 
+    // FULLY OPAQUE BLACK POPUP CONTAINER
     Rectangle {
         id: container
         width: 360
         radius: 8
-        color: "#1A1A1A"
+        color: "#000000"    // solid black, matches your app theme
         x: (parent.width - width) / 2
         y: (parent.height - implicitHeight) / 2
 
