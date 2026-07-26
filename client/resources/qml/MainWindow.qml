@@ -32,7 +32,7 @@ ApplicationWindow {
     signal camerasLoaded(var list)
 
     //
-    // App fullscreen helpers (NX-style)
+    // Fullscreen helpers
     //
     property bool isFullscreen: false
 
@@ -48,7 +48,7 @@ ApplicationWindow {
     }
 
     //
-    // Popups
+    // Restart popup
     //
     RestartPopup {
         id: restartPopup
@@ -82,7 +82,6 @@ ApplicationWindow {
             var fm = fullscreenManagerLoader.item
             fm.mainWindow = mainWindow
             fm.frigateRef = frigateRef
-
             mainWindow.fullscreenManager = fm
         }
     }
@@ -100,7 +99,6 @@ ApplicationWindow {
             var dh = dropHandlerLoader.item
             dh.mainWindow = mainWindow
             dh.contentLoader = contentLoader
-
             mainWindow.dropHandler = dh
         }
     }
@@ -124,7 +122,20 @@ ApplicationWindow {
         isCameraPage: contentLoader.item && contentLoader.item.objectName === "ServerView"
         serverName: mainWindow.serverName
 
-        // ❗ Removed invalid onToggleFullscreen handler
+        //
+        // ⭐ About popup handler
+        //
+        onAboutRequested: {
+            aboutPopupLoader.source = "qrc:/app/resources/qml/components/popups/AboutPage.qml"
+        }
+
+        onDisconnectRequested: {
+            contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
+            mainWindow.serverName = ""
+        }
+
+        onExitRequested: Qt.quit()
+        onMinimizeRequested: mainWindow.showMinimized()
     }
 
     IconButton {
@@ -276,7 +287,6 @@ ApplicationWindow {
                     contentLoader.startupDone = true
                     contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
 
-                    // NX-style fullscreen (taskbar hidden)
                     mainWindow.enterTrueFullscreen()
                     topbar.isMaximized = true
                 })
@@ -314,7 +324,7 @@ ApplicationWindow {
     }
 
     //
-    // Modular connections file
+    // Modular connections
     //
     Loader {
         id: connectionsLoader
@@ -331,6 +341,25 @@ ApplicationWindow {
             c.contentLoader = contentLoader
             c.restartPopup = restartPopup
             c.frigatePollTimer = frigatePollTimer
+        }
+    }
+
+    //
+    // ⭐ Global About popup loader (centered overlay)
+    //
+    Loader {
+        id: aboutPopupLoader
+        source: ""
+        z: 999999
+        visible: source !== ""
+
+        onLoaded: {
+            if (item) {
+                item.mainWindow = mainWindow   // ⭐ REQUIRED for centering
+                item.closeRequested.connect(function() {
+                    aboutPopupLoader.source = ""
+                })
+            }
         }
     }
 }

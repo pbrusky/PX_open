@@ -7,11 +7,6 @@ Item {
     id: tile
     z: dragging ? 99999 : 0
 
-    //
-    // ⭐ NEW — lifecycle flag
-    //
-    property bool destroyed: false
-
     property bool dragging: false
     property int tileIndex: -1
 
@@ -20,9 +15,6 @@ Item {
     property var frigateRef
 
     property string cameraName: ""
-
-    // Online logic
-    property bool isOnline: frameQueue !== null && cameraName !== ""
 
     property string resolution: ""
     property real fps: 0
@@ -39,25 +31,42 @@ Item {
     property real originalWidth: 0
     property real originalHeight: 0
 
+    property bool isOnline: currentFrame !== null && cameraName !== ""
+
     signal removeRequested()
 
     //
-    // ⭐ Unified queue refresh helper (lifecycle‑safe)
+    // ⭐ Collision‑proof helper object
     //
-    function refreshQueue() {
-        if (destroyed) return
-        currentFrame = null
+    QtObject {
+        id: helpers
 
-        if (frigateRef && cameraName !== "")
-            frameQueue = frigateRef.getQueue(cameraName)
-        else
-            frameQueue = null
+        function __updateFrameQueueInternal() {
+            tile.currentFrame = null
+
+            if (tile.frigateRef &&
+                tile.cameraName !== "" &&
+                typeof tile.frigateRef.getQueue === "function") {
+
+                tile.frameQueue = tile.frigateRef.getQueue(tile.cameraName)
+
+            } else {
+                tile.frameQueue = null
+            }
+        }
     }
 
-    onCameraNameChanged: refreshQueue()
+    //
+    // Rebind queue when camera name changes
+    //
+    onCameraNameChanged: helpers.__updateFrameQueueInternal()
 
+    //
+    // When frameQueue changes, bind signals and pop first frame
+    //
     onFrameQueueChanged: {
         frameConn.target = frameQueue
+
         if (frameQueue) {
             var img = frameQueue.popImage()
             if (img) currentFrame = img
@@ -70,7 +79,7 @@ Item {
         ignoreUnknownSignals: true
 
         function onFrameReady() {
-            if (!frameQueue || destroyed) return
+            if (!frameQueue) return
             var img = frameQueue.popImage()
             if (img) currentFrame = img
         }
@@ -181,11 +190,12 @@ Item {
             if (mainWindow && mainWindow.dropHandler) {
                 mainWindow.dropHandler.reorderTile(tileIndex, tile)
 
-                //
-                // ⭐ Safe rebinding — CameraGrid updates cameraName
-                // CameraTile auto-refreshes via onCameraNameChanged
-                //
                 tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
+
+                //
+                // ⭐ Rebind queue safely
+                //
+                helpers.__updateFrameQueueInternal()
             }
         }
 
@@ -224,9 +234,4 @@ Item {
         if (gridRoot && gridRoot.removeTile)
             gridRoot.removeTile(tileIndex)
     }
-
-    //
-    // ⭐ NEW — lifecycle flag set on destruction
-    //
-    Component.onDestruction: destroyed = true
 }

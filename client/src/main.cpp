@@ -22,6 +22,7 @@
 #include "FrameItem.h"
 
 #include "FullscreenHelper.h"
+#include "AboutInfo.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -60,6 +61,14 @@ int main(int argc, char *argv[])
     av_log_set_level(AV_LOG_QUIET);
 
     QQmlApplicationEngine engine;
+
+    //
+    // ⭐ Register AboutInfo singleton (correct placement)
+    //
+    qmlRegisterSingletonType<AboutInfo>("PxOpen", 1, 0, "AboutInfo",
+        [](QQmlEngine*, QJSEngine*) -> QObject* {
+            return new AboutInfo();
+        });
 
     //
     // Register QML types

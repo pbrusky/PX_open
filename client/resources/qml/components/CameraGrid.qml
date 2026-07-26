@@ -104,7 +104,7 @@ Item {
     }
 
     //
-    // ⭐ CLEAN, SAFE REORDER — NO refreshQueue() CALLS
+    // CLEAN, SAFE REORDER — CameraTile handles its own queue via onCameraNameChanged
     //
     function reorderTilesByTileCenter(oldIndex, tileObj) {
         if (hoverIndex < 0 || hoverIndex >= cameraNames.length || hoverIndex === oldIndex)
@@ -119,21 +119,10 @@ Item {
         hoverIndex = -1
         hoverCameraName = ""
 
-        //
-        // ⭐ NEW — update tileIndex safely
-        //
         tileObj.tileIndex = arr.indexOf(tileObj.cameraName)
-
-        //
-        // ⭐ NEW — update cameraName binding
-        // CameraTile will auto-refresh queue via onCameraNameChanged
-        //
         tileObj.cameraName = cameraNames[tileObj.tileIndex]
     }
 
-    //
-    // Fullscreen entry
-    //
     function enterFullscreen(cameraName, liveQueue) {
         let cam = getCamera(cameraName)
         fullscreenCamera = cam ? cam : { id: cameraName, name: cameraName }
@@ -207,15 +196,8 @@ Item {
                     mainWindow: gridContainer.mainWindow
                     tileIndex: index
 
-                    Component.onCompleted: refreshQueue()
-                    onCameraNameChanged: refreshQueue()
-
-                    function refreshQueue() {
-                        if (frigateRef && cameraName !== "")
-                            frameQueue = frigateRef.getQueue(cameraName)
-                        else
-                            frameQueue = null
-                    }
+                    // ❌ removed refreshQueue() and its calls
+                    // CameraTile now manages its own queue via its internal logic
 
                     onRemoveRequested: gridContainer.removeTile(tileIndex)
                 }

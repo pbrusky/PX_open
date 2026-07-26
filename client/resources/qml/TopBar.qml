@@ -21,7 +21,11 @@ Item {
     signal restoreRequested()
     signal maximizeRequested()
     signal addCameraRequested()
+    signal aboutRequested()
 
+    //
+    // Right‑click menu on server name
+    //
     Menu {
         id: serverNameContextMenu
         x: serverNameContainer.x
@@ -44,7 +48,7 @@ Item {
     }
 
     //
-    // ⭐ Double‑click topbar to toggle fullscreen
+    // Double‑click topbar to toggle fullscreen
     //
     MouseArea {
         id: topbarDoubleClickArea
@@ -62,10 +66,12 @@ Item {
             }
         }
 
-        // Allow dragging window normally
         onPressed: mainWindow.startSystemMove()
     }
 
+    //
+    // Hamburger menu button
+    //
     Rectangle {
         id: menuButton
         width: 36
@@ -94,6 +100,9 @@ Item {
         }
     }
 
+    //
+    // Main menu popup
+    //
     Menu {
         id: menuPopup
         x: menuButton.x
@@ -107,11 +116,19 @@ Item {
         MenuSeparator {}
 
         MenuItem {
+            text: "About"
+            onTriggered: topbarWrapper.aboutRequested()
+        }
+
+        MenuItem {
             text: "Exit"
             onTriggered: topbarWrapper.exitRequested()
         }
     }
 
+    //
+    // Right‑side window controls
+    //
     Row {
         id: buttonRow
         anchors.right: parent.right
@@ -119,6 +136,9 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 16
 
+        //
+        // Server name
+        //
         Rectangle {
             id: serverNameContainer
             width: serverNameText.paintedWidth + 24
@@ -147,6 +167,9 @@ Item {
             }
         }
 
+        //
+        // Minimize
+        //
         Rectangle {
             id: minimizeButton
             width: 28
@@ -172,6 +195,9 @@ Item {
             }
         }
 
+        //
+        // Maximize / Restore
+        //
         Rectangle {
             id: maximizeRestoreButton
             width: 28
@@ -205,6 +231,9 @@ Item {
             }
         }
 
+        //
+        // Exit
+        //
         Rectangle {
             id: exitButton
             width: 28

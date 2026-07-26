@@ -34,7 +34,8 @@ qt_add_executable(px_open
     # UI
     src/ui/FrameItem.cpp
     src/ui/FullscreenHelper.cpp   # ⭐ REQUIRED
-
+    src/ui/AboutInfo.cpp
+    
     ${APP_RESOURCES}
 )
 
