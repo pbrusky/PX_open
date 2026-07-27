@@ -16,9 +16,6 @@ ApplicationWindow {
 
     flags: Qt.Window | Qt.FramelessWindowHint
 
-    //
-    // Global state
-    //
     property var frigateRef: frigate
     property var cameraList: []
     property string selectedCameraId: ""
@@ -32,9 +29,6 @@ ApplicationWindow {
     signal cameraOffline(string name)
     signal camerasLoaded(var list)
 
-    //
-    // Fullscreen helpers
-    //
     property bool isFullscreen: false
 
     function enterTrueFullscreen() {
@@ -49,8 +43,23 @@ ApplicationWindow {
     }
 
     //
-    // Poll timer
+    // Extract username/password from RTSP URL (fallback)
     //
+    function parseRtspCredentials(url) {
+        if (!url || !url.startsWith("rtsp://"))
+            return { user: "", pass: "" }
+
+        let authPart = url.split("rtsp://")[1].split("@")[0]
+        if (!authPart.includes(":"))
+            return { user: "", pass: "" }
+
+        let parts = authPart.split(":")
+        return {
+            user: parts[0],
+            pass: parts[1]
+        }
+    }
+
     Timer {
         id: frigatePollTimer
         interval: 1500
@@ -61,9 +70,6 @@ ApplicationWindow {
         }
     }
 
-    //
-    // Fullscreen manager loader
-    //
     Loader {
         id: fullscreenManagerLoader
         source: "qrc:/app/resources/qml/fullscreen/FullscreenManager.qml"
@@ -78,9 +84,6 @@ ApplicationWindow {
         }
     }
 
-    //
-    // Drop handler loader
-    //
     Loader {
         id: dropHandlerLoader
         source: "qrc:/app/resources/qml/components/CameraDropHandler.qml"
@@ -95,9 +98,6 @@ ApplicationWindow {
         }
     }
 
-    //
-    // Top bar
-    //
     TopBar {
         id: topbar
         width: parent.width
@@ -114,9 +114,6 @@ ApplicationWindow {
         isCameraPage: contentLoader.item && contentLoader.item.objectName === "ServerView"
         serverName: mainWindow.serverName
 
-        //
-        // ⭐ About popup via PopupManager
-        //
         onAboutRequested: {
             popupManager.openPopup(
                 "qrc:/app/resources/qml/components/popups/AboutPopup.qml",
@@ -151,9 +148,6 @@ ApplicationWindow {
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
     }
 
-    //
-    // Sidebar
-    //
     Sidebar {
         id: sidebarWrapper
         objectName: "Sidebar"
@@ -197,6 +191,7 @@ ApplicationWindow {
         }
 
         onNavigate: function(page) {
+
             if (page === "qrc:/app/resources/qml/StartupPage.qml") {
                 contentLoader.startupDone = false
                 contentLoader.source = page
@@ -221,6 +216,43 @@ ApplicationWindow {
 
             if (page === "reloadCameras") {
                 frigateRef.loadCameras()
+                return
+            }
+
+            //
+            // ⭐ FULLY PATCHED EDIT CAMERA BLOCK
+            //
+            if (page.startsWith("editCamera:")) {
+                let camId = page.split(":")[1]
+                let cam = mainWindow.cameraList.find(c => c.id === camId)
+
+                if (cam) {
+                    let rtsp = cam.rtsp || cam.streamUrl || ""
+                    let user = cam.username || ""
+                    let pass = cam.password || ""
+
+                    // fallback: parse from RTSP if missing
+                    if ((!user || !pass) && rtsp) {
+                        let creds = parseRtspCredentials(rtsp)
+                        if (!user) user = creds.user
+                        if (!pass) pass = creds.pass
+                    }
+
+                    popupManager.openPopup(
+                        "qrc:/app/resources/qml/components/popups/EditCameraPopup.qml",
+                        {
+                            frigateRef: frigateRef,
+                            cameraId: cam.id,
+                            cameraName: cam.name || "",
+                            rtspUrl: rtsp,
+                            username: user,
+                            password: pass,
+                            popupManager: popupManager
+                        }
+                    )
+                } else {
+                    console.log("EditCamera: Camera not found:", camId)
+                }
                 return
             }
 
@@ -251,9 +283,6 @@ ApplicationWindow {
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
     }
 
-    //
-    // Main content loader
-    //
     Loader {
         id: contentLoader
         anchors.fill: parent
@@ -308,9 +337,6 @@ ApplicationWindow {
         }
     }
 
-    //
-    // Modular connections
-    //
     Loader {
         id: connectionsLoader
         source: "qrc:/app/resources/qml/MainWindowConnections.qml"
@@ -329,9 +355,6 @@ ApplicationWindow {
         }
     }
 
-    //
-    // ⭐ Restored RestartPopup (Fix Option A)
-    //
     RestartPopup {
         id: restartPopup
         frigateRef: mainWindow.frigateRef
@@ -339,9 +362,6 @@ ApplicationWindow {
         z: 999999
     }
 
-    //
-    // ⭐ Global Popup Manager
-    //
     PopupManager {
         id: popupManager
         anchors.fill: parent

@@ -6,9 +6,6 @@ Item {
     id: sidebar
     objectName: "Sidebar"
 
-    //
-    // ⭐ REQUIRED — MainWindow assigns this
-    //
     property var frigateRef
 
     visible: isCameraPage
@@ -117,9 +114,6 @@ Item {
                 property string cameraId: modelData.id
                 property string cameraName: modelData.name
 
-                //
-                // ⭐ FIXED — use frigateRef directly
-                //
                 property bool isOnline: frigateRef
                                         ? frigateRef.isCameraOnline(cameraId)
                                         : false
@@ -160,25 +154,28 @@ Item {
                             sidebar.cameraSelected(cameraId)
                         }
                     }
+
+                    MenuItem {
+                        text: "Edit Camera"
+                        enabled: cameraName !== ""
+                        onTriggered: {
+                            sidebar.selectedCameraId = cameraId
+                            sidebar.cameraSelected(cameraId)
+                            sidebar.navigate("editCamera:" + cameraId)
+                        }
+                    }
+
                     MenuItem {
                         text: "Remove Camera"
                         onTriggered: {
                             sidebar.requestRemoveCamera(cameraId)
                         }
                     }
+
                     MenuItem {
                         text: "Add Camera"
                         onTriggered: {
                             sidebar.navigate("addCamera")
-                        }
-                    }
-
-                    MenuItem {
-                        text: "Fullscreen"
-                        enabled: cameraName !== "" && sidebar.selectedCameraId === cameraId
-                        onTriggered: {
-                            sidebar.cameraSelected(cameraId)
-                            sidebar.navigate("fullscreen:" + cameraId)
                         }
                     }
                 }
@@ -207,9 +204,6 @@ Item {
         }
     }
 
-    //
-    // Drag & Drop logic (unchanged)
-    //
     DragHandler {
         id: globalDrag
         target: null

@@ -52,6 +52,26 @@ Item {
     }
 
     //
+    // ⭐ Edit Camera via PopupManager
+    //
+    function openEditCameraPopup(cameraId, rtspUrl, username, password) {
+        if (!mainWindow || !mainWindow.popupManager)
+            return
+
+        mainWindow.popupManager.openPopup(
+            "qrc:/app/resources/qml/components/popups/EditCameraPopup.qml",
+            {
+                frigateRef: root.frigateRef,
+                cameraId: cameraId,
+                rtspUrl: rtspUrl,
+                username: username,
+                password: password,
+                popupManager: mainWindow.popupManager
+            }
+        )
+    }
+
+    //
     // Camera grid loader
     //
     Loader {
@@ -117,6 +137,10 @@ Item {
 
             function removeCamera(cameraId) {
                 root.openRemoveCameraPopup(cameraId)
+            }
+
+            function editCamera(cameraId, rtspUrl, username, password) {
+                root.openEditCameraPopup(cameraId, rtspUrl, username, password)
             }
 
             //

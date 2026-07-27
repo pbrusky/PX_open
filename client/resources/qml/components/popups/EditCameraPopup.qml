@@ -12,26 +12,48 @@ Item {
     signal closeRequested()
 
     property var frigateRef: null
+    property var popupManager: null
 
     property string cameraId: ""
+    property string cameraName: ""
     property string rtspUrl: ""
     property string username: ""
     property string password: ""
-    property bool rtspValid: true
+
+    Component.onCompleted: {
+        nameField.text = cameraName
+        rtspField.text = rtspUrl
+        userField.text = username
+        passField.text = password
+
+        // Auto-fill IP field if RTSP contains host
+        if (rtspUrl.startsWith("rtsp://")) {
+            let withoutPrefix = rtspUrl.split("rtsp://")[1]
+            let hostPart = withoutPrefix.includes("@")
+                ? withoutPrefix.split("@")[1]
+                : withoutPrefix
+
+            let ip = hostPart.split("/")[0]
+            ipField.text = ip
+        }
+    }
 
     Rectangle {
         anchors.fill: parent
-        color: "#000000AA"
+        color: "#00000080"
     }
 
     Rectangle {
         id: container
         width: 480
-        height: 480
+        height: 520
         radius: 8
-        color: "#111"
-        x: (parent.width - width) / 2
-        y: (parent.height - height) / 2
+        color: "#202020"
+        border.color: "#404040"
+        border.width: 1
+
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
 
         ColumnLayout {
             anchors.fill: parent
@@ -46,21 +68,18 @@ Item {
             }
 
             TextField {
-                id: idField
+                id: nameField
                 Layout.fillWidth: true
-                placeholderText: "Camera ID"
-                text: editPopup.cameraId
-                readOnly: true
+                placeholderText: "Camera Name"
+                onTextChanged: editPopup.cameraName = text
             }
 
             TextField {
                 id: ipField
                 Layout.fillWidth: true
                 placeholderText: "Camera IP address"
-                enabled: !rtspField.text.startsWith("rtsp://")
                 onTextChanged: {
-                    if (!rtspField.text.startsWith("rtsp://"))
-                        rtspField.text = getFinalRtspUrl()
+                    rtspField.text = getFinalRtspUrl()
                 }
             }
 
@@ -68,7 +87,6 @@ Item {
                 id: rtspField
                 Layout.fillWidth: true
                 placeholderText: "RTSP URL"
-                text: editPopup.rtspUrl
                 onTextChanged: editPopup.rtspUrl = text
             }
 
@@ -76,12 +94,9 @@ Item {
                 id: userField
                 Layout.fillWidth: true
                 placeholderText: "Username"
-                text: editPopup.username
-                enabled: !rtspField.text.startsWith("rtsp://")
                 onTextChanged: {
                     editPopup.username = text
-                    if (!rtspField.text.startsWith("rtsp://"))
-                        rtspField.text = getFinalRtspUrl()
+                    rtspField.text = getFinalRtspUrl()
                 }
             }
 
@@ -90,20 +105,10 @@ Item {
                 Layout.fillWidth: true
                 placeholderText: "Password"
                 echoMode: TextInput.Password
-                text: editPopup.password
-                enabled: !rtspField.text.startsWith("rtsp://")
                 onTextChanged: {
                     editPopup.password = text
-                    if (!rtspField.text.startsWith("rtsp://"))
-                        rtspField.text = getFinalRtspUrl()
+                    rtspField.text = getFinalRtspUrl()
                 }
-            }
-
-            Text {
-                visible: rtspField.text.startsWith("rtsp://")
-                text: "Full RTSP URL detected — IP/username/password not required"
-                color: "#66CC66"
-                font.pixelSize: 14
             }
 
             RowLayout {
@@ -113,28 +118,16 @@ Item {
                 Button {
                     text: "Discover ONVIF"
                     Layout.fillWidth: true
-                    enabled: !rtspField.text.startsWith("rtsp://")
-                    onClicked: {
-                        onvifPopup.visible = true
-                        if (frigateRef)
-                            frigateRef.discoverOnvif()
-                    }
+                    onClicked: onvifLoader.active = true
                 }
 
                 Button {
                     text: "Test RTSP"
                     Layout.fillWidth: true
                     onClicked: {
-                        if (!frigateRef) {
-                            rtspStatus.text = "Frigate not ready"
-                            rtspStatus.color = "red"
-                            return
-                        }
-
                         let url = getFinalRtspUrl()
                         rtspStatus.text = "Testing: " + url
                         rtspStatus.color = "yellow"
-
                         frigateRef.testRtsp(url)
                     }
                 }
@@ -156,29 +149,10 @@ Item {
                     text: "Save"
                     Layout.fillWidth: true
                     onClicked: {
-                        if (!frigateRef) {
-                            rtspStatus.text = "Frigate not ready"
-                            rtspStatus.color = "red"
-                            return
-                        }
-
-                        let url = getFinalRtspUrl()
-                        frigateRef.editCamera(idField.text, url)
-                    }
-                }
-
-                Button {
-                    text: "Use"
-                    Layout.fillWidth: true
-                    onClicked: {
-                        if (!frigateRef) {
-                            rtspStatus.text = "Frigate not ready"
-                            rtspStatus.color = "red"
-                            return
-                        }
-
-                        let url = getFinalRtspUrl()
-                        frigateRef.applyNewCameraRtsp(idField.text, url)
+                        frigateRef.editCamera(
+                            editPopup.cameraId,
+                            getFinalRtspUrl()
+                        )
                     }
                 }
 
@@ -191,17 +165,22 @@ Item {
         }
     }
 
-    OnvifDiscoveryPopup {
-        id: onvifPopup
-        visible: false
-        frigateRef: editPopup.frigateRef
-        addCameraPopupRef: editPopup
+    Loader {
+        id: onvifLoader
+        active: false
+        source: "qrc:/app/resources/qml/components/popups/OnvifDiscoveryPopup.qml"
 
-        onCameraSelected: function(address, username, password, rtsp) {
-            ipField.text = address || ""
-            userField.text = username || ""
-            passField.text = password || ""
-            rtspField.text = rtsp || ""
+        onLoaded: {
+            item.visible = true
+            item.frigateRef = editPopup.frigateRef
+            item.addCameraPopupRef = editPopup
+
+            item.cameraSelected.connect(function(address, username, password, rtsp) {
+                ipField.text = address || ""
+                userField.text = username || ""
+                passField.text = password || ""
+                rtspField.text = rtsp || ""
+            })
         }
     }
 
@@ -209,24 +188,22 @@ Item {
         target: frigateRef
 
         function onRtspTestResult(ok, message) {
-            editPopup.rtspValid = ok
-
-            if (ok) {
-                rtspStatus.text = "RTSP Test Passed"
-                rtspStatus.color = "lightgreen"
-            } else {
-                rtspStatus.text = "RTSP Test Failed: " + message
-                rtspStatus.color = "red"
-            }
+            rtspStatus.text = message
+            rtspStatus.color = ok ? "#66CC66" : "red"
         }
 
         function onCameraEditResult(ok, message) {
             if (ok)
                 closeRequested()
+            else {
+                rtspStatus.text = message
+                rtspStatus.color = "red"
+            }
         }
     }
 
     function getFinalRtspUrl() {
+        // If user manually typed a full RTSP, use it
         if (rtspField.text.startsWith("rtsp://"))
             return rtspField.text
 
@@ -234,8 +211,8 @@ Item {
             return ""
 
         let auth = ""
-        if (username.length > 0 && password.length > 0)
-            auth = username + ":" + password + "@"
+        if (userField.text.length > 0 && passField.text.length > 0)
+            auth = userField.text + ":" + passField.text + "@"
 
         return "rtsp://" + auth + ipField.text +
                ":554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
