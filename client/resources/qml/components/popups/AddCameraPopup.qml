@@ -25,9 +25,6 @@ Item {
     property alias userField: userInput
     property alias passField: passInput
 
-    //
-    // ⭐ ONVIF CHILD POPUP (NOT PopupManager)
-    //
     Loader {
         id: onvifLoader
         active: false
@@ -132,9 +129,6 @@ Item {
                 Layout.fillWidth: true
                 spacing: 10
 
-                //
-                // ⭐ ONVIF opens inside AddCameraPopup (always enabled)
-                //
                 Button {
                     text: "Discover ONVIF"
                     Layout.fillWidth: true
@@ -223,6 +217,28 @@ Item {
         function onRtspTestResult(ok, message) {
             rtspStatus.text = message
             rtspStatus.color = ok ? "lightgreen" : "red"
+        }
+
+        function onCameraAddResult(ok, message) {
+            saveButton.enabled = true
+
+            if (ok) {
+                rtspStatus.text = "Camera added successfully"
+                rtspStatus.color = "lightgreen"
+
+                // ⭐ Force close via PopupManager, then open restart popup
+                if (popupRoot.popupManager) {
+                    popupRoot.popupManager.closePopup()
+                    popupRoot.popupManager.openRestartFrigatePopup()
+                } else {
+                    // Fallback: hide this popup if manager is missing
+                    popupRoot.visible = false
+                }
+
+            } else {
+                rtspStatus.text = message
+                rtspStatus.color = "red"
+            }
         }
     }
 

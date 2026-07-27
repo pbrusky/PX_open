@@ -45,4 +45,9 @@ Item {
         currentPopup.destroy()
         currentPopup = null
     }
+
+    // ⭐ Correct path — this fixes your error
+    function openRestartFrigatePopup(params) {
+        openPopup("qrc:/app/resources/qml/components/popups/RestartPopup.qml", params)
+    }
 }
