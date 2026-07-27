@@ -16,20 +16,24 @@ Item {
     property var frigateRef: null
     property string cameraId: ""
 
-    // FULLY OPAQUE BLACK BACKGROUND (no camera visible behind)
+    // Background overlay (not fullscreen popup)
     Rectangle {
         anchors.fill: parent
-        color: "#000000"    // solid black
+        color: "#00000088"
     }
 
-    // FULLY OPAQUE BLACK POPUP CONTAINER
+    // Centered popup box, moved slightly upward
     Rectangle {
         id: container
         width: 360
         radius: 8
-        color: "#000000"    // solid black, matches your app theme
-        x: (parent.width - width) / 2
-        y: (parent.height - implicitHeight) / 2
+        color: "#000000"
+
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
+
+        // ⭐ Move popup upward
+        anchors.verticalCenterOffset: -80
 
         ColumnLayout {
             anchors.fill: parent
@@ -106,11 +110,6 @@ Item {
             if (ok) {
                 closeRequested()
                 removePopup.cameraRemoved()
-
-                if (mainWindow && mainWindow.restartPopup) {
-                    mainWindow.restartPopup.visible = true
-                    mainWindow.frigatePollTimer.start()
-                }
             }
         }
     }
