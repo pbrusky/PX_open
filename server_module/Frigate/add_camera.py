@@ -102,10 +102,10 @@ def add_go2rtc_stream(cam_id, rtsp_url):
     return False
 
 # ---------------------------------------------------------
-# FRIGATE CONFIG ADD (PATCHED WITH CREDENTIALS)
+# FRIGATE CONFIG ADD
 # ---------------------------------------------------------
 
-def add_frigate_camera(cam_id, rtsp_url, record, username, password):
+def add_frigate_camera(cam_id, rtsp_url, record=True):
     backup_file(FRIGATE_CONFIG_PATH)
     cfg = load_yaml(FRIGATE_CONFIG_PATH)
 
@@ -117,8 +117,6 @@ def add_frigate_camera(cam_id, rtsp_url, record, username, password):
 
     cfg["cameras"][cam_id] = {
         "enabled": True,
-        "username": username,          # ⭐ NEW
-        "password": password,          # ⭐ NEW
         "ffmpeg": {
             "inputs": [
                 {
@@ -138,10 +136,10 @@ def add_frigate_camera(cam_id, rtsp_url, record, username, password):
     return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
 # ---------------------------------------------------------
-# PUBLIC API: ADD CAMERA (PATCHED)
+# PUBLIC API: ADD CAMERA
 # ---------------------------------------------------------
 
-def add_camera(cam_id, rtsp_url, record=True, username="", password=""):
+def add_camera(cam_id, rtsp_url, record=True):
     print(f"[camera_manager] add_camera {cam_id}")
 
     if not cam_id or not rtsp_url.startswith("rtsp://"):
@@ -151,18 +149,8 @@ def add_camera(cam_id, rtsp_url, record=True, username="", password=""):
             "message": "Invalid camera name or RTSP URL"
         }
 
-    # Extract credentials from RTSP if not provided
-    if not username or not password:
-        try:
-            auth = rtsp_url.split("rtsp://")[1].split("@")[0]
-            if ":" in auth:
-                username, password = auth.split(":")
-        except:
-            username = ""
-            password = ""
-
     go2_ok = add_go2rtc_stream(cam_id, rtsp_url)
-    fr_ok = add_frigate_camera(cam_id, rtsp_url, record, username, password)
+    fr_ok = add_frigate_camera(cam_id, rtsp_url, record)
     restart_ok = restart_frigate() if fr_ok else False
 
     return {
@@ -170,7 +158,5 @@ def add_camera(cam_id, rtsp_url, record=True, username="", password=""):
         "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
         "message": f"Camera {cam_id} added",
         "go2rtc": go2_ok,
-        "frigate_restart": restart_ok,
-        "username": username,          # ⭐ NEW
-        "password": password           # ⭐ NEW
+        "frigate_restart": restart_ok
     }

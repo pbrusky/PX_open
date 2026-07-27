@@ -17,7 +17,7 @@ from config import (
 # Import HTTPS module
 from https_server import start_https_server
 
-# Import camera modules
+# Import camera modules (camera_manager.py is deleted)
 from add_camera import add_camera, restart_frigate, restart_go2rtc
 from edit_camera import edit_camera
 from remove_camera import remove_camera
@@ -182,26 +182,19 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     print("[getRtsp ERROR]", e)
                     return self.send_json({"rtsp": None})
 
-            # ====================== ADD CAMERA (PATCHED) ======================
             if self.path == "/api/addCamera":
                 return self.send_json(add_camera(
                     data.get("id"),
                     data.get("rtsp"),
-                    bool(data.get("record", True)),
-                    data.get("username", ""),     # ⭐ NEW
-                    data.get("password", "")      # ⭐ NEW
+                    bool(data.get("record", True))
                 ))
 
-            # ====================== EDIT CAMERA (PATCHED) ======================
             if self.path == "/api/editCamera":
                 return self.send_json(edit_camera(
                     data.get("id"),
-                    data.get("rtsp"),
-                    data.get("username", ""),     # ⭐ NEW
-                    data.get("password", "")      # ⭐ NEW
+                    data.get("rtsp")
                 ))
 
-            # ====================== REMOVE CAMERA ======================
             if self.path == "/api/removeCamera":
                 return self.send_json(remove_camera(data.get("id")))
 
@@ -258,7 +251,7 @@ if __name__ == "__main__":
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(f"[*] HTTP server running → http://{LAN_IP}:{HTTP_PORT}")
 
-    # HTTPS Server
+    # HTTPS Server (now in separate file)
     start_https_server(HOST, HTTPS_PORT, VMSHandler)
 
     print("[MAIN] All services started. Press Ctrl+C to stop.")

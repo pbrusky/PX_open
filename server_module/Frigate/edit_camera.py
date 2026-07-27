@@ -106,7 +106,7 @@ def update_go2rtc_stream(cam_id, rtsp_url):
 # FRIGATE CONFIG UPDATE
 # ---------------------------------------------------------
 
-def update_frigate_camera(cam_id, rtsp_url, username, password):
+def update_frigate_camera(cam_id, rtsp_url):
     backup_file(FRIGATE_CONFIG_PATH)
     cfg = load_yaml(FRIGATE_CONFIG_PATH)
 
@@ -114,8 +114,6 @@ def update_frigate_camera(cam_id, rtsp_url, username, password):
 
     cfg["cameras"][cam_id] = {
         "enabled": True,
-        "username": username,          # ⭐ NEW
-        "password": password,          # ⭐ NEW
         "ffmpeg": {
             "inputs": [
                 {
@@ -138,7 +136,7 @@ def update_frigate_camera(cam_id, rtsp_url, username, password):
 # PUBLIC API: EDIT CAMERA
 # ---------------------------------------------------------
 
-def edit_camera(cam_id, rtsp_url, username=None, password=None):
+def edit_camera(cam_id, rtsp_url):
     print(f"[edit_camera] Editing {cam_id}")
 
     if not cam_id or not rtsp_url.startswith("rtsp://"):
@@ -148,21 +146,8 @@ def edit_camera(cam_id, rtsp_url, username=None, password=None):
             "message": "Invalid camera name or RTSP URL"
         }
 
-    # Extract credentials if not explicitly provided
-    if username is None or password is None:
-        try:
-            auth = rtsp_url.split("rtsp://")[1].split("@")[0]
-            if ":" in auth:
-                username, password = auth.split(":")
-            else:
-                username = ""
-                password = ""
-        except:
-            username = ""
-            password = ""
-
     go2_ok = update_go2rtc_stream(cam_id, rtsp_url)
-    fr_ok = update_frigate_camera(cam_id, rtsp_url, username, password)
+    fr_ok = update_frigate_camera(cam_id, rtsp_url)
     restart_ok = restart_frigate() if fr_ok else False
 
     return {
@@ -170,7 +155,5 @@ def edit_camera(cam_id, rtsp_url, username=None, password=None):
         "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
         "message": f"Camera {cam_id} updated",
         "go2rtc": go2_ok,
-        "frigate_restart": restart_ok,
-        "username": username,
-        "password": password
+        "frigate_restart": restart_ok
     }
