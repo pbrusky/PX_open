@@ -42,9 +42,6 @@ ApplicationWindow {
         showNormal()
     }
 
-    //
-    // Extract username/password from RTSP URL (fallback)
-    //
     function parseRtspCredentials(url) {
         if (!url || !url.startsWith("rtsp://"))
             return { user: "", pass: "" }
@@ -219,9 +216,6 @@ ApplicationWindow {
                 return
             }
 
-            //
-            // ⭐ FULLY PATCHED EDIT CAMERA BLOCK
-            //
             if (page.startsWith("editCamera:")) {
                 let camId = page.split(":")[1]
                 let cam = mainWindow.cameraList.find(c => c.id === camId)
@@ -231,7 +225,6 @@ ApplicationWindow {
                     let user = cam.username || ""
                     let pass = cam.password || ""
 
-                    // fallback: parse from RTSP if missing
                     if ((!user || !pass) && rtsp) {
                         let creds = parseRtspCredentials(rtsp)
                         if (!user) user = creds.user
@@ -283,6 +276,9 @@ ApplicationWindow {
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
     }
 
+    //
+    // PART 2 — CONTENT LOADER
+    //
     Loader {
         id: contentLoader
         anchors.fill: parent
@@ -319,8 +315,10 @@ ApplicationWindow {
                 })
             }
 
-            if (item.objectName !== "StartupPage" && discovery)
-                discovery.stopDiscovery()
+            //
+            // ❌ Removed: discovery.stopDiscovery()
+            // Discovery stops automatically in C++ via queued invokeMethod
+            //
 
             if (item.objectName === "ServerView") {
                 item.frigateRef = frigateRef

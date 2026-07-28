@@ -18,6 +18,8 @@
 #include "FrigateOnvif.h"
 
 #include "DiscoveryListener.h"
+#include "DiscoveryProxy.h"
+
 #include "CameraVideoItem.h"
 #include "FrameItem.h"
 
@@ -28,7 +30,6 @@
 #include <windows.h>
 #endif
 
-// ⭐ FFmpeg logging control
 extern "C" {
 #include <libavutil/log.h>
 }
@@ -55,24 +56,15 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     app.setWindowIcon(QIcon(":/assets/icon.ico"));
 
-    //
-    // ⭐ Silence ALL FFmpeg decoder warnings
-    //
     av_log_set_level(AV_LOG_QUIET);
 
     QQmlApplicationEngine engine;
 
-    //
-    // ⭐ Register AboutInfo singleton (correct placement)
-    //
     qmlRegisterSingletonType<AboutInfo>("PxOpen", 1, 0, "AboutInfo",
         [](QQmlEngine*, QJSEngine*) -> QObject* {
             return new AboutInfo();
         });
 
-    //
-    // Register QML types
-    //
     qmlRegisterType<FrigateAPI>("PxOpen", 1, 0, "FrigateAPI");
     qmlRegisterType<FrigateCameraManager>("PxOpen", 1, 0, "FrigateCameraManager");
     qmlRegisterType<FrigateStreamManager>("PxOpen", 1, 0, "FrigateStreamManager");
@@ -83,11 +75,8 @@ int main(int argc, char *argv[])
     qmlRegisterType<CameraVideoItem>("PxOpen", 1, 0, "CameraVideoItem");
     qmlRegisterType<FrameItem>("PxOpen", 1, 0, "FrameItem");
 
-    //
-    // Fullscreen helper
-    //
     qmlRegisterSingletonType<FullscreenHelper>("PxOpen", 1, 0, "FullscreenHelper",
-        [](QQmlEngine* engine, QJSEngine*) -> QObject* {
+        [](QQmlEngine*, QJSEngine*) -> QObject* {
             return new FullscreenHelper();
         });
 
@@ -95,8 +84,31 @@ int main(int argc, char *argv[])
     // Backend singletons
     //
     FrigateAPI* frigateApi = new FrigateAPI(&engine);
-    DiscoveryListener* discovery = new DiscoveryListener(&engine);
     FrigateStreamManager* frigateStream = new FrigateStreamManager(&engine);
+
+    //
+    // Threaded DiscoveryListener + safe QML proxy
+    //
+    DiscoveryListener* discovery = new DiscoveryListener();
+    DiscoveryProxy* discoveryProxy = new DiscoveryProxy();
+
+    QThread* discoveryThread = new QThread;
+    discovery->moveToThread(discoveryThread);
+
+    QObject::connect(discoveryThread, &QThread::started,
+                     discovery, &DiscoveryListener::startDiscovery);
+
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, [&]() {
+        QMetaObject::invokeMethod(discovery, "stopDiscovery", Qt::QueuedConnection);
+        discoveryThread->quit();
+        discoveryThread->wait();
+        frigateStream->stopAllStreams();
+    });
+
+    QObject::connect(discovery, &DiscoveryListener::serverFound,
+                     discoveryProxy, &DiscoveryProxy::serverFound);
+
+    discoveryThread->start();
 
     //
     // Load cameras
@@ -108,12 +120,8 @@ int main(int argc, char *argv[])
     // Expose to QML
     //
     engine.rootContext()->setContextProperty("frigate", frigateApi);
-    engine.rootContext()->setContextProperty("discovery", discovery);
+    engine.rootContext()->setContextProperty("discovery", discoveryProxy);
     engine.rootContext()->setContextProperty("frigateStream", frigateStream);
-
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, [&]() {
-        frigateStream->stopAllStreams();
-    });
 
     engine.load(QUrl("qrc:/app/resources/qml/MainWindow.qml"));
     if (engine.rootObjects().isEmpty())
@@ -149,9 +157,6 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    //
-    // Fullscreen-capable main window
-    //
     if (mainWindow) {
         mainWindow->setFlags(Qt::FramelessWindowHint | Qt::Window);
     }

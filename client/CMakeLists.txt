@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.5 REQUIRED COMPONENTS
     Core Gui Network Quick Qml QuickControls2
     WebEngineQuick WebEngineCore Multimedia
-    Concurrent            # ⭐ ADD THIS
+    Concurrent
 )
 
 qt_standard_project_setup()
@@ -22,6 +22,7 @@ qt_add_executable(px_open
 
     # Backend: discovery
     src/backend/discovery/DiscoveryListener.cpp
+    src/backend/discovery/DiscoveryProxy.cpp
 
     # Backend: stream
     src/backend/stream/FrameQueue.cpp
@@ -31,7 +32,7 @@ qt_add_executable(px_open
     # Backend: render
     src/backend/render/CameraVideoItem.cpp
     src/backend/render/CameraVideoItemTexture.cpp
-   
+
     # UI
     src/ui/FrameItem.cpp
     src/ui/FullscreenHelper.cpp
@@ -78,7 +79,7 @@ target_link_libraries(px_open PRIVATE
     Qt6::Core Qt6::Gui Qt6::Network Qt6::Quick Qt6::Qml
     Qt6::QuickControls2 Qt6::WebEngineQuick Qt6::WebEngineCore
     Qt6::Multimedia
-    Qt6::Concurrent          # ⭐ ADD THIS
+    Qt6::Concurrent
 
     frigate_backend
 

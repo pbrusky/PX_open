@@ -23,11 +23,13 @@ Rectangle {
     signal serverSelected(string name, string ip, int apiPort, int modulePort)
 
     Component.onCompleted: {
-        // logs removed
+        // Discovery now starts automatically in C++
+        // No need to call discovery.startDiscovery()
     }
 
     Component.onDestruction: {
-        if (discovery) discovery.stopDiscovery()
+        // Discovery stops automatically in C++
+        // No need to call discovery.stopDiscovery()
     }
 
     onDiscoveryChanged: {
@@ -36,7 +38,9 @@ Rectangle {
 
         servers = []
         serverModel.clear()
-        discovery.startDiscovery()
+
+        // ❌ Removed: discovery.startDiscovery()
+        // Discovery already running in its own thread
     }
 
     Connections {
