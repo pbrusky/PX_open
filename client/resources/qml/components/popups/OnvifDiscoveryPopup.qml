@@ -19,26 +19,28 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#000000AA"
+        color: "#000000CC"
     }
 
     Rectangle {
         id: container
-        width: 900
-        height: 700
-        radius: 10
-        color: "#121212"
+        width: 940
+        height: 740
+        radius: 14
+        color: "#1A1A1A"
+        border.color: "#2F2F2F"
+        border.width: 1
         x: (parent.width - width) / 2
         y: (parent.height - height) / 2
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 28
-            spacing: 16
+            anchors.margins: 32
+            spacing: 24
 
             Text {
                 text: "ONVIF Discovery"
-                font.pixelSize: 32
+                font.pixelSize: 36
                 font.bold: true
                 color: "white"
             }
@@ -46,39 +48,71 @@ Item {
             GridLayout {
                 Layout.fillWidth: true
                 columns: 2
-                columnSpacing: 12
-                rowSpacing: 8
+                columnSpacing: 18
+                rowSpacing: 12
 
-                Text { text: "Username"; color: "#ccc"; font.pixelSize: 16 }
+                Text { text: "Username"; color: "#AAAAAA"; font.pixelSize: 16 }
                 TextField {
                     id: userField
-                    placeholderText: "Optional"
+                    placeholderText: "admin (optional)"
                     color: "white"
                     font.pixelSize: 16
-                    background: Rectangle { color: "#1E1E1E"; radius: 6; border.color: "#444" }
+                    background: Rectangle {
+                        color: "#252525"
+                        radius: 8
+                        border.color: userField.activeFocus ? "#4A90E2" : "#444"
+                        border.width: userField.activeFocus ? 2 : 1
+                    }
                 }
 
-                Text { text: "Password"; color: "#ccc"; font.pixelSize: 16 }
+                Text { text: "Password"; color: "#AAAAAA"; font.pixelSize: 16 }
                 TextField {
                     id: passField
-                    placeholderText: "Optional"
+                    placeholderText: "password (optional)"
                     echoMode: TextInput.Password
                     color: "white"
                     font.pixelSize: 16
-                    background: Rectangle { color: "#1E1E1E"; radius: 6; border.color: "#444" }
+                    background: Rectangle {
+                        color: "#252525"
+                        radius: 8
+                        border.color: passField.activeFocus ? "#4A90E2" : "#444"
+                        border.width: passField.activeFocus ? 2 : 1
+                    }
+
+                    // ⭐ FIX: Enter key now starts discovery
+                    onAccepted: {
+                        devices = []
+                        discoveryRunning = true
+                        if (frigateRef)
+                            frigateRef.discoverOnvif(userField.text, passField.text)
+                    }
                 }
             }
 
             Button {
-                text: discoveryRunning ? "Scanning..." : "Start Scan"
+                id: scanButton
+                text: discoveryRunning ? "Scanning..." : "Start Discovery"
                 Layout.fillWidth: true
-                font.pixelSize: 20
+                font.pixelSize: 18
+                font.bold: true
                 enabled: !discoveryRunning
+
+                background: Rectangle {
+                    radius: 8
+                    color: scanButton.enabled ? (scanButton.down ? "#3A8EFF" : "#4A90E2") : "#555555"
+                }
+
+                contentItem: Text {
+                    text: scanButton.text
+                    font: scanButton.font
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
 
                 onClicked: {
                     devices = []
                     discoveryRunning = true
-
                     if (frigateRef)
                         frigateRef.discoverOnvif(userField.text, passField.text)
                 }
@@ -86,35 +120,36 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 50
-                radius: 6
-                color: "#1A1A1A"
+                height: 54
+                radius: 8
+                color: "#252525"
                 border.color: "#333"
 
                 Text {
                     anchors.centerIn: parent
                     text: discoveryRunning
-                          ? "Scanning for ONVIF cameras..."
-                          : (devices.length > 0 ? "Scan complete" : "Ready to scan")
-                    color: "#ccc"
-                    font.pixelSize: 18
+                          ? "🔍 Scanning for ONVIF devices on the network..."
+                          : (devices.length > 0 ? "✅ Scan completed — " + devices.length + " device(s) found" : "Ready to scan")
+                    color: discoveryRunning ? "#FFCC00" : "#AAAAAA"
+                    font.pixelSize: 16
                 }
             }
 
             ListView {
                 id: list
-                model: devices
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
                 spacing: 16
+                bottomMargin: 30
+                model: devices
 
                 delegate: Rectangle {
-                    width: list.width
-                    height: 160
-                    radius: 10
-                    color: hovered ? "#2A2A2A" : "#1E1E1E"
-                    border.color: "#444"
+                    width: ListView.view.width
+                    height: 190
+                    radius: 12
+                    color: hovered ? "#2A2A2A" : "#222222"
+                    border.color: "#3F3F3F"
 
                     property bool hovered: false
 
@@ -125,42 +160,57 @@ Item {
                         onExited: parent.hovered = false
                     }
 
-                    Column {
+                    ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: 16
-                        spacing: 6
+                        anchors.margins: 20
+                        spacing: 10
 
                         Text {
                             text: (modelData.manufacturer && modelData.model)
                                   ? modelData.manufacturer + " " + modelData.model
                                   : modelData.address
                             color: "white"
-                            font.pixelSize: 20
+                            font.pixelSize: 19
                             font.bold: true
+                            elide: Text.ElideRight
                         }
 
-                        Text { text: "IP: " + modelData.address; color: "#bbb"; font.pixelSize: 15 }
-                        Text { text: "Protocol: " + modelData.protocol; color: "#bbb"; font.pixelSize: 15 }
-                        Text { text: "Firmware: " + modelData.firmware; color: "#bbb"; font.pixelSize: 15 }
-                        Text { text: "Serial #: " + modelData.serial; color: "#bbb"; font.pixelSize: 15 }
+                        Text { text: "IP: " + modelData.address; color: "#BBB"; font.pixelSize: 14 }
+                        Text { text: "Protocol: " + (modelData.protocol || "ONVIF"); color: "#BBB"; font.pixelSize: 14 }
+                        Text { text: "Firmware: " + (modelData.firmware || "Unknown"); color: "#BBB"; font.pixelSize: 14 }
+                        Text { text: "Serial: " + (modelData.serial || "N/A"); color: "#BBB"; font.pixelSize: 14 }
 
-                        Row {
-                            spacing: 12
+                        Item { Layout.fillHeight: true }
 
-                            Button {
-                                text: "Use"
-                                font.pixelSize: 15
+                        Button {
+                            text: "Use This Camera"
+                            Layout.fillWidth: true
+                            height: 58
+                            font.pixelSize: 16
+                            font.bold: true
 
-                                onClicked: {
-                                    if (!addCameraPopupRef || !frigateRef)
-                                        return
+                            background: Rectangle {
+                                radius: 10
+                                color: parent.down ? "#3670C0" : "#4A90E2"
+                            }
 
-                                    frigateRef.getRtsp(
-                                        modelData.address,
-                                        userField.text,
-                                        passField.text
-                                    )
-                                }
+                            contentItem: Text {
+                                text: parent.text
+                                font: parent.font
+                                color: "white"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            onClicked: {
+                                if (!addCameraPopupRef || !frigateRef)
+                                    return
+
+                                frigateRef.getRtsp(
+                                    modelData.address,
+                                    userField.text,
+                                    passField.text
+                                )
                             }
                         }
                     }
@@ -170,7 +220,13 @@ Item {
             Button {
                 text: "Close"
                 Layout.fillWidth: true
-                font.pixelSize: 18
+                font.pixelSize: 17
+
+                background: Rectangle {
+                    radius: 8
+                    color: parent.down ? "#444" : "#2A2A2A"
+                }
+
                 onClicked: closeRequested()
             }
         }
@@ -186,7 +242,6 @@ Item {
         }
 
         function onRtspResolved(rtsp) {
-
             if (!addCameraPopupRef) {
                 console.warn("ONVIF: addCameraPopupRef is undefined")
                 closeRequested()
