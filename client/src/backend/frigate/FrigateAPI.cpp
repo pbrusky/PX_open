@@ -17,9 +17,6 @@ FrigateAPI::FrigateAPI(QObject* parent)
     m_playback      = new FrigatePlayback(this);
     m_onvif         = new FrigateOnvif(this);
 
-    //
-    // CAMERA SIGNALS
-    //
     connect(m_cameraManager, &FrigateCameraManager::camerasLoaded,
             this, &FrigateAPI::camerasLoaded);
 
@@ -38,9 +35,6 @@ FrigateAPI::FrigateAPI(QObject* parent)
     connect(m_cameraManager, &FrigateCameraManager::cameraRemoveResult,
             this, &FrigateAPI::cameraRemoveResult);
 
-    //
-    // ONVIF SIGNALS
-    //
     connect(m_onvif, &FrigateOnvif::onvifDevicesDiscovered,
             this, &FrigateAPI::onvifDevicesDiscovered);
 
@@ -53,40 +47,25 @@ FrigateAPI::FrigateAPI(QObject* parent)
     connect(m_onvif, &FrigateOnvif::onvifError,
             this, &FrigateAPI::onvifError);
 
-    //
-    // TIMELINE SIGNALS
-    //
     connect(m_timeline, &FrigateTimeline::recordingsLoaded,
             this, &FrigateAPI::recordingsLoaded);
 
     connect(m_timeline, &FrigateTimeline::eventsLoaded,
             this, &FrigateAPI::eventsLoaded);
 
-    //
-    // PLAYBACK SIGNALS
-    //
     connect(m_playback, &FrigatePlayback::playbackPositionChanged,
             this, &FrigateAPI::playbackPositionChanged);
 
-    //
-    // STREAM ONLINE/OFFLINE
-    //
     connect(m_streamManager, &FrigateStreamManager::cameraOnline,
             this, &FrigateAPI::cameraOnline);
 
     connect(m_streamManager, &FrigateStreamManager::cameraOffline,
             this, &FrigateAPI::cameraOffline);
 
-    //
-    // MODULE INFORMATION SIGNALS
-    //
     connect(m_cameraManager, &FrigateCameraManager::moduleInformationReceived,
             this, &FrigateAPI::moduleInformationReceived);
 }
 
-//
-// SERVER SETTERS
-//
 void FrigateAPI::setServer(QString server)
 {
     m_server = server;
@@ -117,9 +96,6 @@ void FrigateAPI::setServerIp(QString ip)
     m_playback->setServerIp(ip);
 }
 
-//
-// CAMERA API
-//
 void FrigateAPI::loadCameras()
 {
     m_cameraManager->loadCameras();
@@ -150,9 +126,6 @@ QVariantList FrigateAPI::getCameraList() const
     return m_cameraManager->getCameraList();
 }
 
-//
-// ONVIF API
-//
 void FrigateAPI::discoverOnvif(const QString& username, const QString& password)
 {
     m_onvif->discoverOnvif(username, password);
@@ -168,12 +141,14 @@ void FrigateAPI::getRtsp(const QString& ip, const QString& username, const QStri
     m_onvif->getRtsp(ip, username, password);
 }
 
-//
-// STREAMING API
-//
 QObject* FrigateAPI::getQueue(const QString& cameraName)
 {
     return m_streamManager->getQueue(cameraName);
+}
+
+QObject* FrigateAPI::getFullscreenQueue(const QString& cameraName)
+{
+    return m_streamManager->getFullscreenQueue(cameraName);
 }
 
 QObject* FrigateAPI::getPlaybackQueue(const QString& cameraName)
@@ -191,17 +166,11 @@ void FrigateAPI::stopAllStreams()
     m_streamManager->stopAllStreams();
 }
 
-//
-// ⭐ NEW — expose FFmpegWorker to QML
-//
 QObject* FrigateAPI::getWorker(const QString& cameraName)
 {
     return m_streamManager->getWorker(cameraName);
 }
 
-//
-// TIMELINE API
-//
 void FrigateAPI::loadRecordings(const QString& cameraId)
 {
     m_timeline->loadRecordings(cameraId);
@@ -222,9 +191,6 @@ QVariantList FrigateAPI::getEventsForCamera(const QString& cameraId)
     return m_timeline->getEvents(cameraId);
 }
 
-//
-// PLAYBACK API
-//
 void FrigateAPI::seek(const QString& cameraId, qint64 timestampMs)
 {
     m_playback->seek(cameraId, timestampMs);
@@ -245,17 +211,11 @@ void FrigateAPI::switchToLive(const QString& cameraId)
     m_playback->switchToLive(cameraId);
 }
 
-//
-// MODULE INFORMATION
-//
 void FrigateAPI::loadModuleInformation()
 {
     m_cameraManager->loadModuleInformation();
 }
 
-//
-// RTSP TESTING
-//
 void FrigateAPI::testRtsp(const QString& url)
 {
     qDebug() << "FrigateAPI::testRtsp REAL TEST for URL:" << url;

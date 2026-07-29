@@ -20,12 +20,10 @@ Item {
     property int hoverIndex: -1
     property string hoverCameraName: ""
 
-    // fullscreen state
     property var fullscreenCamera: null
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
 
-    // Online/offline state map
     property var cameraOnlineMap: ({})
 
     function cameraOnline(name) {
@@ -120,9 +118,6 @@ Item {
         tileObj.cameraName = cameraNames[tileObj.tileIndex]
     }
 
-    //
-    // ROBUST FULLSCREEN
-    //
     function enterFullscreen(cameraName, liveQueue) {
         if (!cameraName || cameraName === "") {
             console.warn("enterFullscreen: empty cameraName")
@@ -131,13 +126,14 @@ Item {
 
         console.log("enterFullscreen called for:", cameraName)
 
-        // Always force a live queue
-        if (!liveQueue && frigateRef) {
-            liveQueue = frigateRef.getQueue(cameraName)
-        }
+        // PRIMARY high-res stream for fullscreen
+        var primaryQueue = null
+        if (frigateRef && typeof frigateRef.getFullscreenQueue === "function")
+            primaryQueue = frigateRef.getFullscreenQueue(cameraName)
 
-        // Fallback camera object if getCamera fails
-        let cam = getCamera(cameraName)
+        console.log("primaryQueue:", primaryQueue)
+
+        var cam = getCamera(cameraName)
         if (!cam) {
             cam = {
                 id: cameraName,
@@ -146,14 +142,12 @@ Item {
         }
 
         fullscreenCamera = cam
-        fullscreenLiveQueue = liveQueue
+        fullscreenLiveQueue = primaryQueue ? primaryQueue : liveQueue
         fullscreenPlaybackQueue = frigateRef ? frigateRef.getPlaybackQueue(cameraName) : null
 
-        // Force reload of the Loader every time (most reliable)
         fullscreenLoader.source = ""
         fullscreenLoader.visible = true
 
-        // Small delay then set the real source
         Qt.callLater(function() {
             fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
         })
@@ -169,7 +163,7 @@ Item {
             return
         }
 
-        let item = fullscreenLoader.item
+        var item = fullscreenLoader.item
 
         item.cameraId      = fullscreenCamera.id || fullscreenCamera.name || ""
         item.cameraName    = fullscreenCamera.name || fullscreenCamera.id || ""

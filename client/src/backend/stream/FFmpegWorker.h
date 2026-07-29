@@ -17,7 +17,6 @@ class FFmpegWorker : public QObject
 {
     Q_OBJECT
 
-    // QML-visible metadata
     Q_PROPERTY(QString resolution READ resolution NOTIFY statsChanged)
     Q_PROPERTY(double fps READ fps NOTIFY statsChanged)
     Q_PROPERTY(int bitrateKbps READ bitrateKbps NOTIFY statsChanged)
@@ -30,8 +29,8 @@ public:
     void setUrl(const QString& url);
     void setTestMode(bool enabled);
     void setFrameQueue(FrameQueue* queue);
+    void setHighQuality(bool enabled);   // false = grid, true = fullscreen primary
 
-    // QML reads these
     QString resolution() const { return m_resolution; }
     double fps() const { return m_fps; }
     int bitrateKbps() const { return m_bitrateKbps; }
@@ -48,8 +47,6 @@ signals:
     void streamStopped();
     void streamError(const QString& reason);
     void finished();
-
-    // QML listens for this
     void statsChanged();
 
 private:
@@ -62,15 +59,14 @@ private:
     QString m_url;
     bool m_abort = false;
     bool m_testMode = false;
+    bool m_highQuality = false;
 
     FrameQueue* m_queue = nullptr;
 
-    // Metadata storage
     QString m_resolution;
     double m_fps = 0.0;
     int m_bitrateKbps = 0;
     QString m_codec;
 
-    // Hardware device context
     AVBufferRef* m_hwDeviceCtx = nullptr;
 };

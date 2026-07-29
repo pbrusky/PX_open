@@ -17,22 +17,17 @@ public:
     explicit FrigateStreamManager(QObject* parent = nullptr);
     ~FrigateStreamManager();
 
-    // Server configuration
     void setServer(const QString& server);
     void setServerIp(const QString& ip);
 
-    // Streaming API
     Q_INVOKABLE QObject* getQueue(const QString& cameraName);
+    Q_INVOKABLE QObject* getFullscreenQueue(const QString& cameraName);
     Q_INVOKABLE QObject* getPlaybackQueue(const QString& cameraName);
 
-    void startStream(const QString& cameraName);
     void stopStream(const QString& cameraName);
     void restartStream(const QString& cameraName);
-
-    // ⭐ Allow QML to stop everything cleanly
     Q_INVOKABLE void stopAllStreams();
 
-    // Worker access for QML
     Q_INVOKABLE QObject* getWorker(const QString& cameraName);
     Q_INVOKABLE QObject* getPlaybackWorker(const QString& cameraName);
 
@@ -44,19 +39,17 @@ private:
     QString m_server;
     QString m_serverIp;
 
-    // Live queues
-    QHash<QString, FrameQueue*> m_queues;
-
-    // Playback queues
-    QHash<QString, FrameQueue*> m_playbackQueues;
-
-    // Workers
+    QHash<QString, FrameQueue*>   m_queues;
     QHash<QString, FFmpegWorker*> m_workers;
-    QHash<QString, FFmpegWorker*> m_playbackWorkers;
+    QHash<QString, QThread*>      m_threads;
 
-    // Worker threads
-    QHash<QString, QThread*> m_threads;
-    QHash<QString, QThread*> m_playbackThreads;
+    QHash<QString, FrameQueue*>   m_fullscreenQueues;
+    QHash<QString, FFmpegWorker*> m_fullscreenWorkers;
+    QHash<QString, QThread*>      m_fullscreenThreads;
+
+    QHash<QString, FrameQueue*>   m_playbackQueues;
+    QHash<QString, FFmpegWorker*> m_playbackWorkers;
+    QHash<QString, QThread*>      m_playbackThreads;
 };
 
-#endif
+#endif // FRIGATESTREAMMANAGER_H

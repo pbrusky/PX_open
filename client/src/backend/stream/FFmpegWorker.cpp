@@ -57,9 +57,13 @@ void FFmpegWorker::setFrameQueue(FrameQueue* queue)
     m_queue = queue;
 }
 
+void FFmpegWorker::setHighQuality(bool enabled)
+{
+    m_highQuality = enabled;
+}
+
 bool FFmpegWorker::initHwDevice(AVCodecContext* ctx, AVCodecID codecId)
 {
-    // Only try hardware acceleration for HEVC
     if (codecId != AV_CODEC_ID_HEVC) {
         qDebug() << "[FFmpegWorker] Not HEVC – using software decoder";
         return false;
@@ -93,7 +97,6 @@ bool FFmpegWorker::initHwDevice(AVCodecContext* ctx, AVCodecID codecId)
             {
                 g_hwPixFmt = config->pix_fmt;
                 ctx->get_format = get_hw_format;
-
                 qDebug() << "[FFmpegWorker] Using hardware acceleration for HEVC:" << candidates[i];
                 return true;
             }
@@ -159,6 +162,7 @@ void FFmpegWorker::decodeLoop()
     av_dict_set(&opts, "probesize", "32768", 0);
     av_dict_set(&opts, "analyzeduration", "0", 0);
     av_dict_set(&opts, "fflags", "discardcorrupt", 0);
+    av_dict_set(&opts, "max_delay", "500000", 0);
 
     int ret = avformat_open_input(&fmtCtx, m_url.toUtf8().constData(), nullptr, &opts);
     av_dict_free(&opts);
@@ -239,12 +243,14 @@ void FFmpegWorker::decodeLoop()
     emit streamStarted();
 
     qint64 lastStatsMs = QDateTime::currentMSecsSinceEpoch();
-    int lastW = 0;
-    int lastH = 0;
+    int lastSrcW = 0, lastSrcH = 0, lastDstW = 0, lastDstH = 0;
     int consecutiveErrors = 0;
 
-    while (!m_abort) {
+    // Grid = low res, Fullscreen primary = high res
+    const int kMaxOutW = m_highQuality ? 1920 : 640;
+    const int kMaxOutH = m_highQuality ? 1080 : 360;
 
+    while (!m_abort) {
         AVPacket pkt;
         av_init_packet(&pkt);
 
@@ -270,18 +276,15 @@ void FFmpegWorker::decodeLoop()
         }
 
         while (!m_abort) {
-
             ret = avcodec_receive_frame(codecCtx, frame);
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;
-
             if (ret < 0) {
                 consecutiveErrors++;
                 continue;
             }
 
             consecutiveErrors = 0;
-
             AVFrame* srcFrame = frame;
 
             if (hwOk && frame->format == g_hwPixFmt) {
@@ -293,32 +296,52 @@ void FFmpegWorker::decodeLoop()
             if (srcFrame->width <= 16 || srcFrame->height <= 16)
                 continue;
 
+            int dstW = srcFrame->width;
+            int dstH = srcFrame->height;
+
+            if (dstW > kMaxOutW || dstH > kMaxOutH) {
+                const float scale = qMin(float(kMaxOutW) / float(dstW),
+                                         float(kMaxOutH) / float(dstH));
+                dstW = int(dstW * scale);
+                dstH = int(dstH * scale);
+            }
+
+            dstW &= ~1;
+            dstH &= ~1;
+            if (dstW < 2 || dstH < 2)
+                continue;
+
             qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
             if (nowMs - lastStatsMs > 1000) {
                 lastStatsMs = nowMs;
                 updateStats(fmtCtx, codecCtx, videoStream);
             }
 
-            if (!rgbSws || lastW != srcFrame->width || lastH != srcFrame->height) {
+            if (!rgbSws ||
+                lastSrcW != srcFrame->width || lastSrcH != srcFrame->height ||
+                lastDstW != dstW || lastDstH != dstH)
+            {
                 if (rgbSws)
                     sws_freeContext(rgbSws);
 
                 rgbSws = sws_getContext(
                     srcFrame->width, srcFrame->height,
                     (AVPixelFormat)srcFrame->format,
-                    srcFrame->width, srcFrame->height,
+                    dstW, dstH,
                     AV_PIX_FMT_BGRA,
                     SWS_FAST_BILINEAR, nullptr, nullptr, nullptr
                 );
 
-                lastW = srcFrame->width;
-                lastH = srcFrame->height;
+                lastSrcW = srcFrame->width;
+                lastSrcH = srcFrame->height;
+                lastDstW = dstW;
+                lastDstH = dstH;
             }
 
             if (!rgbSws)
                 continue;
 
-            QImage img(srcFrame->width, srcFrame->height, QImage::Format_RGB32);
+            QImage img(dstW, dstH, QImage::Format_RGB32);
             if (img.isNull())
                 continue;
 
@@ -333,9 +356,8 @@ void FFmpegWorker::decodeLoop()
                       dest,
                       destStride);
 
-            if (m_queue && !img.isNull() && img.width() > 16 && img.height() > 16) {
+            if (m_queue && !img.isNull() && img.width() > 16 && img.height() > 16)
                 m_queue->pushImage(img);
-            }
         }
     }
 
