@@ -12,16 +12,36 @@ Window {
     property string cameraId: ""
     property string cameraName: ""
     property var frigateRef: null
+
+    // Queues are created lazily via FrigateAPI
     property var liveQueue: null
     property var playbackQueue: null
-    property bool isOnline: false
 
+    property bool isOnline: false
     property bool isPlayback: false
     property int playbackPositionMs: 0
 
     // Almost instant fade
     opacity: 0.0
     Behavior on opacity { NumberAnimation { duration: 80 } }
+
+    // Helper to (re)bind queues safely
+    function updateQueues() {
+        liveQueue = null
+        playbackQueue = null
+
+        if (!frigateRef || cameraName === "")
+            return
+
+        // High-quality fullscreen live queue
+        liveQueue = frigateRef.getFullscreenQueue(cameraName)
+
+        // Playback queue (recordings)
+        playbackQueue = frigateRef.getPlaybackQueue(cameraName)
+    }
+
+    onFrigateRefChanged: updateQueues()
+    onCameraNameChanged: updateQueues()
 
     FocusScope {
         id: keyHandler
@@ -138,12 +158,14 @@ Window {
         anchors.bottom: parent.bottom
         height: 90
         asynchronous: true
-        active: false          // start inactive
+        active: false
         source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
     }
 
     function open() {
-        // 1. Show window immediately (this is the key for speed)
+        // Ensure queues are bound before showing
+        updateQueues()
+
         visible = true
         showFullScreen()
         opacity = 1.0
@@ -151,15 +173,12 @@ Window {
         isPlayback = false
         playbackPositionMs = 0
 
-        // 2. Show overlays a tiny bit later
         Qt.callLater(function() {
             topOverlay.opacity = 1.0
             exitButton.opacity = 1.0
         })
 
-        // 3. Heavy work much later
         Qt.callLater(function() {
-            // Activate timeline only now
             timelineLoader.active = true
 
             if (frigateRef && cameraId !== "") {
@@ -178,7 +197,7 @@ Window {
 
         Qt.callLater(function() {
             visible = false
-            timelineLoader.active = false   // free timeline resources
+            timelineLoader.active = false
         })
     }
 }

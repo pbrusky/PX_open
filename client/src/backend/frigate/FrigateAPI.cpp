@@ -92,6 +92,8 @@ void FrigateAPI::setServerIp(QString ip)
     m_serverIp = ip;
     emit serverIpChanged();
 
+    // ⭐ Propagate IP so StreamManager can build RTSP URLs.
+    // No auto-restart logic inside StreamManager::setServerIp().
     m_streamManager->setServerIp(ip);
     m_playback->setServerIp(ip);
 }

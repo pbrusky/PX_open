@@ -39,7 +39,13 @@ Item {
         id: helpers
 
         function __updateFrameQueueInternal() {
+            // Lazy stream init: only when tile is visible and has a camera
             tile.currentFrame = null
+
+            if (!tile.visible) {
+                tile.frameQueue = null
+                return
+            }
 
             if (tile.frigateRef &&
                 tile.cameraName !== "" &&
@@ -54,6 +60,17 @@ Item {
     }
 
     onCameraNameChanged: helpers.__updateFrameQueueInternal()
+
+    onVisibleChanged: {
+        helpers.__updateFrameQueueInternal()
+
+        if (!visible &&
+            frigateRef &&
+            cameraName !== "" &&
+            typeof frigateRef.stopStream === "function") {
+            frigateRef.stopStream(cameraName)
+        }
+    }
 
     onFrameQueueChanged: {
         frameConn.target = frameQueue
@@ -180,10 +197,8 @@ Item {
 
             if (mainWindow && mainWindow.dropHandler) {
                 mainWindow.dropHandler.reorderTile(tileIndex, tile)
-
                 tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
-                // ❗ Removed helpers.__updateFrameQueueInternal()
-                // cameraNameChanged will trigger it safely
+                // cameraNameChanged will trigger lazy stream init
             }
         }
 
@@ -219,6 +234,12 @@ Item {
     }
 
     function handleRemove() {
+        if (frigateRef &&
+            cameraName !== "" &&
+            typeof frigateRef.stopStream === "function") {
+            frigateRef.stopStream(cameraName)
+        }
+
         if (gridRoot && gridRoot.removeTile)
             gridRoot.removeTile(tileIndex)
     }

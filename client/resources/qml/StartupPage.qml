@@ -22,25 +22,12 @@ Rectangle {
 
     signal serverSelected(string name, string ip, int apiPort, int modulePort)
 
-    Component.onCompleted: {
-        // Discovery now starts automatically in C++
-        // No need to call discovery.startDiscovery()
-    }
-
-    Component.onDestruction: {
-        // Discovery stops automatically in C++
-        // No need to call discovery.stopDiscovery()
-    }
-
     onDiscoveryChanged: {
         if (!discovery)
             return
 
         servers = []
         serverModel.clear()
-
-        // ❌ Removed: discovery.startDiscovery()
-        // Discovery already running in its own thread
     }
 
     Connections {
@@ -85,6 +72,9 @@ Rectangle {
 
         if (!frigateRef)
             return
+
+        // ⭐ Push IP into FrigateAPI so StreamManager gets it
+        frigateRef.setServerIp(address)
 
         frigateRef.setServer(apiUrl)
         frigateRef.setModuleServer(moduleUrl)
@@ -148,6 +138,7 @@ Rectangle {
                             return
 
                         root.serverAssigned = true
+                        // port here is the module port from discovery
                         root.connectToServer(address, port)
                     }
                 }

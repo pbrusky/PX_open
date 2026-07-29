@@ -24,6 +24,10 @@ void FrigateStreamManager::setServer(const QString& server)
 
 void FrigateStreamManager::setServerIp(const QString& ip)
 {
+    // Just store IP; do NOT restart streams here.
+    if (m_serverIp == ip)
+        return;
+
     m_serverIp = ip;
 }
 
@@ -38,14 +42,10 @@ static void stopWorkerThread(FFmpegWorker* worker, QThread* thread)
         worker->stopDecoding();
 
     if (thread) {
-        // Ask the thread's event loop to finish
         thread->quit();
 
-        // Wait until decodeLoop returns and finished() was handled
         if (!thread->wait(5000)) {
-            qWarning() << "[StreamManager] Thread did not finish in time, terminating";
-            thread->terminate();
-            thread->wait(1000);
+            qWarning() << "[StreamManager] Thread did not finish in time";
         }
     }
 }
@@ -64,7 +64,6 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
 
     const QString url = buildRtspUrl(m_serverIp, cameraName);
 
-    // IMPORTANT: do not parent worker/thread to this — we control lifetime
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
@@ -87,7 +86,6 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
 
     connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
     connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
-    // Do NOT deleteLater the thread here from finished — stopWorkerThread owns shutdown
 
     thread->start();
     return queue;
@@ -161,7 +159,6 @@ QObject* FrigateStreamManager::getPlaybackQueue(const QString& cameraName)
 
 void FrigateStreamManager::stopStream(const QString& cameraName)
 {
-    // Live grid
     if (m_workers.contains(cameraName)) {
         FFmpegWorker* worker = m_workers.take(cameraName);
         QThread* thread = m_threads.take(cameraName);
@@ -170,7 +167,6 @@ void FrigateStreamManager::stopStream(const QString& cameraName)
         delete thread;
     }
 
-    // Fullscreen
     if (m_fullscreenWorkers.contains(cameraName)) {
         FFmpegWorker* worker = m_fullscreenWorkers.take(cameraName);
         QThread* thread = m_fullscreenThreads.take(cameraName);
@@ -179,7 +175,6 @@ void FrigateStreamManager::stopStream(const QString& cameraName)
         delete thread;
     }
 
-    // Playback
     if (m_playbackWorkers.contains(cameraName)) {
         FFmpegWorker* worker = m_playbackWorkers.take(cameraName);
         QThread* thread = m_playbackThreads.take(cameraName);

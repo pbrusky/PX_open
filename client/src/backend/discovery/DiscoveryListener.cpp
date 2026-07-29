@@ -61,6 +61,8 @@ void DiscoveryListener::processPendingDatagrams()
         if (senderIp.startsWith("::ffff:"))
             senderIp = senderIp.mid(7);
 
+        // ⭐ Discovery ONLY reports servers.
+        // ⭐ It does NOT set the active server IP.
         emit serverFound(name,
                          senderIp,
                          port,
