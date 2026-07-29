@@ -9,6 +9,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/pixfmt.h>
 }
 
 class FrameQueue;
@@ -29,12 +30,14 @@ public:
     void setUrl(const QString& url);
     void setTestMode(bool enabled);
     void setFrameQueue(FrameQueue* queue);
-    void setHighQuality(bool enabled);   // false = grid, true = fullscreen primary
+    void setHighQuality(bool enabled);   // false = grid, true = fullscreen
 
     QString resolution() const { return m_resolution; }
     double fps() const { return m_fps; }
     int bitrateKbps() const { return m_bitrateKbps; }
     QString codec() const { return m_codec; }
+
+    AVPixelFormat hwPixFmt() const { return m_hwPixFmt; }
 
 public slots:
     void startDecoding();
@@ -54,7 +57,13 @@ private:
     void updateStats(AVFormatContext* fmtCtx,
                      AVCodecContext* codecCtx,
                      AVStream* videoStream);
-    bool initHwDevice(AVCodecContext* ctx, AVCodecID codecId);
+
+    bool initHwDevice(AVCodecContext* ctx);
+    bool openCodec(AVCodecContext** codecCtx,
+                   const AVCodec* codec,
+                   AVCodecParameters* params,
+                   bool tryHw);
+    void clearHw();
 
     QString m_url;
     bool m_abort = false;
@@ -69,4 +78,5 @@ private:
     QString m_codec;
 
     AVBufferRef* m_hwDeviceCtx = nullptr;
+    AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
 };
