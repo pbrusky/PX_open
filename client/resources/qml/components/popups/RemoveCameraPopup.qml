@@ -16,24 +16,17 @@ Item {
     property var frigateRef: null
     property string cameraId: ""
 
-    // Background overlay (not fullscreen popup)
-    Rectangle {
-        anchors.fill: parent
-        color: "#00000088"
-    }
-
-    // Centered popup box, moved slightly upward
+    // Centered popup box - solid black
     Rectangle {
         id: container
         width: 360
+        height: 280          // Optional: give it a fixed height for better look
         radius: 8
-        color: "#000000"
+        color: "#000000"     // Solid black
 
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
-
-        // ⭐ Move popup upward
-        anchors.verticalCenterOffset: -80
+        anchors.verticalCenterOffset: -80   // Moved slightly upward (as before)
 
         ColumnLayout {
             anchors.fill: parent
@@ -98,6 +91,13 @@ Item {
                 }
             }
         }
+    }
+
+    // Optional: Click outside the popup to close (nice UX)
+    MouseArea {
+        anchors.fill: parent
+        onClicked: closeRequested()
+        z: -1   // Behind the popup
     }
 
     Connections {
