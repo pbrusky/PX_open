@@ -44,6 +44,9 @@ def save_yaml(path, data):
         print("[add_camera] save_yaml ERROR:", e)
         return False
 
+def clean_rtsp(url):
+    return (url or "").strip()
+
 # ---------------------------------------------------------
 # RESTART LOGIC
 # ---------------------------------------------------------
@@ -83,18 +86,23 @@ def restart_go2rtc():
     return restart_docker(GO2RTC_CONTAINER_NAME)
 
 # ---------------------------------------------------------
-# GO2RTC STREAM ADD
+# GO2RTC — client streams (sub + main)
 # ---------------------------------------------------------
 
-def add_go2rtc_stream(cam_id, rtsp_url):
+def add_go2rtc_streams(cam_id, main_url, sub_url):
     backup_file(GO2RTC_CONFIG_PATH)
     cfg = load_yaml(GO2RTC_CONFIG_PATH)
-
     cfg.setdefault("streams", {})
-    clean_url = rtsp_url.split("?")[0]
 
-    cfg["streams"][cam_id] = f"ffmpeg:{clean_url}#tcp"
-    print(f"[go2rtc] Added stream for {cam_id}")
+    main_url = clean_rtsp(main_url)
+    sub_url = clean_rtsp(sub_url) if sub_url else main_url
+
+    # Grid / multi-view
+    cfg["streams"][cam_id] = sub_url
+    # Fullscreen / primary
+    cfg["streams"][f"{cam_id}_main"] = main_url
+
+    print(f"[go2rtc] Added streams: {cam_id} (sub), {cam_id}_main (main)")
 
     if save_yaml(GO2RTC_CONFIG_PATH, cfg):
         restart_go2rtc()
@@ -102,61 +110,92 @@ def add_go2rtc_stream(cam_id, rtsp_url):
     return False
 
 # ---------------------------------------------------------
-# FRIGATE CONFIG ADD
+# FRIGATE — direct camera RTSP (same style as working cams)
 # ---------------------------------------------------------
 
-def add_frigate_camera(cam_id, rtsp_url, record=True):
+def add_frigate_camera(cam_id, main_url, sub_url, record=True):
     backup_file(FRIGATE_CONFIG_PATH)
     cfg = load_yaml(FRIGATE_CONFIG_PATH)
-
     cfg.setdefault("cameras", {})
 
-    roles = ["detect"]
+    main_url = clean_rtsp(main_url)
+    sub_url = clean_rtsp(sub_url) if sub_url else main_url
+
+    # detect = sub (lighter), record = main (full quality)
+    inputs = [
+        {
+            "path": sub_url,
+            "input_args": "preset-rtsp-generic",
+            "roles": ["detect"]
+        }
+    ]
+
     if record:
-        roles.append("record")
+        inputs.append({
+            "path": main_url,
+            "input_args": "preset-rtsp-generic",
+            "roles": ["record"]
+        })
 
     cfg["cameras"][cam_id] = {
         "enabled": True,
         "ffmpeg": {
-            "inputs": [
-                {
-                    "path": rtsp_url,
-                    "input_args": "preset-rtsp-generic",
-                    "roles": roles
-                }
-            ]
+            "inputs": inputs
         },
-        "live": {"streams": {"Main Stream": cam_id}},
-        "detect": {"width": 1280, "height": 720},
-        "record": {"enabled": record}
+        "live": {
+            "streams": {
+                "Sub Stream": cam_id,
+                "Main Stream": f"{cam_id}_main"
+            }
+        },
+        "detect": {
+            "width": 1280,
+            "height": 720
+        },
+        "record": {
+            "enabled": bool(record)
+        }
     }
 
-    print(f"[frigate] Added camera {cam_id}")
-
+    print(f"[frigate] Added camera {cam_id} (detect=sub direct, record=main direct)")
     return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
 # ---------------------------------------------------------
-# PUBLIC API: ADD CAMERA
+# PUBLIC API
 # ---------------------------------------------------------
 
-def add_camera(cam_id, rtsp_url, record=True):
+def add_camera(cam_id, rtsp_url, record=True, rtsp_sub=None):
+    """
+    rtsp_url  = MAIN stream (fullscreen / record)
+    rtsp_sub  = SUB stream (grid / detect); if empty, uses main
+    """
     print(f"[camera_manager] add_camera {cam_id}")
 
-    if not cam_id or not rtsp_url.startswith("rtsp://"):
+    main_url = clean_rtsp(rtsp_url)
+    sub_url = clean_rtsp(rtsp_sub) if rtsp_sub else main_url
+
+    if not cam_id or not main_url.startswith("rtsp://"):
         return {
             "event": "cameraAddResult",
             "status": "error",
-            "message": "Invalid camera name or RTSP URL"
+            "message": "Invalid camera name or main RTSP URL"
         }
 
-    go2_ok = add_go2rtc_stream(cam_id, rtsp_url)
-    fr_ok = add_frigate_camera(cam_id, rtsp_url, record)
+    if sub_url and not sub_url.startswith("rtsp://"):
+        return {
+            "event": "cameraAddResult",
+            "status": "error",
+            "message": "Invalid sub RTSP URL"
+        }
+
+    go2_ok = add_go2rtc_streams(cam_id, main_url, sub_url)
+    fr_ok = add_frigate_camera(cam_id, main_url, sub_url, record)
     restart_ok = restart_frigate() if fr_ok else False
 
     return {
         "event": "cameraAddResult",
         "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
-        "message": f"Camera {cam_id} added",
+        "message": f"Camera {cam_id} added (main+sub)",
         "go2rtc": go2_ok,
         "frigate_restart": restart_ok
     }

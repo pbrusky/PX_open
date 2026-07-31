@@ -13,9 +13,6 @@ FrigateCameraManager::FrigateCameraManager(QObject* parent)
 {
 }
 
-//
-// Server setters
-//
 void FrigateCameraManager::setServer(const QString& server)
 {
     m_server = server;
@@ -31,9 +28,6 @@ void FrigateCameraManager::setServerIp(const QString& ip)
     m_serverIp = ip;
 }
 
-//
-// Load cameras from Frigate /api/config
-//
 void FrigateCameraManager::loadCameras()
 {
     if (m_server.isEmpty()) {
@@ -69,9 +63,6 @@ void FrigateCameraManager::loadCameras()
                 entry["id"]   = id;
                 entry["name"] = id;
 
-                //
-                // ⭐ Extract RTSP from Frigate config
-                //
                 QString rtsp = "";
                 if (camObj.contains("ffmpeg")) {
                     QJsonObject ff = camObj["ffmpeg"].toObject();
@@ -85,18 +76,12 @@ void FrigateCameraManager::loadCameras()
                 }
 
                 entry["rtsp"]      = rtsp;
-                entry["streamUrl"] = rtsp;   // QML compatibility
+                entry["streamUrl"] = rtsp;
 
-                //
-                // ⭐ Username / password from config (preferred)
-                //
                 QString username = camObj.value("username").toString();
                 QString password = camObj.value("password").toString();
                 QString ip       = "";
 
-                //
-                // ⭐ Fallback: parse from RTSP if config has no creds
-                //
                 if (rtsp.startsWith("rtsp://")) {
                     QString withoutPrefix = rtsp.mid(7);
 
@@ -129,9 +114,6 @@ void FrigateCameraManager::loadCameras()
                 entry["password"] = password;
                 entry["ip"]       = ip;
 
-                //
-                // Metadata (unchanged)
-                //
                 entry["resolution"]  = "";
                 entry["fps"]         = 0;
                 entry["codec"]       = "";
@@ -157,10 +139,10 @@ void FrigateCameraManager::loadCameras()
     });
 }
 
-//
-// Add camera
-//
-void FrigateCameraManager::addCamera(const QString& id, const QString& url, bool record)
+void FrigateCameraManager::addCamera(const QString& id,
+                                     const QString& mainUrl,
+                                     const QString& subUrl,
+                                     bool record)
 {
     if (m_moduleServer.isEmpty()) {
         emit cameraAddResult(false, "Module server not set");
@@ -171,14 +153,12 @@ void FrigateCameraManager::addCamera(const QString& id, const QString& url, bool
     QNetworkRequest req(endpoint);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
-    //
-    // ⭐ Parse username/password from RTSP for module
-    //
     QString username;
     QString password;
+    const QString source = mainUrl.isEmpty() ? subUrl : mainUrl;
 
-    if (url.startsWith("rtsp://")) {
-        QString withoutPrefix = url.mid(7);
+    if (source.startsWith("rtsp://")) {
+        QString withoutPrefix = source.mid(7);
         int atIndex = withoutPrefix.indexOf("@");
         if (atIndex > 0) {
             QString creds = withoutPrefix.left(atIndex);
@@ -192,7 +172,8 @@ void FrigateCameraManager::addCamera(const QString& id, const QString& url, bool
 
     QJsonObject obj;
     obj["id"]       = id;
-    obj["rtsp"]     = url;
+    obj["rtsp"]     = mainUrl;
+    obj["rtsp_sub"] = subUrl.isEmpty() ? mainUrl : subUrl;
     obj["record"]   = record;
     obj["username"] = username;
     obj["password"] = password;
@@ -221,9 +202,6 @@ void FrigateCameraManager::addCamera(const QString& id, const QString& url, bool
     });
 }
 
-//
-// Edit camera
-//
 void FrigateCameraManager::editCamera(const QString& id, const QString& url)
 {
     if (m_moduleServer.isEmpty()) {
@@ -235,9 +213,6 @@ void FrigateCameraManager::editCamera(const QString& id, const QString& url)
     QNetworkRequest req(endpoint);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
-    //
-    // ⭐ Parse username/password from RTSP for module
-    //
     QString username;
     QString password;
 
@@ -284,9 +259,6 @@ void FrigateCameraManager::editCamera(const QString& id, const QString& url)
     });
 }
 
-//
-// Remove camera
-//
 void FrigateCameraManager::removeCamera(const QString& id)
 {
     if (m_moduleServer.isEmpty()) {
@@ -325,33 +297,21 @@ void FrigateCameraManager::removeCamera(const QString& id)
     });
 }
 
-//
-// Online/offline state
-//
 bool FrigateCameraManager::isCameraOnline(const QString& id) const
 {
     return m_cameraOnline.value(id, false);
 }
 
-//
-// Camera list accessor
-//
 QVariantList FrigateCameraManager::getCameraList() const
 {
     return m_cameraList;
 }
 
-//
-// Camera metadata accessor
-//
 QVariantMap FrigateCameraManager::getCameraMetadata(const QString& id) const
 {
     return m_cameraMetadata.value(id);
 }
 
-//
-// Load module information
-//
 void FrigateCameraManager::loadModuleInformation()
 {
     if (m_moduleServer.isEmpty()) {

@@ -7,17 +7,14 @@ import time
 import subprocess
 from pathlib import Path
 
-# Import config
 from config import (
     LAN_IP, HTTP_PORT, HTTPS_PORT, BROADCAST_IP,
     PROGRESS_FILE, MODULE_ID, SYSTEM_ID, SYSTEM_NAME,
     FRIGATE_CONFIG_PATH
 )
 
-# Import HTTPS module
 from https_server import start_https_server
 
-# Import camera modules (camera_manager.py is deleted)
 from add_camera import add_camera, restart_frigate, restart_go2rtc
 from edit_camera import edit_camera
 from remove_camera import remove_camera
@@ -25,9 +22,6 @@ from remove_camera import remove_camera
 HOST = "0.0.0.0"
 DISCOVERY_PORT = 3666
 
-# ---------------------------------------------------------
-# BROADCAST DISCOVERY
-# ---------------------------------------------------------
 def broadcast_discovery():
     packet = json.dumps({
         "id": MODULE_ID,
@@ -63,9 +57,6 @@ def broadcast_discovery():
         time.sleep(2)
 
 
-# ---------------------------------------------------------
-# HTTP HANDLER
-# ---------------------------------------------------------
 class VMSHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
@@ -85,13 +76,12 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
             body = self.rfile.read(length) if length > 0 else b''
             data = json.loads(body) if body else {}
 
-            # ====================== ONVIF DISCOVERY ======================
             if self.path == "/api/onvifDiscover":
                 username = data.get("username", "")
                 password = data.get("password", "")
-                
+
                 print(f"[ONVIF] Discovery requested with user: '{username}'")
-                
+
                 try:
                     result = subprocess.run(
                         ["python", "onvif_scan.py", "10.36.24.", username, password],
@@ -117,7 +107,6 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     print(f"[ONVIF] Error: {e}")
                     return self.send_json({"devices": []})
 
-            # ====================== CAMERA & RTSP ENDPOINTS ======================
             if self.path == "/api/getRtsp":
                 ip = data.get("ip")
                 username = data.get("username", "")
@@ -186,19 +175,21 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                 return self.send_json(add_camera(
                     data.get("id"),
                     data.get("rtsp"),
-                    bool(data.get("record", True))
+                    bool(data.get("record", True)),
+                    data.get("rtsp_sub")
                 ))
 
             if self.path == "/api/editCamera":
                 return self.send_json(edit_camera(
                     data.get("id"),
-                    data.get("rtsp")
+                    data.get("rtsp"),
+                    data.get("rtsp_sub"),
+                    bool(data.get("record", True))
                 ))
 
             if self.path == "/api/removeCamera":
                 return self.send_json(remove_camera(data.get("id")))
 
-            # ====================== RESTART ENDPOINTS ======================
             if self.path == "/api/restartFrigate":
                 return self.send_json({"success": restart_frigate()})
 
@@ -238,20 +229,15 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
         return self.send_json({"status": "ok"})
 
 
-# ---------------------------------------------------------
-# MAIN
-# ---------------------------------------------------------
 if __name__ == "__main__":
     print(f"[*] Starting Frigate Integration Module on {LAN_IP}")
 
     threading.Thread(target=broadcast_discovery, daemon=True).start()
 
-    # HTTP Server
     httpd = http.server.HTTPServer((HOST, HTTP_PORT), VMSHandler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(f"[*] HTTP server running → http://{LAN_IP}:{HTTP_PORT}")
 
-    # HTTPS Server (now in separate file)
     start_https_server(HOST, HTTPS_PORT, VMSHandler)
 
     print("[MAIN] All services started. Press Ctrl+C to stop.")

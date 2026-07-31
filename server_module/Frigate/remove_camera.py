@@ -13,10 +13,6 @@ from config import (
     GO2RTC_CONTAINER_NAME
 )
 
-# ---------------------------------------------------------
-# UTILITIES
-# ---------------------------------------------------------
-
 def backup_file(path):
     if not os.path.exists(path):
         return
@@ -43,10 +39,6 @@ def save_yaml(path, data):
     except Exception as e:
         print("[remove_camera] save_yaml ERROR:", e)
         return False
-
-# ---------------------------------------------------------
-# RESTART LOGIC
-# ---------------------------------------------------------
 
 def restart_docker(container):
     try:
@@ -82,26 +74,28 @@ def restart_go2rtc():
     print("[go2rtc] Restart requested")
     return restart_docker(GO2RTC_CONTAINER_NAME)
 
-# ---------------------------------------------------------
-# GO2RTC STREAM REMOVE
-# ---------------------------------------------------------
-
-def remove_go2rtc_stream(cam_id):
+def remove_go2rtc_streams(cam_id):
     backup_file(GO2RTC_CONFIG_PATH)
     cfg = load_yaml(GO2RTC_CONFIG_PATH)
 
-    if "streams" in cfg and cam_id in cfg["streams"]:
-        del cfg["streams"][cam_id]
-        print(f"[go2rtc] Removed stream for {cam_id}")
+    removed = False
+    if "streams" in cfg:
+        if cam_id in cfg["streams"]:
+            del cfg["streams"][cam_id]
+            removed = True
+            print(f"[go2rtc] Removed stream {cam_id}")
+
+        main_key = f"{cam_id}_main"
+        if main_key in cfg["streams"]:
+            del cfg["streams"][main_key]
+            removed = True
+            print(f"[go2rtc] Removed stream {main_key}")
 
     if save_yaml(GO2RTC_CONFIG_PATH, cfg):
-        restart_go2rtc()
+        if removed:
+            restart_go2rtc()
         return True
     return False
-
-# ---------------------------------------------------------
-# FRIGATE CONFIG REMOVE
-# ---------------------------------------------------------
 
 def remove_frigate_camera(cam_id):
     backup_file(FRIGATE_CONFIG_PATH)
@@ -113,10 +107,6 @@ def remove_frigate_camera(cam_id):
 
     return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
-# ---------------------------------------------------------
-# PUBLIC API: REMOVE CAMERA
-# ---------------------------------------------------------
-
 def remove_camera(cam_id):
     print(f"[remove_camera] Removing {cam_id}")
 
@@ -127,7 +117,7 @@ def remove_camera(cam_id):
             "message": "Invalid camera name"
         }
 
-    go2_ok = remove_go2rtc_stream(cam_id)
+    go2_ok = remove_go2rtc_streams(cam_id)
     fr_ok = remove_frigate_camera(cam_id)
     restart_ok = restart_frigate() if fr_ok else False
 

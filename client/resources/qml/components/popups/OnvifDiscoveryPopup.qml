@@ -17,6 +17,11 @@ Item {
     property var devices: []
     property bool discoveryRunning: false
 
+    // Camera chosen while waiting for getRtsp()
+    property string pendingAddress: ""
+    property string pendingUser: ""
+    property string pendingPass: ""
+
     Rectangle {
         anchors.fill: parent
         color: "#000000CC"
@@ -79,7 +84,6 @@ Item {
                         border.width: passField.activeFocus ? 2 : 1
                     }
 
-                    // ⭐ FIX: Enter key now starts discovery
                     onAccepted: {
                         devices = []
                         discoveryRunning = true
@@ -128,8 +132,10 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: discoveryRunning
-                          ? "🔍 Scanning for ONVIF devices on the network..."
-                          : (devices.length > 0 ? "✅ Scan completed — " + devices.length + " device(s) found" : "Ready to scan")
+                          ? "Scanning for ONVIF devices on the network..."
+                          : (devices.length > 0
+                             ? "Scan completed — " + devices.length + " device(s) found"
+                             : "Ready to scan")
                     color: discoveryRunning ? "#FFCC00" : "#AAAAAA"
                     font.pixelSize: 16
                 }
@@ -206,10 +212,17 @@ Item {
                                 if (!addCameraPopupRef || !frigateRef)
                                     return
 
+                                pendingAddress = modelData.address || ""
+                                pendingUser = userField.text
+                                pendingPass = passField.text
+
+                                // Prefill credentials / IP on Add Camera form immediately
+                                applyIdentityToAddPopup(pendingAddress, pendingUser, pendingPass)
+
                                 frigateRef.getRtsp(
-                                    modelData.address,
-                                    userField.text,
-                                    passField.text
+                                    pendingAddress,
+                                    pendingUser,
+                                    pendingPass
                                 )
                             }
                         }
@@ -248,20 +261,82 @@ Item {
                 return
             }
 
-            if (!addCameraPopupRef.rtspField) {
-                console.warn("ONVIF: addCameraPopupRef.rtspField is undefined")
-                closeRequested()
-                return
-            }
+            var mainUrl = rtsp || ""
+            var subUrl = deriveSubFromMain(mainUrl)
 
-            addCameraPopupRef.rtspField.text = rtsp
-            addCameraPopupRef.streamUrl = rtsp
+            // New AddCameraPopup fields (main + sub)
+            applyStreamsToAddPopup(mainUrl, subUrl)
+            applyIdentityToAddPopup(pendingAddress, pendingUser, pendingPass)
 
             closeRequested()
         }
 
         function onOnvifError(message) {
             discoveryRunning = false
+            console.warn("ONVIF error:", message)
         }
+    }
+
+    function applyIdentityToAddPopup(address, user, pass) {
+        if (!addCameraPopupRef)
+            return
+
+        // Prefer TextField ids if present
+        if (addCameraPopupRef.ipInput)
+            addCameraPopupRef.ipInput.text = address || ""
+        if (addCameraPopupRef.userInput)
+            addCameraPopupRef.userInput.text = user || ""
+        if (addCameraPopupRef.passInput)
+            addCameraPopupRef.passInput.text = pass || ""
+
+        // Also set properties used by helpers
+        if (typeof addCameraPopupRef.username !== "undefined")
+            addCameraPopupRef.username = user || ""
+        if (typeof addCameraPopupRef.password !== "undefined")
+            addCameraPopupRef.password = pass || ""
+    }
+
+    function applyStreamsToAddPopup(mainUrl, subUrl) {
+        if (!addCameraPopupRef)
+            return
+
+        // TextFields in new AddCameraPopup
+        if (addCameraPopupRef.mainRtspInput)
+            addCameraPopupRef.mainRtspInput.text = mainUrl || ""
+        if (addCameraPopupRef.subRtspInput)
+            addCameraPopupRef.subRtspInput.text = subUrl || mainUrl || ""
+
+        // Properties used by getMainUrl / getSubUrl
+        if (typeof addCameraPopupRef.mainStreamUrl !== "undefined")
+            addCameraPopupRef.mainStreamUrl = mainUrl || ""
+        if (typeof addCameraPopupRef.subStreamUrl !== "undefined")
+            addCameraPopupRef.subStreamUrl = subUrl || mainUrl || ""
+
+        // Backward compatibility if old single-field popup still exists
+        if (addCameraPopupRef.rtspField)
+            addCameraPopupRef.rtspField.text = mainUrl || ""
+        if (typeof addCameraPopupRef.streamUrl !== "undefined")
+            addCameraPopupRef.streamUrl = mainUrl || ""
+    }
+
+    // Best-effort substream from a main RTSP URL
+    function deriveSubFromMain(mainUrl) {
+        if (!mainUrl || mainUrl.indexOf("rtsp://") !== 0)
+            return mainUrl
+
+        var u = mainUrl
+
+        // Hikvision-style
+        if (u.indexOf("/Channels/101") >= 0)
+            return u.replace("/Channels/101", "/Channels/102")
+        if (u.indexOf("/Channels/1") >= 0 && u.indexOf("/Channels/10") < 0)
+            return u.replace("/Channels/1", "/Channels/2")
+
+        // Dahua-style
+        if (u.indexOf("subtype=0") >= 0)
+            return u.replace("subtype=0", "subtype=1")
+
+        // Reolink / others — keep main if unknown
+        return u
     }
 }

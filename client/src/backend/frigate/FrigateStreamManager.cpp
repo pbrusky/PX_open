@@ -1,9 +1,9 @@
 #include "FrigateStreamManager.h"
 #include "FrameQueue.h"
 #include "FFmpegWorker.h"
+
 #include <QVariant>
 #include <QSet>
-
 #include <QThread>
 #include <QDebug>
 
@@ -24,7 +24,6 @@ void FrigateStreamManager::setServer(const QString& server)
 
 void FrigateStreamManager::setServerIp(const QString& ip)
 {
-    // Just store IP; do NOT restart streams here.
     if (m_serverIp == ip)
         return;
 
@@ -62,13 +61,13 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
     queue->setMaxSize(1);
     m_queues.insert(cameraName, queue);
 
+    // Sub / grid stream
     const QString url = buildRtspUrl(m_serverIp, cameraName);
 
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
     worker->setHighQuality(false);
-    worker->setProperty("isProbe", false);
     m_workers.insert(cameraName, worker);
 
     connect(worker, &FFmpegWorker::openInputOk, this, [this, cameraName]() {
@@ -103,13 +102,13 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     queue->setMaxSize(1);
     m_fullscreenQueues.insert(cameraName, queue);
 
-    const QString url = buildRtspUrl(m_serverIp, cameraName);
+    // Main / primary stream
+    const QString url = buildRtspUrl(m_serverIp, cameraName + "_main");
 
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
     worker->setHighQuality(true);
-    worker->setProperty("isProbe", false);
     m_fullscreenWorkers.insert(cameraName, worker);
 
     QThread* thread = new QThread(nullptr);
@@ -142,7 +141,6 @@ QObject* FrigateStreamManager::getPlaybackQueue(const QString& cameraName)
     worker->setUrl(url);
     worker->setFrameQueue(queue);
     worker->setHighQuality(true);
-    worker->setProperty("isProbe", false);
     m_playbackWorkers.insert(cameraName, worker);
 
     QThread* thread = new QThread(nullptr);

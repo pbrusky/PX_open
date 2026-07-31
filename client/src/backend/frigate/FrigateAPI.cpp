@@ -92,8 +92,6 @@ void FrigateAPI::setServerIp(QString ip)
     m_serverIp = ip;
     emit serverIpChanged();
 
-    // ⭐ Propagate IP so StreamManager can build RTSP URLs.
-    // No auto-restart logic inside StreamManager::setServerIp().
     m_streamManager->setServerIp(ip);
     m_playback->setServerIp(ip);
 }
@@ -103,9 +101,9 @@ void FrigateAPI::loadCameras()
     m_cameraManager->loadCameras();
 }
 
-void FrigateAPI::addCamera(QString id, QString url, bool record)
+void FrigateAPI::addCamera(QString id, QString mainUrl, QString subUrl, bool record)
 {
-    m_cameraManager->addCamera(id, url, record);
+    m_cameraManager->addCamera(id, mainUrl, subUrl, record);
 }
 
 void FrigateAPI::editCamera(QString id, QString url)

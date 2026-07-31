@@ -2,6 +2,7 @@ import yaml
 import os
 import shutil
 import time
+import subprocess
 
 from config import (
     FRIGATE_CONFIG_PATH,
@@ -11,12 +12,6 @@ from config import (
     FRIGATE_SERVICE_NAME,
     GO2RTC_CONTAINER_NAME
 )
-
-import subprocess
-
-# ---------------------------------------------------------
-# UTILITIES
-# ---------------------------------------------------------
 
 def backup_file(path):
     if not os.path.exists(path):
@@ -45,9 +40,8 @@ def save_yaml(path, data):
         print("[edit_camera] save_yaml ERROR:", e)
         return False
 
-# ---------------------------------------------------------
-# RESTART LOGIC
-# ---------------------------------------------------------
+def clean_rtsp(url):
+    return (url or "").strip()
 
 def restart_docker(container):
     try:
@@ -83,71 +77,85 @@ def restart_go2rtc():
     print("[go2rtc] Restart requested")
     return restart_docker(GO2RTC_CONTAINER_NAME)
 
-# ---------------------------------------------------------
-# GO2RTC STREAM UPDATE
-# ---------------------------------------------------------
-
-def update_go2rtc_stream(cam_id, rtsp_url):
+def update_go2rtc_streams(cam_id, main_url, sub_url):
     backup_file(GO2RTC_CONFIG_PATH)
     cfg = load_yaml(GO2RTC_CONFIG_PATH)
-
     cfg.setdefault("streams", {})
-    clean_url = rtsp_url.split("?")[0]
 
-    cfg["streams"][cam_id] = f"ffmpeg:{clean_url}#tcp"
-    print(f"[go2rtc] Updated stream for {cam_id}")
+    main_url = clean_rtsp(main_url)
+    sub_url = clean_rtsp(sub_url) if sub_url else main_url
+
+    cfg["streams"][cam_id] = sub_url
+    cfg["streams"][f"{cam_id}_main"] = main_url
+
+    print(f"[go2rtc] Updated streams: {cam_id}, {cam_id}_main")
 
     if save_yaml(GO2RTC_CONFIG_PATH, cfg):
         restart_go2rtc()
         return True
     return False
 
-# ---------------------------------------------------------
-# FRIGATE CONFIG UPDATE
-# ---------------------------------------------------------
-
-def update_frigate_camera(cam_id, rtsp_url):
+def update_frigate_camera(cam_id, main_url, sub_url, record=True):
     backup_file(FRIGATE_CONFIG_PATH)
     cfg = load_yaml(FRIGATE_CONFIG_PATH)
-
     cfg.setdefault("cameras", {})
+
+    main_url = clean_rtsp(main_url)
+    sub_url = clean_rtsp(sub_url) if sub_url else main_url
+
+    inputs = [
+        {
+            "path": sub_url,
+            "input_args": "preset-rtsp-generic",
+            "roles": ["detect"]
+        }
+    ]
+
+    if record:
+        inputs.append({
+            "path": main_url,
+            "input_args": "preset-rtsp-generic",
+            "roles": ["record"]
+        })
 
     cfg["cameras"][cam_id] = {
         "enabled": True,
         "ffmpeg": {
-            "inputs": [
-                {
-                    "path": rtsp_url,
-                    "input_args": "preset-rtsp-generic",
-                    "roles": ["detect", "record"]
-                }
-            ]
+            "inputs": inputs
         },
-        "live": {"streams": {"Main Stream": cam_id}},
-        "detect": {"width": 1280, "height": 720},
-        "record": {"enabled": True}
+        "live": {
+            "streams": {
+                "Sub Stream": cam_id,
+                "Main Stream": f"{cam_id}_main"
+            }
+        },
+        "detect": {
+            "width": 1280,
+            "height": 720
+        },
+        "record": {
+            "enabled": bool(record)
+        }
     }
 
     print(f"[frigate] Updated camera {cam_id}")
-
     return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
-# ---------------------------------------------------------
-# PUBLIC API: EDIT CAMERA
-# ---------------------------------------------------------
-
-def edit_camera(cam_id, rtsp_url):
+def edit_camera(cam_id, rtsp_url, rtsp_sub=None, record=True):
     print(f"[edit_camera] Editing {cam_id}")
 
-    if not cam_id or not rtsp_url.startswith("rtsp://"):
+    main_url = clean_rtsp(rtsp_url)
+    sub_url = clean_rtsp(rtsp_sub) if rtsp_sub else main_url
+
+    if not cam_id or not main_url.startswith("rtsp://"):
         return {
             "event": "cameraEditResult",
             "status": "error",
             "message": "Invalid camera name or RTSP URL"
         }
 
-    go2_ok = update_go2rtc_stream(cam_id, rtsp_url)
-    fr_ok = update_frigate_camera(cam_id, rtsp_url)
+    go2_ok = update_go2rtc_streams(cam_id, main_url, sub_url)
+    fr_ok = update_frigate_camera(cam_id, main_url, sub_url, record)
     restart_ok = restart_frigate() if fr_ok else False
 
     return {

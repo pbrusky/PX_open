@@ -15,15 +15,19 @@ Item {
     property var frigateRef
 
     property string cameraId: ""
-    property string streamUrl: ""
+    property string mainStreamUrl: ""
+    property string subStreamUrl: ""
     property string username: ""
     property string password: ""
     property bool enableRecording: true
 
-    property alias ipField: ipInput
-    property alias rtspField: rtspInput
-    property alias userField: userInput
-    property alias passField: passInput
+    // Aliases so ONVIF / other popups can fill fields
+    property alias ipInput: ipInput
+    property alias userInput: userInput
+    property alias passInput: passInput
+    property alias mainRtspInput: mainRtspInput
+    property alias subRtspInput: subRtspInput
+    property alias idInput: idInput
 
     Loader {
         id: onvifLoader
@@ -49,8 +53,8 @@ Item {
 
     Rectangle {
         id: container
-        width: 520
-        height: 480
+        width: 540
+        height: 640
         radius: 6
         color: "#111"
         x: (parent.width - width) / 2
@@ -59,7 +63,7 @@ Item {
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 20
-            spacing: 14
+            spacing: 12
 
             Text {
                 text: "Add Camera"
@@ -79,29 +83,50 @@ Item {
                 id: ipInput
                 Layout.fillWidth: true
                 placeholderText: "Camera IP address"
-                enabled: !rtspInput.text.startsWith("rtsp://")
                 onTextChanged: {
-                    if (!rtspInput.text.startsWith("rtsp://"))
-                        rtspInput.text = getFinalRtspUrl()
+                    if (!mainRtspInput.text.startsWith("rtsp://"))
+                        mainRtspInput.text = buildMainFromIp()
+                    if (!subRtspInput.text.startsWith("rtsp://"))
+                        subRtspInput.text = buildSubFromIp()
                 }
             }
 
+            Text {
+                text: "Main stream (fullscreen / record)"
+                color: "#aaa"
+                font.pixelSize: 13
+            }
+
             TextField {
-                id: rtspInput
+                id: mainRtspInput
                 Layout.fillWidth: true
-                placeholderText: "RTSP URL"
-                onTextChanged: popupRoot.streamUrl = text
+                placeholderText: "Main RTSP (Channels/101)"
+                onTextChanged: popupRoot.mainStreamUrl = text
+            }
+
+            Text {
+                text: "Sub stream (grid / multi-view)"
+                color: "#aaa"
+                font.pixelSize: 13
+            }
+
+            TextField {
+                id: subRtspInput
+                Layout.fillWidth: true
+                placeholderText: "Sub RTSP (Channels/102) — optional"
+                onTextChanged: popupRoot.subStreamUrl = text
             }
 
             TextField {
                 id: userInput
                 Layout.fillWidth: true
                 placeholderText: "Username"
-                enabled: !rtspInput.text.startsWith("rtsp://")
                 onTextChanged: {
                     popupRoot.username = text
-                    if (!rtspInput.text.startsWith("rtsp://"))
-                        rtspInput.text = getFinalRtspUrl()
+                    if (ipInput.text.length > 0) {
+                        mainRtspInput.text = buildMainFromIp()
+                        subRtspInput.text = buildSubFromIp()
+                    }
                 }
             }
 
@@ -110,11 +135,12 @@ Item {
                 Layout.fillWidth: true
                 placeholderText: "Password"
                 echoMode: TextInput.Password
-                enabled: !rtspInput.text.startsWith("rtsp://")
                 onTextChanged: {
                     popupRoot.password = text
-                    if (!rtspInput.text.startsWith("rtsp://"))
-                        rtspInput.text = getFinalRtspUrl()
+                    if (ipInput.text.length > 0) {
+                        mainRtspInput.text = buildMainFromIp()
+                        subRtspInput.text = buildSubFromIp()
+                    }
                 }
             }
 
@@ -132,23 +158,50 @@ Item {
                 Button {
                     text: "Discover ONVIF"
                     Layout.fillWidth: true
-                    enabled: true
                     onClicked: onvifLoader.active = true
                 }
 
                 Button {
-                    text: "Test RTSP"
+                    text: "Test Main"
                     Layout.fillWidth: true
                     onClicked: {
-                        let url = getFinalRtspUrl()
+                        var url = mainRtspInput.text.startsWith("rtsp://")
+                                   ? mainRtspInput.text
+                                   : getMainUrl()
 
                         if (!url || url === "") {
-                            rtspStatus.text = "RTSP URL required"
+                            rtspStatus.text = "Main RTSP required"
                             rtspStatus.color = "red"
                             return
                         }
 
-                        rtspStatus.text = "Testing: " + url
+                        rtspStatus.text = "Testing main: " + url
+                        rtspStatus.color = "yellow"
+
+                        if (frigateRef)
+                            frigateRef.testRtsp(url)
+                        else {
+                            rtspStatus.text = "Backend not ready"
+                            rtspStatus.color = "red"
+                        }
+                    }
+                }
+
+                Button {
+                    text: "Test Sub"
+                    Layout.fillWidth: true
+                    onClicked: {
+                        var url = subRtspInput.text.startsWith("rtsp://")
+                                   ? subRtspInput.text
+                                   : getSubUrl()
+
+                        if (!url || url === "") {
+                            rtspStatus.text = "Sub RTSP empty"
+                            rtspStatus.color = "red"
+                            return
+                        }
+
+                        rtspStatus.text = "Testing sub: " + url
                         rtspStatus.color = "yellow"
 
                         if (frigateRef)
@@ -166,7 +219,8 @@ Item {
                 Layout.fillWidth: true
                 text: ""
                 color: "white"
-                font.pixelSize: 16
+                font.pixelSize: 14
+                wrapMode: Text.Wrap
             }
 
             RowLayout {
@@ -185,14 +239,29 @@ Item {
                             return
                         }
 
-                        let url = getFinalRtspUrl()
+                        var mainUrl = mainRtspInput.text.startsWith("rtsp://")
+                                      ? mainRtspInput.text
+                                      : getMainUrl()
+
+                        var subUrl = subRtspInput.text.startsWith("rtsp://")
+                                     ? subRtspInput.text
+                                     : getSubUrl()
+
+                        if (!mainUrl || mainUrl === "") {
+                            rtspStatus.text = "Main RTSP required"
+                            rtspStatus.color = "red"
+                            return
+                        }
+
+                        if (!subUrl || subUrl === "")
+                            subUrl = mainUrl
 
                         rtspStatus.text = "Adding camera…"
                         rtspStatus.color = "yellow"
                         saveButton.enabled = false
 
                         if (frigateRef)
-                            frigateRef.addCamera(popupRoot.cameraId, url, popupRoot.enableRecording)
+                            frigateRef.addCamera(popupRoot.cameraId, mainUrl, subUrl, popupRoot.enableRecording)
                         else {
                             rtspStatus.text = "Backend not ready"
                             rtspStatus.color = "red"
@@ -226,15 +295,12 @@ Item {
                 rtspStatus.text = "Camera added successfully"
                 rtspStatus.color = "lightgreen"
 
-                // ⭐ Force close via PopupManager, then open restart popup
                 if (popupRoot.popupManager) {
                     popupRoot.popupManager.closePopup()
                     popupRoot.popupManager.openRestartFrigatePopup()
                 } else {
-                    // Fallback: hide this popup if manager is missing
                     popupRoot.visible = false
                 }
-
             } else {
                 rtspStatus.text = message
                 rtspStatus.color = "red"
@@ -242,18 +308,39 @@ Item {
         }
     }
 
-    function getFinalRtspUrl() {
-        if (streamUrl.startsWith("rtsp://"))
-            return streamUrl
+    function authPrefix() {
+        if (username.length > 0 && password.length > 0)
+            return username + ":" + password + "@"
+        return ""
+    }
 
+    function buildMainFromIp() {
         if (ipInput.text.length === 0)
             return ""
-
-        let auth = ""
-        if (username.length > 0 && password.length > 0)
-            auth = username + ":" + password + "@"
-
-        return "rtsp://" + auth + ipInput.text +
+        return "rtsp://" + authPrefix() + ipInput.text +
                ":554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    }
+
+    function buildSubFromIp() {
+        if (ipInput.text.length === 0)
+            return ""
+        return "rtsp://" + authPrefix() + ipInput.text +
+               ":554/Streaming/Channels/102?transportmode=unicast&profile=Profile_1"
+    }
+
+    function getMainUrl() {
+        if (mainStreamUrl.startsWith("rtsp://"))
+            return mainStreamUrl
+        if (mainRtspInput.text.startsWith("rtsp://"))
+            return mainRtspInput.text
+        return buildMainFromIp()
+    }
+
+    function getSubUrl() {
+        if (subStreamUrl.startsWith("rtsp://"))
+            return subStreamUrl
+        if (subRtspInput.text.startsWith("rtsp://"))
+            return subRtspInput.text
+        return buildSubFromIp()
     }
 }
