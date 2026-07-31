@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QHash>
+#include <QSet>
 #include <QThread>
 
 class FrameQueue;
@@ -47,6 +48,9 @@ private:
 
     QString m_server;
     QString m_serverIp;
+
+    // Cameras where name_main returned 404 — skip main next time
+    QSet<QString> m_mainMissing;
 
     QHash<QString, FrameQueue*>   m_queues;
     QHash<QString, FFmpegWorker*> m_workers;

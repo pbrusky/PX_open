@@ -6,7 +6,6 @@
 #include <QSet>
 #include <QThread>
 #include <QDebug>
-#include <QTimer>
 
 FrigateStreamManager::FrigateStreamManager(QObject* parent)
     : QObject(parent)
@@ -29,6 +28,7 @@ void FrigateStreamManager::setServerIp(const QString& ip)
         return;
 
     m_serverIp = ip;
+    m_mainMissing.clear();
 }
 
 static QString buildRtspUrl(const QString& serverIp, const QString& cameraName)
@@ -43,7 +43,8 @@ static void stopWorkerThread(FFmpegWorker* worker, QThread* thread)
 
     if (thread) {
         thread->quit();
-        if (!thread->wait(5000)) {
+        // Short wait — don't stall UI when reopening fullscreen
+        if (!thread->wait(1500)) {
             qWarning() << "[StreamManager] Thread did not finish in time";
         }
     }
@@ -94,7 +95,7 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
                                                  bool isFallback)
 {
     qDebug() << "[StreamManager] Starting fullscreen stream:"
-             << url << (isFallback ? "(fallback sub)" : "(main)");
+             << url << (isFallback ? "(sub)" : "(main)");
 
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
@@ -106,11 +107,9 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     m_fullscreenThreads.insert(cameraName, thread);
 
     worker->moveToThread(thread);
-
     connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
     connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
 
-    // If main fails (404 / open error) → retry once with sub stream
     if (!isFallback) {
         const QString subUrl = buildRtspUrl(m_serverIp, cameraName);
 
@@ -118,21 +117,22 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
                 [this, cameraName, queue, subUrl](const QString& err) {
             qWarning() << "[StreamManager] Fullscreen main failed for"
                        << cameraName << ":" << err
-                       << "→ falling back to sub";
+                       << "→ using sub";
 
-            // Tear down failed main worker
+            // Remember: no main stream — next open skips main
+            m_mainMissing.insert(cameraName);
+
             FFmpegWorker* oldW = m_fullscreenWorkers.take(cameraName);
             QThread* oldT = m_fullscreenThreads.take(cameraName);
             if (oldW)
                 oldW->stopDecoding();
             if (oldT) {
                 oldT->quit();
-                oldT->wait(3000);
+                oldT->wait(1000);
             }
             delete oldW;
             delete oldT;
 
-            // Start sub as fullscreen (same queue — UI already bound)
             if (m_fullscreenQueues.contains(cameraName))
                 startFullscreenWorker(cameraName, queue, subUrl, true);
         }, Qt::QueuedConnection);
@@ -153,8 +153,14 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     queue->setMaxSize(2);
     m_fullscreenQueues.insert(cameraName, queue);
 
-    const QString mainUrl = buildRtspUrl(m_serverIp, cameraName + "_main");
-    startFullscreenWorker(cameraName, queue, mainUrl, false);
+    // Skip main if we already know it 404s
+    if (m_mainMissing.contains(cameraName)) {
+        const QString subUrl = buildRtspUrl(m_serverIp, cameraName);
+        startFullscreenWorker(cameraName, queue, subUrl, true);
+    } else {
+        const QString mainUrl = buildRtspUrl(m_serverIp, cameraName + "_main");
+        startFullscreenWorker(cameraName, queue, mainUrl, false);
+    }
 
     return queue;
 }
