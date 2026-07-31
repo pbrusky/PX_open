@@ -14,7 +14,6 @@ DiscoveryListener::DiscoveryListener(QObject* parent)
 
 void DiscoveryListener::startDiscovery()
 {
-    // ⭐ Prevent double-binding
     if (m_socket->state() != QAbstractSocket::UnconnectedState) {
         qDebug() << "[Discovery] Already running, ignoring startDiscovery()";
         return;
@@ -45,8 +44,6 @@ void DiscoveryListener::processPendingDatagrams()
         QNetworkDatagram datagram = m_socket->receiveDatagram();
         QByteArray data = datagram.data();
 
-        //qDebug() << "[Discovery] RAW datagram:" << data;
-
         QJsonDocument doc = QJsonDocument::fromJson(data);
         if (!doc.isObject())
             continue;
@@ -60,19 +57,14 @@ void DiscoveryListener::processPendingDatagrams()
         QString moduleId   = obj.value("id").toString();
         QString type       = obj.value("type").toString();
 
-        // ⭐ Clean IPv4 conversion
         QString senderIp = datagram.senderAddress().toString();
         if (senderIp.startsWith("::ffff:"))
             senderIp = senderIp.mid(7);
 
-        QString address = senderIp;
-
-        //qDebug() << "[Discovery] Emitting serverFound:"
-       //          << name << address << port << container
-       //          << systemId << moduleId << type;
-
+        // ⭐ Discovery ONLY reports servers.
+        // ⭐ It does NOT set the active server IP.
         emit serverFound(name,
-                         address,
+                         senderIp,
                          port,
                          container,
                          systemId,

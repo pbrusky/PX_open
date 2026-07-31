@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QHash>
+#include <QSet>
 #include <QThread>
 
 class FrameQueue;
@@ -17,22 +18,20 @@ public:
     explicit FrigateStreamManager(QObject* parent = nullptr);
     ~FrigateStreamManager();
 
-    // Server configuration
     void setServer(const QString& server);
     void setServerIp(const QString& ip);
 
-    // Streaming API
     Q_INVOKABLE QObject* getQueue(const QString& cameraName);
+    Q_INVOKABLE QObject* getFullscreenQueue(const QString& cameraName);
     Q_INVOKABLE QObject* getPlaybackQueue(const QString& cameraName);
 
-    void startStream(const QString& cameraName);
     void stopStream(const QString& cameraName);
     void restartStream(const QString& cameraName);
 
-    // ⭐ Allow QML to stop everything cleanly
+    Q_INVOKABLE void stopFullscreenStream(const QString& cameraName);
+    Q_INVOKABLE void stopAllFullscreenStreams();
     Q_INVOKABLE void stopAllStreams();
 
-    // Worker access for QML
     Q_INVOKABLE QObject* getWorker(const QString& cameraName);
     Q_INVOKABLE QObject* getPlaybackWorker(const QString& cameraName);
 
@@ -41,22 +40,29 @@ signals:
     void cameraOffline(QString id);
 
 private:
+    void stopFullscreenInternal(const QString& cameraName);
+    void startFullscreenWorker(const QString& cameraName,
+                               FrameQueue* queue,
+                               const QString& url,
+                               bool isFallback);
+
     QString m_server;
     QString m_serverIp;
 
-    // Live queues
-    QHash<QString, FrameQueue*> m_queues;
+    // Cameras where name_main returned 404 — skip main next time
+    QSet<QString> m_mainMissing;
 
-    // Playback queues
-    QHash<QString, FrameQueue*> m_playbackQueues;
-
-    // Workers
+    QHash<QString, FrameQueue*>   m_queues;
     QHash<QString, FFmpegWorker*> m_workers;
-    QHash<QString, FFmpegWorker*> m_playbackWorkers;
+    QHash<QString, QThread*>      m_threads;
 
-    // Worker threads
-    QHash<QString, QThread*> m_threads;
-    QHash<QString, QThread*> m_playbackThreads;
+    QHash<QString, FrameQueue*>   m_fullscreenQueues;
+    QHash<QString, FFmpegWorker*> m_fullscreenWorkers;
+    QHash<QString, QThread*>      m_fullscreenThreads;
+
+    QHash<QString, FrameQueue*>   m_playbackQueues;
+    QHash<QString, FFmpegWorker*> m_playbackWorkers;
+    QHash<QString, QThread*>      m_playbackThreads;
 };
 
 #endif

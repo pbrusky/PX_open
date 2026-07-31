@@ -16,9 +16,6 @@ Item {
 
     property string cameraName: ""
 
-    // ⭐ Updated online logic
-    property bool isOnline: frameQueue !== null && cameraName !== ""
-
     property string resolution: ""
     property real fps: 0
     property int bitrateKbps: 0
@@ -34,15 +31,45 @@ Item {
     property real originalWidth: 0
     property real originalHeight: 0
 
+    property bool isOnline: currentFrame !== null && cameraName !== ""
+
     signal removeRequested()
 
-    onCameraNameChanged: {
-        currentFrame = null
+    QtObject {
+        id: helpers
 
-        if (frigateRef && cameraName !== "")
-            frameQueue = frigateRef.getQueue(cameraName)
-        else
-            frameQueue = null
+        function __updateFrameQueueInternal() {
+            // Lazy stream init: only when tile is visible and has a camera
+            tile.currentFrame = null
+
+            if (!tile.visible) {
+                tile.frameQueue = null
+                return
+            }
+
+            if (tile.frigateRef &&
+                tile.cameraName !== "" &&
+                typeof tile.frigateRef.getQueue === "function") {
+
+                tile.frameQueue = tile.frigateRef.getQueue(tile.cameraName)
+
+            } else {
+                tile.frameQueue = null
+            }
+        }
+    }
+
+    onCameraNameChanged: helpers.__updateFrameQueueInternal()
+
+    onVisibleChanged: {
+        helpers.__updateFrameQueueInternal()
+
+        if (!visible &&
+            frigateRef &&
+            cameraName !== "" &&
+            typeof frigateRef.stopStream === "function") {
+            frigateRef.stopStream(cameraName)
+        }
     }
 
     onFrameQueueChanged: {
@@ -50,9 +77,7 @@ Item {
 
         if (frameQueue) {
             var img = frameQueue.popImage()
-            if (img) {
-                currentFrame = img
-            }
+            if (img) currentFrame = img
         }
     }
 
@@ -64,9 +89,7 @@ Item {
         function onFrameReady() {
             if (!frameQueue) return
             var img = frameQueue.popImage()
-            if (img) {
-                currentFrame = img
-            }
+            if (img) currentFrame = img
         }
     }
 
@@ -77,7 +100,6 @@ Item {
         visible: currentFrame === null || currentFrame === undefined
     }
 
-    // ⭐ Correct renderer — now always visible when online
     CameraVideoItem {
         id: videoFrame
         anchors.fill: parent
@@ -173,13 +195,16 @@ Item {
                 tile.height = originalHeight
             }
 
-            if (mainWindow && mainWindow.dropHandler)
+            if (mainWindow && mainWindow.dropHandler) {
                 mainWindow.dropHandler.reorderTile(tileIndex, tile)
+                tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
+                // cameraNameChanged will trigger lazy stream init
+            }
         }
 
         onDoubleClicked: {
             if (gridRoot && gridRoot.enterFullscreen && cameraName !== "")
-                gridRoot.enterFullscreen(cameraName, frameQueue)
+                gridRoot.enterFullscreen(cameraName)
         }
 
         onClicked: function(mouse) {
@@ -197,7 +222,7 @@ Item {
             enabled: cameraName !== ""
             onTriggered: {
                 if (gridRoot && gridRoot.enterFullscreen)
-                    gridRoot.enterFullscreen(cameraName, frameQueue)
+                    gridRoot.enterFullscreen(cameraName)
             }
         }
 
@@ -209,7 +234,13 @@ Item {
     }
 
     function handleRemove() {
-        if (mainWindow && mainWindow.dropHandler)
-            mainWindow.dropHandler.removeCamera(cameraName)
+        if (frigateRef &&
+            cameraName !== "" &&
+            typeof frigateRef.stopStream === "function") {
+            frigateRef.stopStream(cameraName)
+        }
+
+        if (gridRoot && gridRoot.removeTile)
+            gridRoot.removeTile(tileIndex)
     }
 }

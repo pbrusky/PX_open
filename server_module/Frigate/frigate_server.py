@@ -7,21 +7,21 @@ import time
 import subprocess
 from pathlib import Path
 
-# Import config
 from config import (
     LAN_IP, HTTP_PORT, HTTPS_PORT, BROADCAST_IP,
-    PROGRESS_FILE, MODULE_ID, SYSTEM_ID, SYSTEM_NAME
+    PROGRESS_FILE, MODULE_ID, SYSTEM_ID, SYSTEM_NAME,
+    FRIGATE_CONFIG_PATH
 )
 
-# Import HTTPS module
 from https_server import start_https_server
+
+from add_camera import add_camera, restart_frigate, restart_go2rtc
+from edit_camera import edit_camera
+from remove_camera import remove_camera
 
 HOST = "0.0.0.0"
 DISCOVERY_PORT = 3666
 
-# ---------------------------------------------------------
-# BROADCAST DISCOVERY
-# ---------------------------------------------------------
 def broadcast_discovery():
     packet = json.dumps({
         "id": MODULE_ID,
@@ -57,9 +57,6 @@ def broadcast_discovery():
         time.sleep(2)
 
 
-# ---------------------------------------------------------
-# HTTP HANDLER
-# ---------------------------------------------------------
 class VMSHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
@@ -79,13 +76,12 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
             body = self.rfile.read(length) if length > 0 else b''
             data = json.loads(body) if body else {}
 
-            # ====================== ONVIF DISCOVERY ======================
             if self.path == "/api/onvifDiscover":
                 username = data.get("username", "")
                 password = data.get("password", "")
-                
+
                 print(f"[ONVIF] Discovery requested with user: '{username}'")
-                
+
                 try:
                     result = subprocess.run(
                         ["python", "onvif_scan.py", "10.36.24.", username, password],
@@ -111,39 +107,93 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     print(f"[ONVIF] Error: {e}")
                     return self.send_json({"devices": []})
 
-            # ====================== CAMERA & RTSP ENDPOINTS ======================
             if self.path == "/api/getRtsp":
-                from camera_manager import get_rtsp_url
-                rtsp = get_rtsp_url(
-                    data.get("ip"),
-                    data.get("username", ""),
-                    data.get("password", "")
-                )
-                return self.send_json({"rtsp": rtsp})
+                ip = data.get("ip")
+                username = data.get("username", "")
+                password = data.get("password", "")
+
+                if not ip:
+                    return self.send_json({"rtsp": None})
+
+                try:
+                    from requests.auth import HTTPDigestAuth
+                    import requests
+                    import xml.etree.ElementTree as ET
+
+                    print(f"[RTSP] Attempting to get URL for {ip}")
+                    auth = HTTPDigestAuth(username, password) if username else None
+                    endpoint = f"http://{ip}/onvif/device_service"
+
+                    tokens = ["Profile_1", "profile_1", "0", "1", "Main"]
+
+                    for token in tokens:
+                        try:
+                            SOAP = f"""<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+  <s:Body>
+    <GetStreamUri xmlns="http://www.onvif.org/ver10/media/wsdl">
+      <StreamSetup>
+        <Stream xmlns="http://www.onvif.org/ver10/schema">RTP-Unicast</Stream>
+        <Transport xmlns="http://www.onvif.org/ver10/schema">
+          <Protocol>RTSP</Protocol>
+        </Transport>
+      </StreamSetup>
+      <ProfileToken>{token}</ProfileToken>
+    </GetStreamUri>
+  </s:Body>
+</s:Envelope>"""
+
+                            r = requests.post(endpoint, data=SOAP, timeout=2.5, auth=auth)
+
+                            if r.status_code == 200:
+                                xml = ET.fromstring(r.text)
+                                uri = xml.find(".//{*}Uri")
+                                if uri is not None and uri.text:
+                                    rtsp = uri.text.strip()
+                                    print(f"[RTSP] SUCCESS with token '{token}'")
+                                    if username and password:
+                                        rtsp = rtsp.replace("rtsp://", f"rtsp://{username}:{password}@")
+                                    return self.send_json({"rtsp": rtsp})
+
+                        except Exception:
+                            continue
+
+                    print(f"[RTSP] ONVIF failed for {ip}, using fallback")
+
+                    if username:
+                        fallback = f"rtsp://{username}:{password}@{ip}:554/Streaming/Channels/101"
+                    else:
+                        fallback = f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
+
+                    return self.send_json({"rtsp": fallback})
+
+                except Exception as e:
+                    print("[getRtsp ERROR]", e)
+                    return self.send_json({"rtsp": None})
 
             if self.path == "/api/addCamera":
-                from camera_manager import add_camera
                 return self.send_json(add_camera(
                     data.get("id"),
                     data.get("rtsp"),
-                    bool(data.get("record", True))
+                    bool(data.get("record", True)),
+                    data.get("rtsp_sub")
                 ))
 
             if self.path == "/api/editCamera":
-                from camera_manager import edit_camera
-                return self.send_json(edit_camera(data.get("id"), data.get("rtsp")))
+                return self.send_json(edit_camera(
+                    data.get("id"),
+                    data.get("rtsp"),
+                    data.get("rtsp_sub"),
+                    bool(data.get("record", True))
+                ))
 
             if self.path == "/api/removeCamera":
-                from camera_manager import remove_camera
                 return self.send_json(remove_camera(data.get("id")))
 
-            # ====================== RESTART ENDPOINTS ======================
             if self.path == "/api/restartFrigate":
-                from camera_manager import restart_frigate
                 return self.send_json({"success": restart_frigate()})
 
             if self.path == "/api/restartGo2rtc":
-                from camera_manager import restart_go2rtc
                 return self.send_json({"success": restart_go2rtc()})
 
             return self.send_json({"status": "ok"})
@@ -179,20 +229,15 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
         return self.send_json({"status": "ok"})
 
 
-# ---------------------------------------------------------
-# MAIN
-# ---------------------------------------------------------
 if __name__ == "__main__":
     print(f"[*] Starting Frigate Integration Module on {LAN_IP}")
 
     threading.Thread(target=broadcast_discovery, daemon=True).start()
 
-    # HTTP Server
     httpd = http.server.HTTPServer((HOST, HTTP_PORT), VMSHandler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(f"[*] HTTP server running → http://{LAN_IP}:{HTTP_PORT}")
 
-    # HTTPS Server (now in separate file)
     start_https_server(HOST, HTTPS_PORT, VMSHandler)
 
     print("[MAIN] All services started. Press Ctrl+C to stop.")

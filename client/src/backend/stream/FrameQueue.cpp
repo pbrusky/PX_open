@@ -22,6 +22,11 @@ void FrameQueue::pushImage(const QImage& img)
 {
     {
         QMutexLocker locker(&m_mutex);
+
+        // Drop oldest frames if queue is full
+        while (m_imageQueue.size() >= m_maxSize)
+            m_imageQueue.dequeue();
+
         m_imageQueue.enqueue(img);
     }
 
@@ -45,6 +50,13 @@ void FrameQueue::pushTexture(ID3D11Texture2D* tex)
 {
     {
         QMutexLocker locker(&m_mutex);
+
+        while (m_textureQueue.size() >= m_maxSize) {
+            // Note: we are not releasing the D3D texture here.
+            // If you ever use the GPU path you must release the dropped textures.
+            m_textureQueue.dequeue();
+        }
+
         m_textureQueue.enqueue(tex);
     }
 

@@ -9,6 +9,8 @@ Popup {
     width: 600
     height: 300
     closePolicy: Popup.NoAutoClose
+    
+    property var frigateRef
 
     anchors.centerIn: Overlay.overlay
 
@@ -27,7 +29,7 @@ Popup {
         Text {
             text: "Frigate is restarting…"
             color: "white"
-            font.pixelSize: 40      // ⭐ BIGGER
+            font.pixelSize: 40
             font.bold: true
             horizontalAlignment: Text.AlignHCenter
             Layout.fillWidth: true
@@ -42,11 +44,37 @@ Popup {
             Layout.fillWidth: true
         }
 
-        BusyIndicator {
+        //
+        // ⭐ White + larger custom spinner
+        //
+        Item {
+            width: 70
+            height: 70
             Layout.alignment: Qt.AlignHCenter
-            running: true
-            width: 50
-            height: 50
+
+            Canvas {
+                id: spinnerCanvas
+                anchors.fill: parent
+
+                onPaint: {
+                    var ctx = getContext("2d")
+                    ctx.reset()
+
+                    ctx.lineWidth = 6
+                    ctx.strokeStyle = "white"   // ⭐ WHITE SPINNER
+
+                    ctx.beginPath()
+                    ctx.arc(width/2, height/2, width/3, 0, Math.PI * 1.5)
+                    ctx.stroke()
+                }
+            }
+
+            RotationAnimator on rotation {
+                from: 0
+                to: 360
+                duration: 900
+                loops: Animation.Infinite
+            }
         }
     }
 }

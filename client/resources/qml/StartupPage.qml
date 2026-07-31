@@ -22,21 +22,12 @@ Rectangle {
 
     signal serverSelected(string name, string ip, int apiPort, int modulePort)
 
-    Component.onCompleted: {
-        // logs removed
-    }
-
-    Component.onDestruction: {
-        if (discovery) discovery.stopDiscovery()
-    }
-
     onDiscoveryChanged: {
         if (!discovery)
             return
 
         servers = []
         serverModel.clear()
-        discovery.startDiscovery()
     }
 
     Connections {
@@ -81,6 +72,9 @@ Rectangle {
 
         if (!frigateRef)
             return
+
+        // ⭐ Push IP into FrigateAPI so StreamManager gets it
+        frigateRef.setServerIp(address)
 
         frigateRef.setServer(apiUrl)
         frigateRef.setModuleServer(moduleUrl)
@@ -144,6 +138,7 @@ Rectangle {
                             return
 
                         root.serverAssigned = true
+                        // port here is the module port from discovery
                         root.connectToServer(address, port)
                     }
                 }

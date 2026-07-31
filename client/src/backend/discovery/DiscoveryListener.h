@@ -11,12 +11,11 @@ class DiscoveryListener : public QObject
 public:
     explicit DiscoveryListener(QObject* parent = nullptr);
 
-    // ⭐ Callable from QML
-    Q_INVOKABLE void startDiscovery();
-    Q_INVOKABLE void stopDiscovery();
+public slots:
+    void startDiscovery();
+    void stopDiscovery();
 
 signals:
-    // ⭐ Full discovery info (matches Frigate JSON broadcast)
     void serverFound(QString name,
                      QString address,
                      int port,

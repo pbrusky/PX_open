@@ -3,7 +3,9 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
+
 import "qrc:/app/resources/qml/components"
+import "qrc:/app/resources/qml/components/popups"
 
 ApplicationWindow {
     id: mainWindow
@@ -14,9 +16,6 @@ ApplicationWindow {
 
     flags: Qt.Window | Qt.FramelessWindowHint
 
-    //
-    // Global state
-    //
     property var frigateRef: frigate
     property var cameraList: []
     property string selectedCameraId: ""
@@ -30,9 +29,6 @@ ApplicationWindow {
     signal cameraOffline(string name)
     signal camerasLoaded(var list)
 
-    //
-    // App fullscreen helpers (NX-style)
-    //
     property bool isFullscreen: false
 
     function enterTrueFullscreen() {
@@ -46,18 +42,21 @@ ApplicationWindow {
         showNormal()
     }
 
-    //
-    // Popups
-    //
-    RestartPopup {
-        id: restartPopup
-        visible: false
-        z: 999999
+    function parseRtspCredentials(url) {
+        if (!url || !url.startsWith("rtsp://"))
+            return { user: "", pass: "" }
+
+        let authPart = url.split("rtsp://")[1].split("@")[0]
+        if (!authPart.includes(":"))
+            return { user: "", pass: "" }
+
+        let parts = authPart.split(":")
+        return {
+            user: parts[0],
+            pass: parts[1]
+        }
     }
 
-    //
-    // Poll timer
-    //
     Timer {
         id: frigatePollTimer
         interval: 1500
@@ -68,9 +67,6 @@ ApplicationWindow {
         }
     }
 
-    //
-    // Fullscreen manager loader
-    //
     Loader {
         id: fullscreenManagerLoader
         source: "qrc:/app/resources/qml/fullscreen/FullscreenManager.qml"
@@ -81,14 +77,10 @@ ApplicationWindow {
             var fm = fullscreenManagerLoader.item
             fm.mainWindow = mainWindow
             fm.frigateRef = frigateRef
-
             mainWindow.fullscreenManager = fm
         }
     }
 
-    //
-    // Drop handler loader
-    //
     Loader {
         id: dropHandlerLoader
         source: "qrc:/app/resources/qml/components/CameraDropHandler.qml"
@@ -99,14 +91,10 @@ ApplicationWindow {
             var dh = dropHandlerLoader.item
             dh.mainWindow = mainWindow
             dh.contentLoader = contentLoader
-
             mainWindow.dropHandler = dh
         }
     }
 
-    //
-    // Top bar
-    //
     TopBar {
         id: topbar
         width: parent.width
@@ -123,7 +111,20 @@ ApplicationWindow {
         isCameraPage: contentLoader.item && contentLoader.item.objectName === "ServerView"
         serverName: mainWindow.serverName
 
-        // ❗ Removed invalid onToggleFullscreen handler
+        onAboutRequested: {
+            popupManager.openPopup(
+                "qrc:/app/resources/qml/components/popups/AboutPopup.qml",
+                { mainWindow: mainWindow }
+            )
+        }
+
+        onDisconnectRequested: {
+            contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
+            mainWindow.serverName = ""
+        }
+
+        onExitRequested: Qt.quit()
+        onMinimizeRequested: mainWindow.showMinimized()
     }
 
     IconButton {
@@ -144,9 +145,6 @@ ApplicationWindow {
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
     }
 
-    //
-    // Sidebar
-    //
     Sidebar {
         id: sidebarWrapper
         objectName: "Sidebar"
@@ -174,12 +172,14 @@ ApplicationWindow {
         }
 
         onRequestRemoveCamera: function(id) {
-            if (contentLoader.item &&
-                contentLoader.item.objectName === "ServerView" &&
-                contentLoader.item.openRemoveCameraPopup)
-            {
-                contentLoader.item.openRemoveCameraPopup(id)
-            }
+            popupManager.openPopup(
+                "qrc:/app/resources/qml/components/popups/RemoveCameraPopup.qml",
+                {
+                    frigateRef: frigateRef,
+                    cameraId: id,
+                    popupManager: popupManager
+                }
+            )
         }
 
         onCameraDropped: function(x, y, cameraName) {
@@ -188,6 +188,7 @@ ApplicationWindow {
         }
 
         onNavigate: function(page) {
+
             if (page === "qrc:/app/resources/qml/StartupPage.qml") {
                 contentLoader.startupDone = false
                 contentLoader.source = page
@@ -200,17 +201,51 @@ ApplicationWindow {
             }
 
             if (page === "addCamera") {
-                if (contentLoader.item &&
-                    contentLoader.item.objectName === "ServerView" &&
-                    contentLoader.item.openAddCameraPopup)
-                {
-                    contentLoader.item.openAddCameraPopup()
-                }
+                popupManager.openPopup(
+                    "qrc:/app/resources/qml/components/popups/AddCameraPopup.qml",
+                    {
+                        frigateRef: frigateRef,
+                        popupManager: popupManager
+                    }
+                )
                 return
             }
 
             if (page === "reloadCameras") {
                 frigateRef.loadCameras()
+                return
+            }
+
+            if (page.startsWith("editCamera:")) {
+                let camId = page.split(":")[1]
+                let cam = mainWindow.cameraList.find(c => c.id === camId)
+
+                if (cam) {
+                    let rtsp = cam.rtsp || cam.streamUrl || ""
+                    let user = cam.username || ""
+                    let pass = cam.password || ""
+
+                    if ((!user || !pass) && rtsp) {
+                        let creds = parseRtspCredentials(rtsp)
+                        if (!user) user = creds.user
+                        if (!pass) pass = creds.pass
+                    }
+
+                    popupManager.openPopup(
+                        "qrc:/app/resources/qml/components/popups/EditCameraPopup.qml",
+                        {
+                            frigateRef: frigateRef,
+                            cameraId: cam.id,
+                            cameraName: cam.name || "",
+                            rtspUrl: rtsp,
+                            username: user,
+                            password: pass,
+                            popupManager: popupManager
+                        }
+                    )
+                } else {
+                    console.log("EditCamera: Camera not found:", camId)
+                }
                 return
             }
 
@@ -242,7 +277,7 @@ ApplicationWindow {
     }
 
     //
-    // Main content loader
+    // PART 2 — CONTENT LOADER
     //
     Loader {
         id: contentLoader
@@ -275,14 +310,15 @@ ApplicationWindow {
                     contentLoader.startupDone = true
                     contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
 
-                    // NX-style fullscreen (taskbar hidden)
                     mainWindow.enterTrueFullscreen()
                     topbar.isMaximized = true
                 })
             }
 
-            if (item.objectName !== "StartupPage" && discovery)
-                discovery.stopDiscovery()
+            //
+            // ❌ Removed: discovery.stopDiscovery()
+            // Discovery stops automatically in C++ via queued invokeMethod
+            //
 
             if (item.objectName === "ServerView") {
                 item.frigateRef = frigateRef
@@ -299,22 +335,6 @@ ApplicationWindow {
         }
     }
 
-    //
-    // Popups
-    //
-    AddCameraPopup {
-        id: addCameraPopup
-        frigateRef: mainWindow.frigateRef
-    }
-
-    RemoveCameraPopup {
-        id: removePopup
-        frigateRef: mainWindow.frigateRef
-    }
-
-    //
-    // Modular connections file
-    //
     Loader {
         id: connectionsLoader
         source: "qrc:/app/resources/qml/MainWindowConnections.qml"
@@ -331,5 +351,18 @@ ApplicationWindow {
             c.restartPopup = restartPopup
             c.frigatePollTimer = frigatePollTimer
         }
+    }
+
+    RestartPopup {
+        id: restartPopup
+        frigateRef: mainWindow.frigateRef
+        visible: false
+        z: 999999
+    }
+
+    PopupManager {
+        id: popupManager
+        anchors.fill: parent
+        z: 999999
     }
 }
