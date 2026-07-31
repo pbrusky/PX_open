@@ -45,6 +45,8 @@ public:
     Q_INVOKABLE QObject* getFullscreenQueue(const QString& cameraName);
     Q_INVOKABLE QObject* getPlaybackQueue(const QString& cameraName);
     Q_INVOKABLE void stopStream(const QString& cameraName);
+    Q_INVOKABLE void stopFullscreenStream(const QString& cameraName);
+    Q_INVOKABLE void stopAllFullscreenStreams();
     Q_INVOKABLE void stopAllStreams();
     Q_INVOKABLE QObject* getWorker(const QString& cameraName);
 

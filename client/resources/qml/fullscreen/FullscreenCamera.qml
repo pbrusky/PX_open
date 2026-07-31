@@ -13,35 +13,31 @@ Window {
     property string cameraName: ""
     property var frigateRef: null
 
-    // Queues are created lazily via FrigateAPI
     property var liveQueue: null
     property var playbackQueue: null
 
     property bool isOnline: false
     property bool isPlayback: false
     property int playbackPositionMs: 0
+    property bool _pxOpened: false
+    property bool _queuesBound: false
 
-    // Almost instant fade
     opacity: 0.0
     Behavior on opacity { NumberAnimation { duration: 80 } }
 
-    // Helper to (re)bind queues safely
     function updateQueues() {
-        liveQueue = null
-        playbackQueue = null
-
         if (!frigateRef || cameraName === "")
             return
 
-        // High-quality fullscreen live queue
-        liveQueue = frigateRef.getFullscreenQueue(cameraName)
-
-        // Playback queue (recordings)
-        playbackQueue = frigateRef.getPlaybackQueue(cameraName)
+        // Only bind once per open; parent already passed liveQueue when possible
+        if (!_queuesBound) {
+            if (!liveQueue)
+                liveQueue = frigateRef.getFullscreenQueue(cameraName)
+            if (!playbackQueue)
+                playbackQueue = frigateRef.getPlaybackQueue(cameraName)
+            _queuesBound = true
+        }
     }
-
-    onFrigateRefChanged: updateQueues()
-    onCameraNameChanged: updateQueues()
 
     FocusScope {
         id: keyHandler
@@ -81,7 +77,7 @@ Window {
 
             Text {
                 anchors.centerIn: parent
-                text: "No video queue"
+                text: "Connecting…"
                 color: "white"
                 font.pixelSize: 24
                 font.bold: true
@@ -95,7 +91,6 @@ Window {
         }
     }
 
-    // Lightweight overlays (appear after window is shown)
     Rectangle {
         id: topOverlay
         height: 36
@@ -150,7 +145,6 @@ Window {
         }
     }
 
-    // Timeline loaded asynchronously and only when needed
     Loader {
         id: timelineLoader
         anchors.left: parent.left
@@ -163,7 +157,6 @@ Window {
     }
 
     function open() {
-        // Ensure queues are bound before showing
         updateQueues()
 
         visible = true
@@ -195,9 +188,28 @@ Window {
 
         showNormal()
 
+        // Stop main stream so next fullscreen open is clean
+        if (frigateRef && cameraName !== "" &&
+            typeof frigateRef.stopFullscreenStream === "function") {
+            frigateRef.stopFullscreenStream(cameraName)
+        }
+
+        liveQueue = null
+        playbackQueue = null
+        _queuesBound = false
+        _pxOpened = false
+
         Qt.callLater(function() {
             visible = false
             timelineLoader.active = false
         })
+    }
+
+    onClosing: {
+        // OS close / Alt+F4
+        if (frigateRef && cameraName !== "" &&
+            typeof frigateRef.stopFullscreenStream === "function") {
+            frigateRef.stopFullscreenStream(cameraName)
+        }
     }
 }

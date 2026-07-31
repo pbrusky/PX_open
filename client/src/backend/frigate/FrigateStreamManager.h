@@ -26,6 +26,9 @@ public:
 
     void stopStream(const QString& cameraName);
     void restartStream(const QString& cameraName);
+
+    Q_INVOKABLE void stopFullscreenStream(const QString& cameraName);
+    Q_INVOKABLE void stopAllFullscreenStreams();
     Q_INVOKABLE void stopAllStreams();
 
     Q_INVOKABLE QObject* getWorker(const QString& cameraName);
@@ -36,6 +39,12 @@ signals:
     void cameraOffline(QString id);
 
 private:
+    void stopFullscreenInternal(const QString& cameraName);
+    void startFullscreenWorker(const QString& cameraName,
+                               FrameQueue* queue,
+                               const QString& url,
+                               bool isFallback);
+
     QString m_server;
     QString m_serverIp;
 
@@ -52,4 +61,4 @@ private:
     QHash<QString, QThread*>      m_playbackThreads;
 };
 
-#endif // FRIGATESTREAMMANAGER_H
+#endif

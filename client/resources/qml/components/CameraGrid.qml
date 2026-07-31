@@ -23,6 +23,7 @@ Item {
     property var fullscreenCamera: null
     property var fullscreenLiveQueue: null
     property var fullscreenPlaybackQueue: null
+    property bool fullscreenOpening: false
 
     property var cameraOnlineMap: ({})
 
@@ -73,7 +74,6 @@ Item {
 
         cameraNames.push(cameraName)
         cameraNames = cameraNames.slice()
-
         updateGridSize()
 
         if (mainWindow && mainWindow.selectedCameraId !== cameraName)
@@ -92,7 +92,6 @@ Item {
 
         let cellW = grid.width / cols
         let cellH = grid.height / rows
-
         let col = Math.floor(x / cellW)
         let row = Math.floor(y / cellH)
         let idx = row * cols + col
@@ -124,9 +123,18 @@ Item {
             return
         }
 
+        if (fullscreenOpening) {
+            console.log("enterFullscreen: already opening, ignore")
+            return
+        }
+
+        fullscreenOpening = true
         console.log("enterFullscreen called for:", cameraName)
 
-        // PRIMARY high-res stream for fullscreen
+        // Stop any previous fullscreen main stream first
+        if (frigateRef && typeof frigateRef.stopAllFullscreenStreams === "function")
+            frigateRef.stopAllFullscreenStreams()
+
         var primaryQueue = null
         if (frigateRef && typeof frigateRef.getFullscreenQueue === "function")
             primaryQueue = frigateRef.getFullscreenQueue(cameraName)
@@ -135,10 +143,7 @@ Item {
 
         var cam = getCamera(cameraName)
         if (!cam) {
-            cam = {
-                id: cameraName,
-                name: cameraName
-            }
+            cam = { id: cameraName, name: cameraName }
         }
 
         fullscreenCamera = cam
@@ -153,17 +158,40 @@ Item {
         })
     }
 
+    function exitFullscreen() {
+        var name = fullscreenCamera
+                   ? (fullscreenCamera.name || fullscreenCamera.id || "")
+                   : ""
+
+        if (fullscreenLoader.item && typeof fullscreenLoader.item.close === "function")
+            fullscreenLoader.item.close()
+
+        fullscreenLoader.visible = false
+        fullscreenLoader.source = ""
+        fullscreenCamera = null
+        fullscreenLiveQueue = null
+        fullscreenPlaybackQueue = null
+        fullscreenOpening = false
+
+        // Release main stream so next open is fresh
+        if (frigateRef) {
+            if (name !== "" && typeof frigateRef.stopFullscreenStream === "function")
+                frigateRef.stopFullscreenStream(name)
+            else if (typeof frigateRef.stopAllFullscreenStreams === "function")
+                frigateRef.stopAllFullscreenStreams()
+        }
+    }
+
     function configureAndOpenFullscreen() {
-        if (!fullscreenLoader.item) {
-            console.warn("configureAndOpenFullscreen: no item yet")
+        if (!fullscreenLoader.item || !fullscreenCamera)
             return
-        }
-        if (!fullscreenCamera) {
-            console.warn("configureAndOpenFullscreen: no fullscreenCamera")
-            return
-        }
 
         var item = fullscreenLoader.item
+
+        // Avoid double-open
+        if (item._pxOpened === true)
+            return
+        item._pxOpened = true
 
         item.cameraId      = fullscreenCamera.id || fullscreenCamera.name || ""
         item.cameraName    = fullscreenCamera.name || fullscreenCamera.id || ""
@@ -172,12 +200,19 @@ Item {
         item.liveQueue     = fullscreenLiveQueue
         item.playbackQueue = fullscreenPlaybackQueue
 
+        // When fullscreen window closes, clean up streams
+        if (typeof item.close === "function") {
+            item.closing.connect(function() {
+                // optional if Window has closing signal
+            })
+        }
+
         console.log("Opening fullscreen for", item.cameraName)
 
         if (typeof item.open === "function")
             item.open()
-        else
-            console.warn("FullscreenCamera has no open() function")
+
+        fullscreenOpening = false
     }
 
     function addCamera() {
@@ -258,22 +293,7 @@ Item {
             configureAndOpenFullscreen()
         }
 
-        onStatusChanged: {
-            if (status === Loader.Ready && visible)
-                configureAndOpenFullscreen()
-        }
-
-        Keys.onEscapePressed: {
-            if (item && typeof item.close === "function")
-                item.close()
-            else {
-                visible = false
-                source = ""
-                fullscreenCamera = null
-                fullscreenLiveQueue = null
-                fullscreenPlaybackQueue = null
-            }
-        }
+        Keys.onEscapePressed: gridContainer.exitFullscreen()
     }
 
     Component.onCompleted: {

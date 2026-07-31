@@ -5,6 +5,7 @@
 #include "FrigateTimeline.h"
 #include "FrigatePlayback.h"
 #include "FrigateOnvif.h"
+
 #include <QProcess>
 #include <QDebug>
 
@@ -159,6 +160,16 @@ QObject* FrigateAPI::getPlaybackQueue(const QString& cameraName)
 void FrigateAPI::stopStream(const QString& cameraName)
 {
     m_streamManager->stopStream(cameraName);
+}
+
+void FrigateAPI::stopFullscreenStream(const QString& cameraName)
+{
+    m_streamManager->stopFullscreenStream(cameraName);
+}
+
+void FrigateAPI::stopAllFullscreenStreams()
+{
+    m_streamManager->stopAllFullscreenStreams();
 }
 
 void FrigateAPI::stopAllStreams()
