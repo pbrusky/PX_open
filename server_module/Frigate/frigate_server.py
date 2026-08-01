@@ -87,7 +87,8 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                         ["python", "onvif_scan.py", "10.36.24.", username, password],
                         capture_output=True,
                         text=True,
-                        timeout=40
+                        timeout=40,
+                        stdin=subprocess.DEVNULL   # ⭐ FIX: prevents blocking / waiting for ENTER
                     )
 
                     if result.stderr.strip():
