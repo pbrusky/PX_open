@@ -203,9 +203,12 @@ FRIGATE_API_ENABLED = True
 
 FRIGATE_MEDIA_PATH, FRIGATE_CACHE_PATH, FRIGATE_CONFIG_PATH = detect_paths_from_docker(FRIGATE_CONTAINER_NAME)
 
-# Fallbacks if docker inspect fails
+# Fallbacks if docker inspect fails. On the current host layout the live
+# media root is under C:\frigate\media and recordings are nested beneath it,
+# so keep the fallback aligned with the real tree instead of the older
+# C:\frigate\media\frigate assumption.
 if FRIGATE_MEDIA_PATH is None:
-    FRIGATE_MEDIA_PATH = Path(r"C:\frigate\media\frigate")
+    FRIGATE_MEDIA_PATH = Path(r"C:\frigate\media")
 
 if FRIGATE_CACHE_PATH is None:
     FRIGATE_CACHE_PATH = Path(r"C:\frigate\cache")

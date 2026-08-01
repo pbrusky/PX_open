@@ -123,19 +123,78 @@ def delete_dir_if_exists(path):
         return False
 
 
+def delete_file_if_exists(path):
+    try:
+        if not path.exists():
+            return True
+
+        print(f"[frigate] Deleting file: {path}")
+        path.unlink(missing_ok=True)
+        return not path.exists()
+    except Exception as e:
+        print(f"[frigate] Failed to delete file {path}: {e}")
+        return False
+
+
+def _content_contains_camera(path, cam_id):
+    try:
+        if not path.is_file() or not path.exists():
+            return False
+
+        if path.stat().st_size > 2 * 1024 * 1024:
+            return False
+
+        data = path.read_bytes()
+        needle = cam_id.encode("utf-8", errors="ignore")
+        needle_main = f"{cam_id}_main".encode("utf-8", errors="ignore")
+        return needle in data or needle_main in data
+    except Exception:
+        return False
+
+
+def _matches_camera_name(path, cam_id):
+    target = cam_id.casefold()
+    target_main = f"{cam_id}_main".casefold()
+
+    if path.name.casefold() == target or path.name.casefold() == target_main:
+        return True
+
+    if path.stem.casefold() == target or path.stem.casefold() == target_main:
+        return True
+
+    parts = [part.casefold() for part in path.parts]
+    return target in parts or target_main in parts
+
+
 def delete_camera_files(cam_id):
     success = True
-    media_targets = []
-    cache_targets = []
+    delete_roots = []
 
-    if FRIGATE_MEDIA_PATH.exists():
-        for path in FRIGATE_MEDIA_PATH.rglob('*'):
-            if path.is_dir() and path.name in {cam_id, f"{cam_id}_main"}:
-                media_targets.append(path)
+    for root in (FRIGATE_MEDIA_PATH, FRIGATE_CACHE_PATH):
+        if root and root.exists() and root not in delete_roots:
+            delete_roots.append(root)
 
-    for media_target in media_targets:
-        if not delete_dir_if_exists(media_target):
-            success = False
+    parent_media = getattr(FRIGATE_MEDIA_PATH, "parent", None)
+    if parent_media and parent_media.exists() and parent_media not in delete_roots:
+        delete_roots.append(parent_media)
+
+    parent_cache = getattr(FRIGATE_CACHE_PATH, "parent", None)
+    if parent_cache and parent_cache.exists() and parent_cache not in delete_roots:
+        delete_roots.append(parent_cache)
+
+    for root in delete_roots:
+        print(f"[frigate] Scanning delete root: {root}")
+        candidates = sorted(root.rglob('*'), key=lambda p: (len(p.parts), str(p)), reverse=True)
+        for path in candidates:
+            matches_name = _matches_camera_name(path, cam_id)
+            matches_content = _content_contains_camera(path, cam_id)
+            if matches_name or matches_content:
+                if path.is_dir():
+                    if not delete_dir_if_exists(path):
+                        success = False
+                elif path.is_file():
+                    if not delete_file_if_exists(path):
+                        success = False
 
     direct_media_folder = FRIGATE_MEDIA_PATH / cam_id
     if not delete_dir_if_exists(direct_media_folder):
@@ -144,15 +203,6 @@ def delete_camera_files(cam_id):
     direct_cache_folder = FRIGATE_CACHE_PATH / cam_id
     if not delete_dir_if_exists(direct_cache_folder):
         success = False
-
-    if FRIGATE_CACHE_PATH.exists():
-        for path in FRIGATE_CACHE_PATH.rglob('*'):
-            if path.is_dir() and path.name in {cam_id, f"{cam_id}_main"}:
-                cache_targets.append(path)
-
-    for cache_target in cache_targets:
-        if not delete_dir_if_exists(cache_target):
-            success = False
 
     return success
 
