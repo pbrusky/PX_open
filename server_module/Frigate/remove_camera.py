@@ -3,6 +3,7 @@ import os
 import shutil
 import time
 import subprocess
+from pathlib import Path
 
 from config import (
     FRIGATE_CONFIG_PATH,
@@ -10,7 +11,9 @@ from config import (
     FRIGATE_INSTALL_TYPE,
     FRIGATE_CONTAINER_NAME,
     FRIGATE_SERVICE_NAME,
-    GO2RTC_CONTAINER_NAME
+    GO2RTC_CONTAINER_NAME,
+    FRIGATE_MEDIA_PATH,
+    FRIGATE_CACHE_PATH
 )
 
 def backup_file(path):
@@ -107,6 +110,24 @@ def remove_frigate_camera(cam_id):
 
     return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
+def delete_camera_files(cam_id):
+    deleted_any = False
+
+    media_folder = FRIGATE_MEDIA_PATH / cam_id
+    cache_folder = FRIGATE_CACHE_PATH / cam_id
+
+    if media_folder.exists():
+        print(f"[frigate] Deleting media folder: {media_folder}")
+        shutil.rmtree(media_folder, ignore_errors=True)
+        deleted_any = True
+
+    if cache_folder.exists():
+        print(f"[frigate] Deleting cache folder: {cache_folder}")
+        shutil.rmtree(cache_folder, ignore_errors=True)
+        deleted_any = True
+
+    return deleted_any
+
 def remove_camera(cam_id):
     print(f"[remove_camera] Removing {cam_id}")
 
@@ -117,11 +138,17 @@ def remove_camera(cam_id):
             "message": "Invalid camera name"
         }
 
+    # STOP FRIGATE FIRST
+    print("[frigate] Stopping Frigate before deletion...")
+    subprocess.run(["docker", "stop", FRIGATE_CONTAINER_NAME], capture_output=True, text=True)
+
     go2_ok = remove_go2rtc_streams(cam_id)
     fr_ok = remove_frigate_camera(cam_id)
-    restart_ok = restart_frigate() if fr_ok else False
+    delete_ok = delete_camera_files(cam_id)
 
-    ok = go2_ok and fr_ok and restart_ok
+    restart_ok = restart_frigate()
+
+    ok = go2_ok and fr_ok and delete_ok and restart_ok
 
     return {
         "event": "cameraRemoveResult",

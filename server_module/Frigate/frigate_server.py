@@ -10,7 +10,8 @@ from pathlib import Path
 from config import (
     LAN_IP, HTTP_PORT, HTTPS_PORT, BROADCAST_IP,
     PROGRESS_FILE, MODULE_ID, SYSTEM_ID, SYSTEM_NAME,
-    FRIGATE_CONFIG_PATH
+    FRIGATE_CONFIG_PATH, FRIGATE_MEDIA_PATH, FRIGATE_CACHE_PATH,
+    GO2RTC_CONFIG_PATH
 )
 
 from https_server import start_https_server
@@ -88,7 +89,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                         capture_output=True,
                         text=True,
                         timeout=40,
-                        stdin=subprocess.DEVNULL   # ⭐ FIX: prevents blocking / waiting for ENTER
+                        stdin=subprocess.DEVNULL
                     )
 
                     if result.stderr.strip():
