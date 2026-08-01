@@ -284,6 +284,8 @@ void FrigateCameraManager::removeCamera(const QString& id)
 
         QString event = root.value("event").toString();
         bool ok       = root.value("status").toString() == "ok";
+        if (!ok && root.contains("ok"))
+            ok = root.value("ok").toBool();
         QString msg   = root.value("message").toString();
 
         if (event == "cameraRemoveResult") {

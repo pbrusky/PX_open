@@ -110,23 +110,51 @@ def remove_frigate_camera(cam_id):
 
     return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
+def delete_dir_if_exists(path):
+    try:
+        if not path.exists():
+            return True
+
+        print(f"[frigate] Deleting folder: {path}")
+        shutil.rmtree(path, ignore_errors=False)
+        return not path.exists()
+    except Exception as e:
+        print(f"[frigate] Failed to delete folder {path}: {e}")
+        return False
+
+
 def delete_camera_files(cam_id):
-    deleted_any = False
+    success = True
+    media_targets = []
+    cache_targets = []
 
-    media_folder = FRIGATE_MEDIA_PATH / cam_id
-    cache_folder = FRIGATE_CACHE_PATH / cam_id
+    if FRIGATE_MEDIA_PATH.exists():
+        for path in FRIGATE_MEDIA_PATH.rglob('*'):
+            if path.is_dir() and path.name in {cam_id, f"{cam_id}_main"}:
+                media_targets.append(path)
 
-    if media_folder.exists():
-        print(f"[frigate] Deleting media folder: {media_folder}")
-        shutil.rmtree(media_folder, ignore_errors=True)
-        deleted_any = True
+    for media_target in media_targets:
+        if not delete_dir_if_exists(media_target):
+            success = False
 
-    if cache_folder.exists():
-        print(f"[frigate] Deleting cache folder: {cache_folder}")
-        shutil.rmtree(cache_folder, ignore_errors=True)
-        deleted_any = True
+    direct_media_folder = FRIGATE_MEDIA_PATH / cam_id
+    if not delete_dir_if_exists(direct_media_folder):
+        success = False
 
-    return deleted_any
+    direct_cache_folder = FRIGATE_CACHE_PATH / cam_id
+    if not delete_dir_if_exists(direct_cache_folder):
+        success = False
+
+    if FRIGATE_CACHE_PATH.exists():
+        for path in FRIGATE_CACHE_PATH.rglob('*'):
+            if path.is_dir() and path.name in {cam_id, f"{cam_id}_main"}:
+                cache_targets.append(path)
+
+    for cache_target in cache_targets:
+        if not delete_dir_if_exists(cache_target):
+            success = False
+
+    return success
 
 def remove_camera(cam_id):
     print(f"[remove_camera] Removing {cam_id}")
@@ -134,6 +162,7 @@ def remove_camera(cam_id):
     if not cam_id:
         return {
             "event": "cameraRemoveResult",
+            "status": "error",
             "ok": False,
             "message": "Invalid camera name"
         }
@@ -152,6 +181,7 @@ def remove_camera(cam_id):
 
     return {
         "event": "cameraRemoveResult",
+        "status": "ok" if ok else "error",
         "ok": ok,
         "message": f"Camera {cam_id} removed"
     }

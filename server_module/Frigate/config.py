@@ -124,14 +124,26 @@ def detect_paths_from_docker(container_name):
 def auto_detect_container(name_hint: str):
     try:
         result = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}"],
+            ["docker", "ps", "-a", "--format", "{{.Names}}|{{.Image}}"],
             capture_output=True,
             text=True
         )
-        names = result.stdout.strip().splitlines()
-        for n in names:
-            if name_hint.lower() in n.lower():
-                return n
+        entries = result.stdout.strip().splitlines()
+        hint = name_hint.lower()
+
+        for entry in entries:
+            if not entry.strip():
+                continue
+
+            parts = entry.split("|", 1)
+            if len(parts) != 2:
+                continue
+
+            name = parts[0].strip()
+            image = parts[1].strip().lower()
+
+            if hint in name.lower() or hint in image:
+                return name
     except:
         pass
     return None
@@ -162,9 +174,10 @@ def detect_install_type():
         return "hassio"
 
     try:
-        result = subprocess.run(["docker", "ps"], capture_output=True, text=True)
-        if "frigate" in result.stdout.lower():
-            return "docker"
+        result = subprocess.run(["docker", "ps", "-a", "--format", "{{.Names}}|{{.Image}}"], capture_output=True, text=True)
+        for line in result.stdout.splitlines():
+            if line.lower().find("frigate") >= 0 or line.lower().find("go2rtc") >= 0:
+                return "docker"
     except:
         pass
 

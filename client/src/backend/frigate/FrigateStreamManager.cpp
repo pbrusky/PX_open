@@ -48,6 +48,14 @@ static void stopWorkerThread(FFmpegWorker* worker, QThread* thread)
             qWarning() << "[StreamManager] Thread did not finish in time";
         }
     }
+
+    // Defer deletion until the thread event loop and worker signal handlers
+    // have fully unwound, otherwise QML/C++ can tear down the object while
+    // a queued signal callback is still in progress.
+    if (worker)
+        worker->deleteLater();
+    if (thread)
+        thread->deleteLater();
 }
 
 QObject* FrigateStreamManager::getQueue(const QString& cameraName)
@@ -124,14 +132,7 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
 
             FFmpegWorker* oldW = m_fullscreenWorkers.take(cameraName);
             QThread* oldT = m_fullscreenThreads.take(cameraName);
-            if (oldW)
-                oldW->stopDecoding();
-            if (oldT) {
-                oldT->quit();
-                oldT->wait(1000);
-            }
-            delete oldW;
-            delete oldT;
+            stopWorkerThread(oldW, oldT);
 
             if (m_fullscreenQueues.contains(cameraName))
                 startFullscreenWorker(cameraName, queue, subUrl, true);
@@ -202,8 +203,6 @@ void FrigateStreamManager::stopFullscreenInternal(const QString& cameraName)
         FFmpegWorker* worker = m_fullscreenWorkers.take(cameraName);
         QThread* thread = m_fullscreenThreads.take(cameraName);
         stopWorkerThread(worker, thread);
-        delete worker;
-        delete thread;
         qDebug() << "[StreamManager] Stopped fullscreen stream:" << cameraName;
     }
 
@@ -228,8 +227,6 @@ void FrigateStreamManager::stopStream(const QString& cameraName)
         FFmpegWorker* worker = m_workers.take(cameraName);
         QThread* thread = m_threads.take(cameraName);
         stopWorkerThread(worker, thread);
-        delete worker;
-        delete thread;
     }
 
     stopFullscreenInternal(cameraName);
@@ -238,8 +235,6 @@ void FrigateStreamManager::stopStream(const QString& cameraName)
         FFmpegWorker* worker = m_playbackWorkers.take(cameraName);
         QThread* thread = m_playbackThreads.take(cameraName);
         stopWorkerThread(worker, thread);
-        delete worker;
-        delete thread;
     }
 
     m_queues.remove(cameraName);

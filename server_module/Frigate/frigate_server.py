@@ -5,6 +5,7 @@ import socket
 import threading
 import time
 import subprocess
+import sys
 from pathlib import Path
 
 from config import (
@@ -84,12 +85,14 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                 print(f"[ONVIF] Discovery requested with user: '{username}'")
 
                 try:
+                    script_path = Path(__file__).with_name("onvif_scan.py")
                     result = subprocess.run(
-                        ["python", "onvif_scan.py", "10.36.24.", username, password],
+                        [sys.executable, str(script_path), "10.36.24.", username, password],
                         capture_output=True,
                         text=True,
                         timeout=40,
-                        stdin=subprocess.DEVNULL
+                        stdin=subprocess.DEVNULL,
+                        cwd=str(Path(__file__).resolve().parent)
                     )
 
                     if result.stderr.strip():
