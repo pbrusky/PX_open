@@ -136,19 +136,25 @@ def delete_file_if_exists(path):
         return False
 
 
-def _content_contains_camera(path, cam_id):
+def purge_cache_root():
     try:
-        if not path.is_file() or not path.exists():
-            return False
+        if not FRIGATE_CACHE_PATH.exists():
+            return True
 
-        if path.stat().st_size > 2 * 1024 * 1024:
-            return False
+        print(f"[frigate] Purging cache root: {FRIGATE_CACHE_PATH}")
+        success = True
 
-        data = path.read_bytes()
-        needle = cam_id.encode("utf-8", errors="ignore")
-        needle_main = f"{cam_id}_main".encode("utf-8", errors="ignore")
-        return needle in data or needle_main in data
-    except Exception:
+        for child in sorted(FRIGATE_CACHE_PATH.iterdir(), key=lambda p: (len(p.parts), str(p)), reverse=True):
+            if child.is_dir():
+                if not delete_dir_if_exists(child):
+                    success = False
+            elif child.is_file():
+                if not delete_file_if_exists(child):
+                    success = False
+
+        return success
+    except Exception as e:
+        print(f"[frigate] Failed to purge cache root {FRIGATE_CACHE_PATH}: {e}")
         return False
 
 
@@ -186,9 +192,7 @@ def delete_camera_files(cam_id):
         print(f"[frigate] Scanning delete root: {root}")
         candidates = sorted(root.rglob('*'), key=lambda p: (len(p.parts), str(p)), reverse=True)
         for path in candidates:
-            matches_name = _matches_camera_name(path, cam_id)
-            matches_content = _content_contains_camera(path, cam_id)
-            if matches_name or matches_content:
+            if _matches_camera_name(path, cam_id):
                 if path.is_dir():
                     if not delete_dir_if_exists(path):
                         success = False
@@ -202,6 +206,9 @@ def delete_camera_files(cam_id):
 
     direct_cache_folder = FRIGATE_CACHE_PATH / cam_id
     if not delete_dir_if_exists(direct_cache_folder):
+        success = False
+
+    if not purge_cache_root():
         success = False
 
     return success
