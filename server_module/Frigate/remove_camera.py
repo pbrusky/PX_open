@@ -113,7 +113,7 @@ def remove_camera(cam_id):
     if not cam_id:
         return {
             "event": "cameraRemoveResult",
-            "status": "error",
+            "ok": False,
             "message": "Invalid camera name"
         }
 
@@ -121,10 +121,10 @@ def remove_camera(cam_id):
     fr_ok = remove_frigate_camera(cam_id)
     restart_ok = restart_frigate() if fr_ok else False
 
+    ok = go2_ok and fr_ok and restart_ok
+
     return {
         "event": "cameraRemoveResult",
-        "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
-        "message": f"Camera {cam_id} removed",
-        "go2rtc": go2_ok,
-        "frigate_restart": restart_ok
+        "ok": ok,
+        "message": f"Camera {cam_id} removed"
     }

@@ -12,18 +12,24 @@ Item {
     signal popupClosed(string type)
 
     function openPopup(path, params) {
-        if (currentPopup) {
-            currentPopup.destroy()
-            currentPopup = null
-        }
+        closePopup()
 
-        let comp = Qt.createComponent(path)
-        if (comp.status !== Component.Ready) {
-            console.error("PopupManager: failed to load", path)
-            return
-        }
+        var comp = Qt.createComponent(path)
+        if (comp.status === Component.Loading)
+            comp.statusChanged.connect(function() {
+                if (comp.status === Component.Ready)
+                    finishOpen(comp, path, params)
+                else if (comp.status === Component.Error)
+                    console.error("PopupManager: failed to load", path, comp.errorString())
+            })
+        else if (comp.status === Component.Ready)
+            finishOpen(comp, path, params)
+        else
+            console.error("PopupManager: failed to load", path, comp.errorString())
+    }
 
-        let obj = comp.createObject(popupManager, params || {})
+    function finishOpen(comp, path, params) {
+        var obj = comp.createObject(popupManager, params || {})
         if (!obj) {
             console.error("PopupManager: failed to create popup object")
             return
@@ -31,9 +37,8 @@ Item {
 
         currentPopup = obj
 
-        if (obj.closeRequested) {
+        if (obj.closeRequested)
             obj.closeRequested.connect(closePopup)
-        }
 
         popupOpened(path)
     }
@@ -42,12 +47,20 @@ Item {
         if (!currentPopup)
             return
 
-        currentPopup.destroy()
+        var popup = currentPopup
         currentPopup = null
+
+        if (popup.closeRequested) {
+            try { popup.closeRequested.disconnect(closePopup) } catch (e) {}
+        }
+
+        popup.visible = false
+        popup.destroy()
+        popupClosed("")
     }
 
-    // ⭐ Correct path — this fixes your error
     function openRestartFrigatePopup(params) {
+        // Prefer dedicated restart overlay on MainWindow, not this manager
         openPopup("qrc:/app/resources/qml/components/popups/RestartPopup.qml", params)
     }
 }
