@@ -42,7 +42,7 @@ static void stopWorkerThread(FFmpegWorker* worker, QThread* thread)
 
     if (thread) {
         thread->quit();
-        if (!thread->wait(200))
+        if (!thread->wait(300))
             qDebug() << "[StreamManager] Thread still stopping (async)";
     }
 }
@@ -64,7 +64,7 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
-    worker->setHighQuality(false);
+    worker->setHighQuality(false); // grid: low res
     m_workers.insert(cameraName, worker);
 
     connect(worker, &FFmpegWorker::openInputOk, this, [this, cameraName]() {
@@ -94,8 +94,9 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
                                                  bool isFallback)
 {
     qDebug() << "[StreamManager] Starting fullscreen stream:"
-             << url << (isFallback ? "(sub)" : "(main)");
+             << url << (isFallback ? "(hq-sub)" : "(main)");
 
+    // Replace worker only — keep the same FrameQueue pointer for QML
     if (m_fullscreenWorkers.contains(cameraName)) {
         FFmpegWorker* oldW = m_fullscreenWorkers.take(cameraName);
         QThread* oldT = m_fullscreenThreads.take(cameraName);
@@ -107,7 +108,7 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
-    worker->setHighQuality(true);
+    worker->setHighQuality(true); // fullscreen: up to ~1920
     m_fullscreenWorkers.insert(cameraName, worker);
 
     QThread* thread = new QThread(nullptr);
@@ -127,8 +128,9 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
             if (m_fullscreenWorkers.value(cameraName) != worker)
                 return;
 
-            qWarning() << "[StreamManager] Fullscreen main failed for"
-                       << cameraName << ":" << err << "→ using sub";
+            qWarning() << "[StreamManager] MAIN missing for"
+                       << cameraName << ":" << err
+                       << "→ fallback HQ sub" << subUrl;
 
             m_mainMissing.insert(cameraName);
 
@@ -138,7 +140,8 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
                 disconnect(oldW, nullptr, this, nullptr);
             stopWorkerThread(oldW, oldT);
 
-            if (m_fullscreenQueues.contains(cameraName))
+            // Same FrameQueue — QML mainQueue pointer stays valid
+            if (m_fullscreenQueues.value(cameraName) == queue)
                 startFullscreenWorker(cameraName, queue, subUrl, true);
         }, Qt::QueuedConnection);
     }
@@ -151,18 +154,31 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     if (cameraName.trimmed().isEmpty() || m_serverIp.trimmed().isEmpty())
         return nullptr;
 
-    if (m_fullscreenQueues.contains(cameraName))
+    // Reuse if already running — DO NOT stop/restart (that was killing MAIN)
+    if (m_fullscreenQueues.contains(cameraName) &&
+        m_fullscreenWorkers.contains(cameraName)) {
+        qDebug() << "[StreamManager] Reusing fullscreen queue for" << cameraName;
         return m_fullscreenQueues[cameraName];
+    }
+
+    // Clean leftover queue without worker
+    if (m_fullscreenQueues.contains(cameraName)) {
+        FrameQueue* stale = m_fullscreenQueues.take(cameraName);
+        if (stale)
+            stale->deleteLater();
+    }
 
     FrameQueue* queue = new FrameQueue(this);
-    queue->setMaxSize(2);
+    queue->setMaxSize(3);
     m_fullscreenQueues.insert(cameraName, queue);
 
     if (m_mainMissing.contains(cameraName)) {
-        startFullscreenWorker(cameraName, queue, buildRtspUrl(m_serverIp, cameraName), true);
+        // Known missing *_main → HQ decode of base stream (real upgrade vs grid 640px)
+        const QString subUrl = buildRtspUrl(m_serverIp, cameraName);
+        startFullscreenWorker(cameraName, queue, subUrl, true);
     } else {
-        startFullscreenWorker(cameraName, queue,
-                              buildRtspUrl(m_serverIp, cameraName + "_main"), false);
+        const QString mainUrl = buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"));
+        startFullscreenWorker(cameraName, queue, mainUrl, false);
     }
 
     return queue;
@@ -234,7 +250,7 @@ void FrigateStreamManager::stopAllFullscreenStreams()
 
 void FrigateStreamManager::stopStream(const QString& cameraName)
 {
-    // Grid worker only — do NOT touch fullscreen here
+    // Grid only — never touch fullscreen here
     if (m_workers.contains(cameraName)) {
         FFmpegWorker* worker = m_workers.take(cameraName);
         QThread* thread = m_threads.take(cameraName);

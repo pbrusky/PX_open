@@ -11,73 +11,91 @@ Item {
     property string cameraId: ""
     property string cameraName: ""
     property var frigateRef: null
-    property var liveQueue: null
-    property var playbackQueue: null
+
+    property var subQueue: null
+    property var mainQueue: null
+
     property bool isOnline: false
     property bool isPlayback: false
-    property int playbackPositionMs: 0
-    property bool _pxOpened: false
-    property bool _queuesBound: false
     property bool closeEnabled: false
-    property string streamLabel: "SUB"
+    property bool mainReady: false
+    property string streamLabel: mainReady ? "MAIN" : "SUB"
 
     signal requestClose()
 
-    onLiveQueueChanged: {
-        liveVideo.queue = null
-        liveVideo.queue = liveQueue
+    onSubQueueChanged: subVideo.queue = subQueue
+    onMainQueueChanged: {
+        mainReady = false
+        mainVideo.queue = mainQueue
+        if (mainQueue)
+            mainPoll.restart()
+        else
+            mainPoll.stop()
     }
 
-    Rectangle {
+    Rectangle { anchors.fill: parent; color: "black" }
+
+    CameraVideoItem {
+        id: subVideo
         anchors.fill: parent
-        color: "black"
+        z: 0
+        visible: subQueue !== null
+        queue: subQueue
+    }
+
+    CameraVideoItem {
+        id: mainVideo
+        anchors.fill: parent
+        z: 1
+        visible: mainReady && mainQueue !== null
+        queue: mainQueue
+    }
+
+    Timer {
+        id: mainPoll
+        interval: 150
+        repeat: true
+        running: false
+        onTriggered: {
+            if (!mainQueue) { stop(); return }
+            var ok = false
+            try { ok = mainQueue.hasFrames() } catch (e) { stop(); return }
+            if (ok) {
+                mainReady = true
+                console.log("Fullscreen: MAIN layer ON for", cameraName)
+                stop()
+            }
+        }
+    }
+
+    Timer {
+        id: closeArmTimer
+        interval: 1000
+        onTriggered: root.closeEnabled = true
     }
 
     FocusScope {
         anchors.fill: parent
         focus: true
+        z: 20
         Keys.onReleased: function(event) {
             if (event.key === Qt.Key_Escape && root.closeEnabled) {
+                console.log("Fullscreen ESC → requestClose")
                 root.requestClose()
                 event.accepted = true
             }
         }
     }
 
-    CameraVideoItem {
-        id: liveVideo
-        anchors.fill: parent
-        visible: !isPlayback && liveQueue !== null
-        queue: liveQueue
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        color: "#222"
-        visible: liveQueue === null
-        z: 1
-        Text {
-            anchors.centerIn: parent
-            text: "Connecting…"
-            color: "white"
-            font.pixelSize: 24
-            font.bold: true
-        }
-    }
-
-    Timer {
-        id: closeArmTimer
-        interval: 700
-        onTriggered: root.closeEnabled = true
-    }
-
     MouseArea {
         anchors.fill: parent
+        z: 15
         acceptedButtons: Qt.LeftButton
-        z: 2
         onDoubleClicked: {
-            if (root.closeEnabled)
+            if (root.closeEnabled) {
+                console.log("Fullscreen double-click → requestClose")
                 root.requestClose()
+            }
         }
     }
 
@@ -86,25 +104,16 @@ Item {
         width: parent.width
         anchors.top: parent.top
         color: "#00000099"
-        z: 10
+        z: 30
         Row {
             anchors.fill: parent
             anchors.margins: 8
             spacing: 16
-            Text {
-                text: cameraName
-                color: "white"
-                font.pixelSize: 15
-                font.bold: true
-            }
-            Text {
-                text: "LIVE"
-                color: "#00C853"
-                font.pixelSize: 13
-            }
+            Text { text: cameraName; color: "white"; font.pixelSize: 15; font.bold: true }
+            Text { text: "LIVE"; color: "#00C853"; font.pixelSize: 13 }
             Text {
                 text: root.streamLabel
-                color: root.streamLabel === "MAIN" ? "#FFC107" : "#90CAF9"
+                color: root.mainReady ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
             }
         }
@@ -118,38 +127,35 @@ Item {
         anchors.margins: 10
         radius: 4
         color: "#000000AA"
-        z: 11
-        Text {
-            anchors.centerIn: parent
-            text: "Exit"
-            color: "white"
-            font.pixelSize: 13
-        }
+        z: 31
+        Text { anchors.centerIn: parent; text: "Exit"; color: "white"; font.pixelSize: 13 }
         MouseArea {
             anchors.fill: parent
             onClicked: {
-                if (root.closeEnabled)
+                if (root.closeEnabled) {
+                    console.log("Fullscreen Exit → requestClose")
                     root.requestClose()
+                }
             }
         }
     }
 
     function open() {
         closeEnabled = false
-        streamLabel = "SUB"
+        mainReady = false
         visible = true
-        isPlayback = false
         closeArmTimer.restart()
+        if (mainQueue)
+            mainPoll.restart()
     }
 
     function close() {
+        mainPoll.stop()
         closeArmTimer.stop()
         closeEnabled = false
         visible = false
-        liveQueue = null
-        playbackQueue = null
-        _pxOpened = false
-        _queuesBound = false
-        streamLabel = "SUB"
+        mainReady = false
+        subQueue = null
+        mainQueue = null
     }
 }
