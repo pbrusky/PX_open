@@ -43,11 +43,19 @@ static void stopWorkerThread(FFmpegWorker* worker, QThread* thread)
 
     if (thread) {
         thread->quit();
-        const bool waited = thread->wait(500);
-        if (!waited) {
-            qDebug() << "[StreamManager] Thread cleanup pending after stop request";
+        // Short wait — don't stall UI when reopening fullscreen
+        if (!thread->wait(1500)) {
+            qWarning() << "[StreamManager] Thread did not finish in time";
         }
     }
+
+    // Defer deletion until the thread event loop and worker signal handlers
+    // have fully unwound, otherwise QML/C++ can tear down the object while
+    // a queued signal callback is still in progress.
+    if (worker)
+        worker->deleteLater();
+    if (thread)
+        thread->deleteLater();
 }
 
 QObject* FrigateStreamManager::getQueue(const QString& cameraName)
@@ -84,8 +92,6 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
     worker->moveToThread(thread);
     connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
     connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
-    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
 
     thread->start();
     return queue;
@@ -111,8 +117,6 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     worker->moveToThread(thread);
     connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
     connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
-    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
 
     if (!isFallback) {
         const QString subUrl = buildRtspUrl(m_serverIp, cameraName);
@@ -150,8 +154,7 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     queue->setMaxSize(2);
     m_fullscreenQueues.insert(cameraName, queue);
 
-    // Prefer the main RTSP source for fullscreen. If it is not available,
-    // fallback to the stable sub-stream only once.
+    // Skip main if we already know it 404s
     if (m_mainMissing.contains(cameraName)) {
         const QString subUrl = buildRtspUrl(m_serverIp, cameraName);
         startFullscreenWorker(cameraName, queue, subUrl, true);
@@ -189,8 +192,6 @@ QObject* FrigateStreamManager::getPlaybackQueue(const QString& cameraName)
     worker->moveToThread(thread);
     connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
     connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
-    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
 
     thread->start();
     return queue;
