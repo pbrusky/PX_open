@@ -26,4 +26,5 @@ protected:
 private:
     FrameQueue* m_queue = nullptr;
     QImage m_lastImage;
+    qint64 m_lastPaintMs = 0;
 };

@@ -23,6 +23,7 @@ Item {
     property string streamType: ""
 
     property var frameQueue: null
+    property string boundCameraName: ""
 
     property var originalParent: null
     property real originalX: 0
@@ -35,11 +36,16 @@ Item {
     signal removeRequested()
 
     function bindQueue() {
+        if (tile.boundCameraName === tile.cameraName && tile.frameQueue !== null)
+            return
+
         if (tile.frigateRef &&
             tile.cameraName !== "" &&
             typeof tile.frigateRef.getQueue === "function") {
+            tile.boundCameraName = tile.cameraName
             tile.frameQueue = tile.frigateRef.getQueue(tile.cameraName)
         } else {
+            tile.boundCameraName = ""
             tile.frameQueue = null
         }
     }

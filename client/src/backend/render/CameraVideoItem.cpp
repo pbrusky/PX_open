@@ -4,6 +4,7 @@
 #include <QSGSimpleTextureNode>
 #include <QQuickWindow>
 #include <QDebug>
+#include <QDateTime>
 
 CameraVideoItem::CameraVideoItem(QQuickItem* parent)
     : QQuickItem(parent)
@@ -33,12 +34,15 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
 {
     QSGSimpleTextureNode* node = static_cast<QSGSimpleTextureNode*>(oldNode);
 
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const bool shouldRender = m_lastPaintMs == 0 || (nowMs - m_lastPaintMs) >= 16;
+
     // Pop latest QImage frame
     if (m_queue) {
         QImage img = m_queue->popImage();
-        if (!img.isNull()) {
+        if (!img.isNull() && shouldRender && (m_lastImage.isNull() || !(m_lastImage.size() == img.size() && m_lastImage == img))) {
             m_lastImage = img;
-            // qDebug() << "CameraVideoItem: got image" << img.size();
+            m_lastPaintMs = nowMs;
         }
     }
 

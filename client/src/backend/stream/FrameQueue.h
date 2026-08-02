@@ -31,6 +31,8 @@ private:
     QMutex m_mutex;
     int m_maxSize = 2;          // critical: keep only 1–2 frames
 
+    QImage m_lastImage;
+    qint64 m_lastEmitMs = 0;
     QQueue<QImage> m_imageQueue;
     QQueue<ID3D11Texture2D*> m_textureQueue;
 };
