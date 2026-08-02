@@ -36,7 +36,8 @@ Item {
         grid.forceLayout()
     }
     function getCamera(name) {
-        if (!mainWindow || !mainWindow.cameraList) return null
+        if (!mainWindow || !mainWindow.cameraList)
+            return null
         return mainWindow.cameraList.find(function(c) {
             return c.name === name || c.id === name
         })
@@ -61,30 +62,35 @@ Item {
     }
 
     function dropAt(x, y, cameraName) {
-        if (!cameraName || cameraNames.indexOf(cameraName) !== -1) return
+        if (!cameraName || cameraNames.indexOf(cameraName) !== -1)
+            return
         cameraNames.push(cameraName)
         cameraNames = cameraNames.slice()
         updateGridSize()
-        if (frigateRef && frigateRef.getQueue)
+        if (frigateRef && typeof frigateRef.getQueue === "function")
             frigateRef.getQueue(cameraName)
         if (mainWindow)
             mainWindow.selectedCameraId = cameraName
     }
 
     function removeTile(index) {
-        if (index < 0 || index >= cameraNames.length) return
+        if (index < 0 || index >= cameraNames.length)
+            return
         var name = cameraNames[index]
         cameraNames.splice(index, 1)
         cameraNames = cameraNames.slice()
         updateGridSize()
         if (name && frigateRef) {
-            if (frigateRef.stopStream) frigateRef.stopStream(name)
-            if (frigateRef.stopFullscreenStream) frigateRef.stopFullscreenStream(name)
+            if (typeof frigateRef.stopStream === "function")
+                frigateRef.stopStream(name)
+            if (typeof frigateRef.stopFullscreenStream === "function")
+                frigateRef.stopFullscreenStream(name)
         }
     }
 
     function updateHoverIndex(x, y, cameraName) {
-        if (cols <= 0 || rows <= 0 || grid.width <= 0) return
+        if (cols <= 0 || rows <= 0 || grid.width <= 0)
+            return
         var col = Math.floor(x / (grid.width / cols))
         var row = Math.floor(y / (grid.height / rows))
         var idx = row * cols + col
@@ -93,8 +99,10 @@ Item {
     }
 
     function reorderTilesByTileCenter(oldIndex, tileObj) {
-        if (hoverIndex < 0 || oldIndex < 0 || hoverIndex === oldIndex) return
-        if (hoverIndex >= cameraNames.length || oldIndex >= cameraNames.length) return
+        if (hoverIndex < 0 || oldIndex < 0 || hoverIndex === oldIndex)
+            return
+        if (hoverIndex >= cameraNames.length || oldIndex >= cameraNames.length)
+            return
         var arr = cameraNames.slice()
         var tmp = arr[oldIndex]
         arr[oldIndex] = arr[hoverIndex]
@@ -103,25 +111,26 @@ Item {
         hoverIndex = -1
         if (tileObj) {
             var n = arr.indexOf(tileObj.cameraName)
-            if (n >= 0) tileObj.tileIndex = n
+            if (n >= 0)
+                tileObj.tileIndex = n
         }
     }
 
     function enterFullscreen(cameraName) {
-        if (!cameraName) return
+        if (!cameraName || cameraName === "")
+            return
+
         console.log("enterFullscreen", cameraName)
 
         var prevName = fullscreenName
-
-        // Stop previous camera only
         if (prevName !== "" && prevName !== cameraName &&
-            frigateRef && frigateRef.stopFullscreenStream) {
-            console.log("Stopping previous fullscreen", prevName)
+            frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
             frigateRef.stopFullscreenStream(prevName)
         }
 
-        var subQ = frigateRef && frigateRef.getQueue
-                   ? frigateRef.getQueue(cameraName) : null
+        var subQ = null
+        if (frigateRef && typeof frigateRef.getQueue === "function")
+            subQ = frigateRef.getQueue(cameraName)
 
         fullscreenName = cameraName
         fullscreenSubQueue = subQ
@@ -129,18 +138,19 @@ Item {
         fullscreenLocked = true
         unlockTimer.restart()
 
-        // NO reparent — keep loader inside grid to avoid destroy/stop races
         fullscreenLoader.visible = true
 
-        if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0)
+        if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0) {
             fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
-        else if (fullscreenLoader.item)
+        } else if (fullscreenLoader.item) {
             applyFullscreenItem(cameraName, subQ, null)
+        }
 
-        // Start HQ stream after a tick
         Qt.callLater(function() {
-            if (fullscreenName !== cameraName || !frigateRef) return
-            if (!frigateRef.getFullscreenQueue) return
+            if (fullscreenName !== cameraName || !frigateRef)
+                return
+            if (typeof frigateRef.getFullscreenQueue !== "function")
+                return
 
             var mainQ = frigateRef.getFullscreenQueue(cameraName)
             console.log("MAIN queue", mainQ)
@@ -152,35 +162,35 @@ Item {
 
     Timer {
         id: unlockTimer
-        interval: 1000
+        interval: 600
         onTriggered: {
             gridContainer.fullscreenLocked = false
-            // Arm close only after lock ends
             if (fullscreenLoader.item) {
                 try {
                     fullscreenLoader.item.requestClose.disconnect(gridContainer.exitFullscreen)
                 } catch (e) {}
                 fullscreenLoader.item.requestClose.connect(gridContainer.exitFullscreen)
-                console.log("Fullscreen close armed")
             }
         }
     }
 
     function applyFullscreenItem(cameraName, subQ, mainQ) {
         var item = fullscreenLoader.item
-        if (!item) return
+        if (!item)
+            return
 
-        // Do NOT connect requestClose here — unlockTimer does it after 1s
+        var name = cameraName ? ("" + cameraName) : ""
+
         try { item.requestClose.disconnect(gridContainer.exitFullscreen) } catch (e) {}
 
-        item.cameraId = cameraName
-        item.cameraName = cameraName
+        item.cameraId = name
+        item.cameraName = name
         item.frigateRef = frigateRef
         item.subQueue = subQ
         item.mainQueue = mainQ
         item.mainReady = false
 
-        console.log("Opening SUB layer", cameraName)
+        console.log("Opening SUB layer", name)
         item.open()
     }
 
@@ -201,8 +211,10 @@ Item {
         fullscreenSubQueue = null
         fullscreenMainQueue = null
 
-        if (name && frigateRef && frigateRef.stopFullscreenStream)
+        if (name !== "" && frigateRef &&
+            typeof frigateRef.stopFullscreenStream === "function") {
             frigateRef.stopFullscreenStream(name)
+        }
     }
 
     function addCamera() {
@@ -239,7 +251,7 @@ Item {
         Repeater {
             model: gridContainer.cameraNames
             delegate: Item {
-                property string cameraName: modelData
+                property string cameraName: modelData !== undefined ? modelData : ""
                 property real cellW: (grid.width / Math.max(gridContainer.cols, 1)) - grid.columnSpacing
                 property real cellH: (grid.height / Math.max(gridContainer.rows, 1)) - grid.rowSpacing
                 width: Math.min(cellW, cellH * 16 / 9)

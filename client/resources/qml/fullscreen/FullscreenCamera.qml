@@ -11,12 +11,9 @@ Item {
     property string cameraId: ""
     property string cameraName: ""
     property var frigateRef: null
-
     property var subQueue: null
     property var mainQueue: null
-
     property bool isOnline: false
-    property bool isPlayback: false
     property bool closeEnabled: false
     property bool mainReady: false
     property string streamLabel: mainReady ? "MAIN" : "SUB"
@@ -70,8 +67,11 @@ Item {
 
     Timer {
         id: closeArmTimer
-        interval: 1000
-        onTriggered: root.closeEnabled = true
+        interval: 600
+        onTriggered: {
+            root.closeEnabled = true
+            console.log("Fullscreen close armed (double-click or Exit/Esc)")
+        }
     }
 
     FocusScope {
@@ -80,7 +80,6 @@ Item {
         z: 20
         Keys.onReleased: function(event) {
             if (event.key === Qt.Key_Escape && root.closeEnabled) {
-                console.log("Fullscreen ESC → requestClose")
                 root.requestClose()
                 event.accepted = true
             }
@@ -92,10 +91,8 @@ Item {
         z: 15
         acceptedButtons: Qt.LeftButton
         onDoubleClicked: {
-            if (root.closeEnabled) {
-                console.log("Fullscreen double-click → requestClose")
+            if (root.closeEnabled)
                 root.requestClose()
-            }
         }
     }
 
@@ -109,7 +106,7 @@ Item {
             anchors.fill: parent
             anchors.margins: 8
             spacing: 16
-            Text { text: cameraName; color: "white"; font.pixelSize: 15; font.bold: true }
+            Text { text: root.cameraName; color: "white"; font.pixelSize: 15; font.bold: true }
             Text { text: "LIVE"; color: "#00C853"; font.pixelSize: 13 }
             Text {
                 text: root.streamLabel
@@ -132,10 +129,8 @@ Item {
         MouseArea {
             anchors.fill: parent
             onClicked: {
-                if (root.closeEnabled) {
-                    console.log("Fullscreen Exit → requestClose")
+                if (root.closeEnabled)
                     root.requestClose()
-                }
             }
         }
     }
@@ -144,6 +139,7 @@ Item {
         closeEnabled = false
         mainReady = false
         visible = true
+        forceActiveFocus()
         closeArmTimer.restart()
         if (mainQueue)
             mainPoll.restart()
