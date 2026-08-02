@@ -123,8 +123,10 @@ Item {
                 placeholderText: "Username"
                 onTextChanged: {
                     popupRoot.username = text
-                    if (ipInput.text.length > 0) {
+                    if (ipInput.text.length > 0 && !mainRtspInput.text.startsWith("rtsp://")) {
                         mainRtspInput.text = buildMainFromIp()
+                    }
+                    if (ipInput.text.length > 0 && !subRtspInput.text.startsWith("rtsp://")) {
                         subRtspInput.text = buildSubFromIp()
                     }
                 }
@@ -137,8 +139,10 @@ Item {
                 echoMode: TextInput.Password
                 onTextChanged: {
                     popupRoot.password = text
-                    if (ipInput.text.length > 0) {
+                    if (ipInput.text.length > 0 && !mainRtspInput.text.startsWith("rtsp://")) {
                         mainRtspInput.text = buildMainFromIp()
+                    }
+                    if (ipInput.text.length > 0 && !subRtspInput.text.startsWith("rtsp://")) {
                         subRtspInput.text = buildSubFromIp()
                     }
                 }

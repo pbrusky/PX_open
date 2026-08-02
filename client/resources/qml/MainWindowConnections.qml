@@ -1,10 +1,8 @@
 import QtQuick 2.15
-import "qrc:/app/resources/qml/components/popups"
 
 Item {
     id: root
 
-    // These must NOT have default bindings
     property var mainWindow
     property var frigateRef
     property var topbar
@@ -12,34 +10,110 @@ Item {
     property var contentLoader
     property var restartPopup
     property var frigatePollTimer
+    property var popupManager   // ⭐ set from MainWindow
 
-    //
-    // Frigate signals
-    //
+    property bool restartInProgress: false
+    property real restartStartedAt: 0
+
+    function dismissCurrentPopup() {
+        if (popupManager && typeof popupManager.closePopup === "function") {
+            popupManager.closePopup()
+            return
+        }
+        if (mainWindow && mainWindow.popupManager)
+            mainWindow.popupManager.closePopup()
+    }
+
+    function showRestartOverlay() {
+        // Make sure remove is gone again
+        dismissCurrentPopup()
+
+        restartInProgress = true
+        restartStartedAt = Date.now()
+
+        if (restartPopup) {
+            restartPopup.z = 2000000
+            if (typeof restartPopup.open === "function")
+                restartPopup.open()
+            else
+                restartPopup.visible = true
+        }
+
+        pollDelayTimer.restart()
+    }
+
+    function startRestartFlow() {
+        dismissCurrentPopup()
+        // Wait a tick so destroy finishes, then show restart only
+        Qt.callLater(showRestartOverlay)
+    }
+
+    function stopRestartFlow() {
+        restartInProgress = false
+
+        if (frigatePollTimer && frigatePollTimer.running)
+            frigatePollTimer.stop()
+
+        if (restartPopup) {
+            if (typeof restartPopup.close === "function")
+                restartPopup.close()
+            else
+                restartPopup.visible = false
+        }
+    }
+
+    Timer {
+        id: pollDelayTimer
+        interval: 2500
+        repeat: false
+        onTriggered: {
+            if (!restartInProgress)
+                return
+            if (frigatePollTimer)
+                frigatePollTimer.start()
+            if (frigateRef)
+                frigateRef.loadCameras()
+        }
+    }
+
     Connections {
         target: frigateRef
         ignoreUnknownSignals: true
 
         function onCamerasLoaded(list) {
-            if (!list || list.length === 0)
+            if (!list)
                 return
 
-            mainWindow.cameraList = list
-            sidebarWrapper.cameraList = list
+            if (list.length > 0) {
+                mainWindow.cameraList = list
+                if (sidebarWrapper)
+                    sidebarWrapper.cameraList = list
 
-            if (contentLoader.item &&
-                contentLoader.item.objectName === "ServerView" &&
-                contentLoader.item.updateCameras)
-            {
-                contentLoader.item.updateCameras(list)
+                if (contentLoader.item &&
+                    contentLoader.item.objectName === "ServerView" &&
+                    contentLoader.item.updateCameras) {
+                    contentLoader.item.updateCameras(list)
+                }
+
+                mainWindow.camerasLoaded(list)
             }
 
-            mainWindow.camerasLoaded(list)
+            if (restartInProgress) {
+                var elapsed = Date.now() - restartStartedAt
+                if (list.length > 0 && elapsed >= 3000)
+                    stopRestartFlow()
+                return
+            }
 
-            if (frigatePollTimer.running)
+            if (frigatePollTimer && frigatePollTimer.running)
                 frigatePollTimer.stop()
 
-            restartPopup.visible = false
+            if (restartPopup) {
+                if (typeof restartPopup.close === "function")
+                    restartPopup.close()
+                else
+                    restartPopup.visible = false
+            }
         }
 
         function onCameraOffline(name) {
@@ -47,7 +121,8 @@ Item {
                 if (mainWindow.cameraList[i].name === name)
                     mainWindow.cameraList[i].isOnline = false
 
-            sidebarWrapper.cameraList = mainWindow.cameraList
+            if (sidebarWrapper)
+                sidebarWrapper.cameraList = mainWindow.cameraList
             mainWindow.cameraOffline(name)
         }
 
@@ -56,37 +131,32 @@ Item {
                 if (mainWindow.cameraList[i].name === name)
                     mainWindow.cameraList[i].isOnline = true
 
-            sidebarWrapper.cameraList = mainWindow.cameraList
+            if (sidebarWrapper)
+                sidebarWrapper.cameraList = mainWindow.cameraList
             mainWindow.cameraOnline(name)
         }
 
         function onCameraAddResult(ok, message) {
-            restartPopup.visible = true
-            frigatePollTimer.start()
-            frigateRef.loadCameras()
+            startRestartFlow()
         }
 
         function onCameraEditResult(ok, message) {
-            restartPopup.visible = true
-            frigatePollTimer.start()
-            frigateRef.loadCameras()
+            startRestartFlow()
         }
 
         function onCameraRemoveResult(ok, message) {
-            restartPopup.visible = true
-            frigatePollTimer.start()
-            frigateRef.loadCameras()
+            console.log("MainWindowConnections cameraRemoveResult", ok, message)
+            startRestartFlow()
         }
     }
 
-    //
-    // Topbar signals
-    //
     Connections {
         target: topbar
         ignoreUnknownSignals: true
 
         function onDisconnectRequested() {
+            stopRestartFlow()
+
             contentLoader.startupDone = false
             contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
 
@@ -107,8 +177,7 @@ Item {
         function onAddCameraRequested() {
             if (contentLoader.item &&
                 contentLoader.item.objectName === "ServerView" &&
-                contentLoader.item.openAddCameraPopup)
-            {
+                contentLoader.item.openAddCameraPopup) {
                 contentLoader.item.openAddCameraPopup()
             }
         }

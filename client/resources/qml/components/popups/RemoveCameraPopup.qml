@@ -7,7 +7,7 @@ Item {
     objectName: "RemoveCameraPopup"
 
     anchors.fill: parent
-    z: 999999
+    z: 1
 
     signal closeRequested()
     signal cameraRemoved()
@@ -15,18 +15,43 @@ Item {
     property var popupManager
     property var frigateRef: null
     property string cameraId: ""
+    property bool closing: false
 
-    // Centered popup box - solid black
+    function forceClose() {
+        if (closing)
+            return
+        closing = true
+
+        // Preferred: PopupManager connection
+        closeRequested()
+
+        // Fallback: call manager directly
+        if (popupManager && typeof popupManager.closePopup === "function")
+            popupManager.closePopup()
+
+        // Last resort: hide + destroy self
+        visible = false
+        Qt.callLater(function() {
+            if (removePopup)
+                removePopup.destroy()
+        })
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: "#00000099"
+    }
+
     Rectangle {
         id: container
         width: 360
-        height: 280          // Optional: give it a fixed height for better look
+        height: 280
         radius: 8
-        color: "#000000"     // Solid black
+        color: "#000000"
 
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: -80   // Moved slightly upward (as before)
+        anchors.verticalCenterOffset: -80
 
         ColumnLayout {
             anchors.fill: parent
@@ -69,17 +94,21 @@ Item {
                 Layout.fillWidth: true
 
                 Button {
+                    id: removeBtn
                     text: "Remove"
                     Layout.fillWidth: true
+                    enabled: !closing
                     onClicked: {
                         statusText.text = "Removing..."
                         statusText.color = "yellow"
+                        removeBtn.enabled = false
 
                         if (frigateRef)
                             frigateRef.removeCamera(removePopup.cameraId)
                         else {
                             statusText.text = "Frigate not ready"
                             statusText.color = "red"
+                            removeBtn.enabled = true
                         }
                     }
                 }
@@ -87,30 +116,24 @@ Item {
                 Button {
                     text: "Cancel"
                     Layout.fillWidth: true
-                    onClicked: closeRequested()
+                    enabled: !closing
+                    onClicked: forceClose()
                 }
             }
         }
     }
 
-    // Optional: Click outside the popup to close (nice UX)
-    MouseArea {
-        anchors.fill: parent
-        onClicked: closeRequested()
-        z: -1   // Behind the popup
-    }
-
     Connections {
         target: frigateRef
+        ignoreUnknownSignals: true
 
         function onCameraRemoveResult(ok, message) {
             statusText.text = message
             statusText.color = ok ? "lightgreen" : "red"
 
-            if (ok) {
-                closeRequested()
-                removePopup.cameraRemoved()
-            }
+            // ALWAYS close this popup when the server answers
+            forceClose()
+            cameraRemoved()
         }
     }
 }

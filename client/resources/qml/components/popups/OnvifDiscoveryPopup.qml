@@ -261,7 +261,7 @@ Item {
                 return
             }
 
-            var mainUrl = rtsp || ""
+            var mainUrl = normalizeMainRtsp(rtsp || "")
             var subUrl = deriveSubFromMain(mainUrl)
 
             // New AddCameraPopup fields (main + sub)
@@ -317,6 +317,25 @@ Item {
             addCameraPopupRef.rtspField.text = mainUrl || ""
         if (typeof addCameraPopupRef.streamUrl !== "undefined")
             addCameraPopupRef.streamUrl = mainUrl || ""
+    }
+
+    function normalizeMainRtsp(mainUrl) {
+        if (!mainUrl || mainUrl.indexOf("rtsp://") !== 0)
+            return mainUrl
+
+        var u = mainUrl
+
+        // Hikvision-style
+        if (u.indexOf("/Channels/102") >= 0)
+            return u.replace("/Channels/102", "/Channels/101")
+        if (u.indexOf("/Channels/2") >= 0 && u.indexOf("/Channels/20") < 0)
+            return u.replace("/Channels/2", "/Channels/1")
+
+        // Dahua-style / reolink-style
+        if (u.indexOf("subtype=1") >= 0)
+            return u.replace("subtype=1", "subtype=0")
+
+        return u
     }
 
     // Best-effort substream from a main RTSP URL

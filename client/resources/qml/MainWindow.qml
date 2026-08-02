@@ -315,11 +315,6 @@ ApplicationWindow {
                 })
             }
 
-            //
-            // ❌ Removed: discovery.stopDiscovery()
-            // Discovery stops automatically in C++ via queued invokeMethod
-            //
-
             if (item.objectName === "ServerView") {
                 item.frigateRef = frigateRef
                 item.mainWindow = mainWindow
@@ -333,6 +328,26 @@ ApplicationWindow {
                 })
             }
         }
+    }
+
+    //
+    // PopupManager FIRST (lower z) — hosts Remove/Add/Edit dialogs
+    //
+    PopupManager {
+        id: popupManager
+        anchors.fill: parent
+        z: 999999
+    }
+
+    //
+    // Restart overlay LAST (higher z) — always above PopupManager
+    //
+    RestartPopup {
+        id: restartPopup
+        anchors.fill: parent
+        frigateRef: mainWindow.frigateRef
+        visible: false
+        z: 2000000
     }
 
     Loader {
@@ -350,19 +365,7 @@ ApplicationWindow {
             c.contentLoader = contentLoader
             c.restartPopup = restartPopup
             c.frigatePollTimer = frigatePollTimer
+            c.popupManager = popupManager   // ⭐ required for closePopup
         }
-    }
-
-    RestartPopup {
-        id: restartPopup
-        frigateRef: mainWindow.frigateRef
-        visible: false
-        z: 999999
-    }
-
-    PopupManager {
-        id: popupManager
-        anchors.fill: parent
-        z: 999999
     }
 }
