@@ -30,10 +30,6 @@ Item {
     property real originalWidth: 0
     property real originalHeight: 0
 
-    property real pressX: 0
-    property real pressY: 0
-    property bool didReparent: false
-
     property bool isOnline: cameraName !== "" && frameQueue !== null
 
     signal removeRequested()
@@ -51,7 +47,6 @@ Item {
     onCameraNameChanged: bindQueue()
     Component.onCompleted: bindQueue()
 
-    // NEVER stopStream here — hiding under fullscreen would kill the main stream
     onVisibleChanged: {
         if (visible && cameraName !== "")
             bindQueue()
@@ -65,7 +60,6 @@ Item {
     }
 
     CameraVideoItem {
-        id: videoFrame
         anchors.fill: parent
         queue: frameQueue
         visible: frameQueue !== null
@@ -76,7 +70,6 @@ Item {
         color: "#000000AA"
         visible: cameraName !== "" && frameQueue === null
         z: 50
-
         Text {
             anchors.centerIn: parent
             text: "Connecting…"
@@ -86,17 +79,14 @@ Item {
     }
 
     CameraTileOverlay {
-        id: overlay
         anchors.fill: parent
         z: 100
         visible: cameraName !== ""
-
         cameraName: tile.cameraName
         resolution: tile.resolution
         fps: tile.fps
         bitrateKbps: tile.bitrateKbps
         codec: tile.codec
-
         onInfoRequested: infoPopup.open()
         onRemoveRequested: tile.handleRemove()
     }
@@ -108,7 +98,6 @@ Item {
         width: 260
         height: 180
         background: Rectangle { color: "#222"; radius: 8 }
-
         Column {
             anchors.centerIn: parent
             spacing: 6
@@ -121,68 +110,83 @@ Item {
     }
 
     MouseArea {
+        id: dragArea
         anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
+        preventStealing: true
 
-        drag.target: dragging ? tile : undefined
+        drag.target: tile
         drag.axis: Drag.XAndYAxis
+        drag.threshold: 8
 
         onPressed: function(mouse) {
+            if (mouse.button !== Qt.LeftButton)
+                return
+
             dragging = false
-            didReparent = false
-            pressX = mouse.x
-            pressY = mouse.y
+
+            // Clear anchors so x/y can change (critical for drag)
+            tile.anchors.centerIn = undefined
+            tile.anchors.horizontalCenter = undefined
+            tile.anchors.verticalCenter = undefined
+            tile.anchors.fill = undefined
+
             originalParent = tile.parent
             originalX = tile.x
             originalY = tile.y
             originalWidth = tile.width
             originalHeight = tile.height
+
+            if (gridRoot && originalParent) {
+                var mapped = originalParent.mapToItem(gridRoot, tile.x, tile.y)
+                tile.parent = gridRoot
+                tile.x = mapped.x
+                tile.y = mapped.y
+                tile.width = originalWidth
+                tile.height = originalHeight
+                tile.z = 99999
+            }
         }
 
-        onPositionChanged: function(mouse) {
-            if (!pressed)
+        onPositionChanged: {
+            if (!drag.active)
                 return
 
-            var dx = mouse.x - pressX
-            var dy = mouse.y - pressY
+            dragging = true
 
-            if (!dragging && (dx * dx + dy * dy) >= 36) {
-                dragging = true
-                if (!didReparent && originalParent && gridRoot) {
-                    didReparent = true
-                    tile.parent = gridRoot
-                    tile.width = originalWidth
-                    tile.height = originalHeight
-                    var p = originalParent.mapToItem(gridRoot, originalX, originalY)
-                    tile.x = p.x
-                    tile.y = p.y
-                }
-            }
-
-            if (dragging && gridRoot && gridRoot.updateHoverIndex) {
-                var global = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
-                gridRoot.updateHoverIndex(global.x, global.y, cameraName)
+            if (gridRoot && gridRoot.updateHoverIndex) {
+                var g = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
+                gridRoot.updateHoverIndex(g.x, g.y, cameraName)
             }
         }
 
         onReleased: {
-            if (dragging) {
-                if (didReparent && originalParent) {
-                    tile.parent = originalParent
-                    tile.x = originalX
-                    tile.y = originalY
-                    tile.width = originalWidth
-                    tile.height = originalHeight
-                }
-                if (mainWindow && mainWindow.dropHandler) {
-                    mainWindow.dropHandler.reorderTile(tileIndex, tile)
-                    if (gridRoot && gridRoot.cameraNames && tile.tileIndex >= 0)
-                        tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
+            dragging = false
+            tile.z = 0
+
+            if (originalParent) {
+                tile.parent = originalParent
+                tile.x = originalX
+                tile.y = originalY
+                tile.width = originalWidth
+                tile.height = originalHeight
+            }
+
+            if (mainWindow && mainWindow.dropHandler && dragArea.drag.active === false) {
+                // Always try reorder if we moved
+            }
+            if (mainWindow && mainWindow.dropHandler) {
+                mainWindow.dropHandler.reorderTile(tileIndex, tile)
+                if (gridRoot && gridRoot.cameraNames &&
+                    tile.tileIndex >= 0 &&
+                    tile.tileIndex < gridRoot.cameraNames.length) {
+                    tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
                 }
             }
-            dragging = false
-            didReparent = false
+
+            // Restore centered layout inside cell
+            tile.anchors.centerIn = originalParent ? originalParent : undefined
         }
 
         onDoubleClicked: {
@@ -199,7 +203,6 @@ Item {
     Menu {
         id: contextMenu
         title: cameraName !== "" ? cameraName : "Camera"
-
         MenuItem {
             text: "Fullscreen"
             enabled: cameraName !== ""
@@ -208,7 +211,6 @@ Item {
                     gridRoot.enterFullscreen(cameraName)
             }
         }
-
         MenuItem {
             text: "Remove Camera"
             enabled: cameraName !== ""
@@ -218,9 +220,8 @@ Item {
 
     function handleRemove() {
         if (frigateRef && cameraName !== "" &&
-            typeof frigateRef.stopStream === "function") {
+            typeof frigateRef.stopStream === "function")
             frigateRef.stopStream(cameraName)
-        }
         if (gridRoot && gridRoot.removeTile)
             gridRoot.removeTile(tileIndex)
     }

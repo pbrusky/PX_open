@@ -11,22 +11,18 @@ Item {
     property string cameraId: ""
     property string cameraName: ""
     property var frigateRef: null
-
     property var liveQueue: null
     property var playbackQueue: null
-
     property bool isOnline: false
     property bool isPlayback: false
     property int playbackPositionMs: 0
     property bool _pxOpened: false
     property bool _queuesBound: false
+    property bool closeEnabled: false
 
-    // Notify parent when user requests close
     signal requestClose()
 
-    onLiveQueueChanged: {
-        liveVideo.queue = liveQueue
-    }
+    onLiveQueueChanged: liveVideo.queue = liveQueue
 
     Rectangle {
         anchors.fill: parent
@@ -34,12 +30,10 @@ Item {
     }
 
     FocusScope {
-        id: keyHandler
         anchors.fill: parent
         focus: true
-
         Keys.onReleased: function(event) {
-            if (event.key === Qt.Key_Escape) {
+            if (event.key === Qt.Key_Escape && root.closeEnabled) {
                 root.requestClose()
                 event.accepted = true
             }
@@ -53,19 +47,11 @@ Item {
         queue: liveQueue
     }
 
-    CameraVideoItem {
-        id: playbackVideo
-        anchors.fill: parent
-        visible: isPlayback && playbackQueue !== null
-        queue: playbackQueue
-    }
-
     Rectangle {
         anchors.fill: parent
         color: "#222"
-        visible: liveQueue === null && !isPlayback
+        visible: liveQueue === null
         z: 1
-
         Text {
             anchors.centerIn: parent
             text: "Connecting…"
@@ -75,43 +61,48 @@ Item {
         }
     }
 
+    // Ignore the double-click that opened us
+    Timer {
+        id: closeArmTimer
+        interval: 450
+        onTriggered: root.closeEnabled = true
+    }
+
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
         z: 2
-        onDoubleClicked: root.requestClose()
+        onDoubleClicked: {
+            if (root.closeEnabled)
+                root.requestClose()
+        }
     }
 
     Rectangle {
-        id: topOverlay
         height: 36
         width: parent.width
         anchors.top: parent.top
         color: "#00000099"
         z: 10
-
         Row {
             anchors.fill: parent
             anchors.margins: 8
             spacing: 16
-
             Text {
                 text: cameraName
                 color: "white"
                 font.pixelSize: 15
                 font.bold: true
             }
-
             Text {
-                text: isPlayback ? "PLAYBACK" : "LIVE"
-                color: isPlayback ? "#FFC107" : "#00C853"
+                text: "LIVE"
+                color: "#00C853"
                 font.pixelSize: 13
             }
         }
     }
 
     Rectangle {
-        id: exitButton
         width: 70
         height: 28
         anchors.top: parent.top
@@ -120,54 +111,35 @@ Item {
         radius: 4
         color: "#000000AA"
         z: 11
-
         Text {
             anchors.centerIn: parent
             text: "Exit"
             color: "white"
             font.pixelSize: 13
         }
-
         MouseArea {
             anchors.fill: parent
-            onClicked: root.requestClose()
+            onClicked: {
+                if (root.closeEnabled)
+                    root.requestClose()
+            }
         }
     }
 
-    Loader {
-        id: timelineLoader
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: 90
-        z: 12
-        asynchronous: true
-        active: false
-        source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
-    }
-
     function open() {
+        closeEnabled = false
         visible = true
         isPlayback = false
-        playbackPositionMs = 0
-        keyHandler.forceActiveFocus()
-
-        Qt.callLater(function() {
-            timelineLoader.active = true
-            if (frigateRef && cameraId !== "") {
-                frigateRef.loadEvents(cameraId)
-                frigateRef.loadRecordings(cameraId)
-            }
-        })
+        closeArmTimer.restart()
     }
 
     function close() {
+        closeArmTimer.stop()
+        closeEnabled = false
         visible = false
-        timelineLoader.active = false
-        _pxOpened = false
-        _queuesBound = false
-        // Parent stops the fullscreen stream — do not stop here
         liveQueue = null
         playbackQueue = null
+        _pxOpened = false
+        _queuesBound = false
     }
 }
