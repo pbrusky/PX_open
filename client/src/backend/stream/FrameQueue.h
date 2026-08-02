@@ -13,23 +13,24 @@ class FrameQueue : public QObject
 public:
     explicit FrameQueue(QObject* parent = nullptr);
 
-    // CPU frames
     Q_INVOKABLE QImage popImage();
     void pushImage(const QImage& img);
 
-    // GPU frames
     ID3D11Texture2D* popTexture();
     void pushTexture(ID3D11Texture2D* tex);
 
-    // Keep only the newest N frames
     void setMaxSize(int size) { m_maxSize = size; }
+
+    // QML can poll this to know MAIN has real frames
+    Q_INVOKABLE bool hasFrames() const;
+    Q_INVOKABLE int frameCount() const;
 
 signals:
     void frameReady();
 
 private:
-    QMutex m_mutex;
-    int m_maxSize = 2;          // critical: keep only 1–2 frames
+    mutable QMutex m_mutex;
+    int m_maxSize = 2;
 
     QImage m_lastImage;
     qint64 m_lastEmitMs = 0;

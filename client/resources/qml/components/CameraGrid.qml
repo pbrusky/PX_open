@@ -21,7 +21,7 @@ Item {
     property var fullscreenCamera: null
     property var fullscreenLiveQueue: null
     property string fullscreenName: ""
-    property bool fullscreenLocked: false   // block exit for a short time after open
+    property bool fullscreenLocked: false
 
     property var cameraOnlineMap: ({})
 
@@ -141,9 +141,6 @@ Item {
         _mainFrameCount = 0
     }
 
-    //
-    // SUB first (grid queue), then MAIN only after real frames arrive
-    //
     function enterFullscreen(cameraName) {
         if (!cameraName || cameraName === "")
             return
@@ -154,6 +151,7 @@ Item {
         disconnectPendingMain()
         upgradeTimer.stop()
 
+        // 1) SUB immediately (grid stream)
         var subQueue = null
         if (frigateRef && typeof frigateRef.getQueue === "function")
             subQueue = frigateRef.getQueue(cameraName)
@@ -177,12 +175,12 @@ Item {
             applyFullscreenItem(cameraName, subQueue)
         }
 
-        // Stop previous camera MAIN only (not the one we just opened)
         if (prevName !== "" && prevName !== cameraName &&
             frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
             frigateRef.stopFullscreenStream(prevName)
         }
 
+        // 2) Start MAIN after short delay; swap only when frames arrive
         upgradeTimer.cameraName = cameraName
         upgradeTimer.restart()
     }
@@ -195,20 +193,25 @@ Item {
 
     Timer {
         id: upgradeTimer
-        interval: 200
+        interval: 250
         property string cameraName: ""
         onTriggered: {
             if (!frigateRef || fullscreenName !== cameraName)
                 return
-            if (typeof frigateRef.getFullscreenQueue !== "function")
+
+            if (typeof frigateRef.getFullscreenQueue !== "function") {
+                console.warn("Fullscreen: getFullscreenQueue missing on frigateRef")
                 return
+            }
 
             var primary = frigateRef.getFullscreenQueue(cameraName)
+            console.log("Fullscreen: got primary queue", primary)
+
             if (!primary)
                 return
 
             if (primary === fullscreenLiveQueue) {
-                console.log("Fullscreen: primary is same object as sub — stay on SUB")
+                console.log("Fullscreen: primary === sub queue, nothing to upgrade")
                 return
             }
 
@@ -217,7 +220,6 @@ Item {
             _mainFrameCount = 0
             mainFrameConn.target = primary
             console.log("Fullscreen: waiting for MAIN frames for", cameraName)
-            // Do NOT swap here — wait for onFrameReady
         }
     }
 
@@ -227,20 +229,17 @@ Item {
         ignoreUnknownSignals: true
 
         function onFrameReady() {
-            if (!_pendingMainQueue || _pendingMainName === "")
-                return
-            if (fullscreenName !== _pendingMainName)
+            if (!_pendingMainQueue || fullscreenName !== _pendingMainName)
                 return
             if (!fullscreenLoader.item)
                 return
 
             _mainFrameCount++
-            // Need several frames so decoder is actually producing
-            if (_mainFrameCount < 3)
+            if (_mainFrameCount < 2)
                 return
 
-            console.log("Fullscreen: swapping SUB → MAIN for", _pendingMainName,
-                        "after", _mainFrameCount, "frames")
+            console.log("Fullscreen: SUB → MAIN for", _pendingMainName,
+                        "frames:", _mainFrameCount)
 
             fullscreenLiveQueue = _pendingMainQueue
             fullscreenLoader.item.liveQueue = _pendingMainQueue
@@ -275,7 +274,7 @@ Item {
 
     function exitFullscreen() {
         if (fullscreenLocked) {
-            console.log("exitFullscreen ignored (locked after open)")
+            console.log("exitFullscreen ignored (locked)")
             return
         }
 
@@ -328,8 +327,6 @@ Item {
         columns: gridContainer.cols
         rowSpacing: 6
         columnSpacing: 6
-
-        // Hide grid while fullscreen so tiles don't steal SUB frames
         opacity: fullscreenName !== "" ? 0 : 1
         enabled: fullscreenName === ""
 
