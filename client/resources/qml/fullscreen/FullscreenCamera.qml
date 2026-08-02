@@ -67,10 +67,10 @@ Item {
 
     Timer {
         id: closeArmTimer
-        interval: 600
+        interval: 800
         onTriggered: {
             root.closeEnabled = true
-            console.log("Fullscreen close armed (double-click or Exit/Esc)")
+            console.log("Fullscreen close armed")
         }
     }
 

@@ -162,7 +162,7 @@ Item {
 
     Timer {
         id: unlockTimer
-        interval: 600
+        interval: 800
         onTriggered: {
             gridContainer.fullscreenLocked = false
             if (fullscreenLoader.item) {
@@ -179,15 +179,15 @@ Item {
         if (!item)
             return
 
-        var name = cameraName ? ("" + cameraName) : ""
+        var name = (cameraName !== undefined && cameraName !== null) ? ("" + cameraName) : ""
 
         try { item.requestClose.disconnect(gridContainer.exitFullscreen) } catch (e) {}
 
         item.cameraId = name
         item.cameraName = name
         item.frigateRef = frigateRef
-        item.subQueue = subQ
-        item.mainQueue = mainQ
+        item.subQueue = subQ !== undefined ? subQ : null
+        item.mainQueue = mainQ !== undefined ? mainQ : null
         item.mainReady = false
 
         console.log("Opening SUB layer", name)
@@ -196,7 +196,7 @@ Item {
 
     function exitFullscreen() {
         if (fullscreenLocked) {
-            console.log("exitFullscreen BLOCKED (locked)")
+            console.log("exitFullscreen BLOCKED")
             return
         }
 
@@ -251,7 +251,7 @@ Item {
         Repeater {
             model: gridContainer.cameraNames
             delegate: Item {
-                property string cameraName: modelData !== undefined ? modelData : ""
+                property string cameraName: modelData !== undefined ? ("" + modelData) : ""
                 property real cellW: (grid.width / Math.max(gridContainer.cols, 1)) - grid.columnSpacing
                 property real cellH: (grid.height / Math.max(gridContainer.rows, 1)) - grid.rowSpacing
                 width: Math.min(cellW, cellH * 16 / 9)
