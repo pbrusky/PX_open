@@ -19,10 +19,14 @@ Item {
     property bool _pxOpened: false
     property bool _queuesBound: false
     property bool closeEnabled: false
+    property string streamLabel: "SUB"
 
     signal requestClose()
 
-    onLiveQueueChanged: liveVideo.queue = liveQueue
+    onLiveQueueChanged: {
+        liveVideo.queue = null
+        liveVideo.queue = liveQueue
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -61,10 +65,9 @@ Item {
         }
     }
 
-    // Ignore the double-click that opened us
     Timer {
         id: closeArmTimer
-        interval: 450
+        interval: 700
         onTriggered: root.closeEnabled = true
     }
 
@@ -99,6 +102,11 @@ Item {
                 color: "#00C853"
                 font.pixelSize: 13
             }
+            Text {
+                text: root.streamLabel
+                color: root.streamLabel === "MAIN" ? "#FFC107" : "#90CAF9"
+                font.pixelSize: 13
+            }
         }
     }
 
@@ -128,6 +136,7 @@ Item {
 
     function open() {
         closeEnabled = false
+        streamLabel = "SUB"
         visible = true
         isPlayback = false
         closeArmTimer.restart()
@@ -141,5 +150,6 @@ Item {
         playbackQueue = null
         _pxOpened = false
         _queuesBound = false
+        streamLabel = "SUB"
     }
 }

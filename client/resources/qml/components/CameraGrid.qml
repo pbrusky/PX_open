@@ -21,8 +21,13 @@ Item {
     property var fullscreenCamera: null
     property var fullscreenLiveQueue: null
     property string fullscreenName: ""
+    property bool fullscreenLocked: false   // block exit for a short time after open
 
     property var cameraOnlineMap: ({})
+
+    property var _pendingMainQueue: null
+    property string _pendingMainName: ""
+    property int _mainFrameCount: 0
 
     function cameraOnline(name) {
         cameraOnlineMap[name] = true
@@ -119,18 +124,26 @@ Item {
         arr[oldIndex] = arr[hoverIndex]
         arr[hoverIndex] = tmp
         cameraNames = arr
-
         hoverIndex = -1
         hoverCameraName = ""
 
         if (tileObj) {
             var newIdx = arr.indexOf(tileObj.cameraName)
-            if (newIdx >= 0) {
+            if (newIdx >= 0)
                 tileObj.tileIndex = newIdx
-            }
         }
     }
 
+    function disconnectPendingMain() {
+        mainFrameConn.target = null
+        _pendingMainQueue = null
+        _pendingMainName = ""
+        _mainFrameCount = 0
+    }
+
+    //
+    // SUB first (grid queue), then MAIN only after real frames arrive
+    //
     function enterFullscreen(cameraName) {
         if (!cameraName || cameraName === "")
             return
@@ -138,16 +151,19 @@ Item {
         console.log("enterFullscreen called for:", cameraName)
 
         var prevName = fullscreenName
+        disconnectPendingMain()
+        upgradeTimer.stop()
 
-        var instantQueue = null
+        var subQueue = null
         if (frigateRef && typeof frigateRef.getQueue === "function")
-            instantQueue = frigateRef.getQueue(cameraName)
+            subQueue = frigateRef.getQueue(cameraName)
 
         fullscreenName = cameraName
         fullscreenCamera = getCamera(cameraName) || { id: cameraName, name: cameraName }
-        fullscreenLiveQueue = instantQueue
+        fullscreenLiveQueue = subQueue
+        fullscreenLocked = true
+        unlockTimer.restart()
 
-        // Cover the whole main window
         if (mainWindow && mainWindow.contentItem) {
             fullscreenLoader.parent = mainWindow.contentItem
             fullscreenLoader.anchors.fill = mainWindow.contentItem
@@ -158,31 +174,80 @@ Item {
         if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0) {
             fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
         } else if (fullscreenLoader.item) {
-            applyFullscreenItem(cameraName, instantQueue)
+            applyFullscreenItem(cameraName, subQueue)
         }
 
+        // Stop previous camera MAIN only (not the one we just opened)
         if (prevName !== "" && prevName !== cameraName &&
             frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
             frigateRef.stopFullscreenStream(prevName)
         }
 
-        // Upgrade to main/sub AFTER a short delay so open isn't cancelled
         upgradeTimer.cameraName = cameraName
         upgradeTimer.restart()
     }
 
     Timer {
+        id: unlockTimer
+        interval: 600
+        onTriggered: gridContainer.fullscreenLocked = false
+    }
+
+    Timer {
         id: upgradeTimer
-        interval: 300
+        interval: 200
         property string cameraName: ""
         onTriggered: {
             if (!frigateRef || fullscreenName !== cameraName)
                 return
             if (typeof frigateRef.getFullscreenQueue !== "function")
                 return
+
             var primary = frigateRef.getFullscreenQueue(cameraName)
-            if (primary && fullscreenName === cameraName && fullscreenLoader.item)
-                fullscreenLoader.item.liveQueue = primary
+            if (!primary)
+                return
+
+            if (primary === fullscreenLiveQueue) {
+                console.log("Fullscreen: primary is same object as sub — stay on SUB")
+                return
+            }
+
+            _pendingMainQueue = primary
+            _pendingMainName = cameraName
+            _mainFrameCount = 0
+            mainFrameConn.target = primary
+            console.log("Fullscreen: waiting for MAIN frames for", cameraName)
+            // Do NOT swap here — wait for onFrameReady
+        }
+    }
+
+    Connections {
+        id: mainFrameConn
+        target: null
+        ignoreUnknownSignals: true
+
+        function onFrameReady() {
+            if (!_pendingMainQueue || _pendingMainName === "")
+                return
+            if (fullscreenName !== _pendingMainName)
+                return
+            if (!fullscreenLoader.item)
+                return
+
+            _mainFrameCount++
+            // Need several frames so decoder is actually producing
+            if (_mainFrameCount < 3)
+                return
+
+            console.log("Fullscreen: swapping SUB → MAIN for", _pendingMainName,
+                        "after", _mainFrameCount, "frames")
+
+            fullscreenLiveQueue = _pendingMainQueue
+            fullscreenLoader.item.liveQueue = _pendingMainQueue
+            if (fullscreenLoader.item.streamLabel !== undefined)
+                fullscreenLoader.item.streamLabel = "MAIN"
+
+            disconnectPendingMain()
         }
     }
 
@@ -198,17 +263,25 @@ Item {
         item.liveQueue = queue
         item._pxOpened = true
         item._queuesBound = true
+        if (item.streamLabel !== undefined)
+            item.streamLabel = "SUB"
 
         try { item.requestClose.disconnect(gridContainer.exitFullscreen) } catch (e) {}
         item.requestClose.connect(gridContainer.exitFullscreen)
 
-        console.log("Opening fullscreen for", cameraName)
+        console.log("Opening fullscreen (SUB first) for", cameraName)
         item.open()
     }
 
     function exitFullscreen() {
+        if (fullscreenLocked) {
+            console.log("exitFullscreen ignored (locked after open)")
+            return
+        }
+
         var name = fullscreenName
         upgradeTimer.stop()
+        disconnectPendingMain()
 
         if (fullscreenLoader.item)
             fullscreenLoader.item.close()
@@ -235,7 +308,6 @@ Item {
             serverViewRoot.openRemoveCameraPopup(cameraId)
     }
 
-    // Highlight target cell while dragging
     Rectangle {
         id: hoverHighlight
         visible: hoverIndex >= 0 && hoverIndex < cameraNames.length
@@ -257,6 +329,10 @@ Item {
         rowSpacing: 6
         columnSpacing: 6
 
+        // Hide grid while fullscreen so tiles don't steal SUB frames
+        opacity: fullscreenName !== "" ? 0 : 1
+        enabled: fullscreenName === ""
+
         Repeater {
             model: gridContainer.cameraNames
 
@@ -269,18 +345,15 @@ Item {
                 height: Math.min(cellH, cellW * 9 / 16)
 
                 CameraTile {
-                    // Position with x/y only — NO anchors.centerIn (breaks drag)
                     x: (parent.width - width) / 2
                     y: (parent.height - height) / 2
                     width: parent.width
                     height: parent.height
-
                     cameraName: cell.cameraName
                     gridRoot: gridContainer
                     frigateRef: gridContainer.frigateRef
                     mainWindow: gridContainer.mainWindow
                     tileIndex: index
-
                     onRemoveRequested: gridContainer.removeTile(index)
                 }
             }
