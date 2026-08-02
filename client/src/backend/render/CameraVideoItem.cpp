@@ -35,7 +35,7 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
     QSGSimpleTextureNode* node = static_cast<QSGSimpleTextureNode*>(oldNode);
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    const bool shouldRender = m_lastPaintMs == 0 || (nowMs - m_lastPaintMs) >= 16;
+    const bool shouldRender = m_lastPaintMs == 0 || (nowMs - m_lastPaintMs) >= 8;
 
     // Pop latest QImage frame
     if (m_queue) {

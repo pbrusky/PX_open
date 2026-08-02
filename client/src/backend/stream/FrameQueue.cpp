@@ -30,7 +30,7 @@ void FrameQueue::pushImage(const QImage& img)
         if (!m_lastImage.isNull() && m_lastImage == img)
             return;
 
-        const bool shouldThrottle = (nowMs - m_lastEmitMs) < 33;
+        const bool shouldThrottle = (nowMs - m_lastEmitMs) < 16;
         if (shouldThrottle && !m_imageQueue.isEmpty())
             return;
 
