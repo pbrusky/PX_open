@@ -23,7 +23,6 @@ Item {
     property string streamType: ""
 
     property var frameQueue: null
-    property var currentFrame
 
     property var originalParent: null
     property real originalX: 0
@@ -31,88 +30,59 @@ Item {
     property real originalWidth: 0
     property real originalHeight: 0
 
-    property bool isOnline: currentFrame !== null && cameraName !== ""
+    property real pressX: 0
+    property real pressY: 0
+    property bool didReparent: false
+
+    property bool isOnline: cameraName !== "" && frameQueue !== null
 
     signal removeRequested()
 
-    QtObject {
-        id: helpers
-
-        function __updateFrameQueueInternal() {
-            // Lazy stream init: only when tile is visible and has a camera
-            tile.currentFrame = null
-
-            if (!tile.visible) {
-                tile.frameQueue = null
-                return
-            }
-
-            if (tile.frigateRef &&
-                tile.cameraName !== "" &&
-                typeof tile.frigateRef.getQueue === "function") {
-
-                tile.frameQueue = tile.frigateRef.getQueue(tile.cameraName)
-
-            } else {
-                tile.frameQueue = null
-            }
+    function bindQueue() {
+        if (tile.frigateRef &&
+            tile.cameraName !== "" &&
+            typeof tile.frigateRef.getQueue === "function") {
+            tile.frameQueue = tile.frigateRef.getQueue(tile.cameraName)
+        } else {
+            tile.frameQueue = null
         }
     }
 
-    onCameraNameChanged: helpers.__updateFrameQueueInternal()
+    onCameraNameChanged: bindQueue()
+    Component.onCompleted: bindQueue()
 
+    // NEVER stopStream here — hiding under fullscreen would kill the main stream
     onVisibleChanged: {
-        helpers.__updateFrameQueueInternal()
-
-        if (!visible &&
-            frigateRef &&
-            cameraName !== "" &&
-            typeof frigateRef.stopStream === "function") {
-            frigateRef.stopStream(cameraName)
-        }
-    }
-
-    onFrameQueueChanged: {
-        frameConn.target = frameQueue
-
-        if (frameQueue) {
-            var img = frameQueue.popImage()
-            if (img) currentFrame = img
-        }
-    }
-
-    Connections {
-        id: frameConn
-        target: frameQueue
-        ignoreUnknownSignals: true
-
-        function onFrameReady() {
-            if (!frameQueue) return
-            var img = frameQueue.popImage()
-            if (img) currentFrame = img
-        }
+        if (visible && cameraName !== "")
+            bindQueue()
     }
 
     Rectangle {
         anchors.fill: parent
         color: "#101010"
         radius: 6
-        visible: currentFrame === null || currentFrame === undefined
+        visible: frameQueue === null
     }
 
     CameraVideoItem {
         id: videoFrame
         anchors.fill: parent
         queue: frameQueue
-        visible: isOnline
+        visible: frameQueue !== null
     }
 
     Rectangle {
-        id: offlineOverlay
         anchors.fill: parent
         color: "#000000AA"
-        visible: cameraName !== "" && !isOnline
+        visible: cameraName !== "" && frameQueue === null
         z: 50
+
+        Text {
+            anchors.centerIn: parent
+            text: "Connecting…"
+            color: "#aaaaaa"
+            font.pixelSize: 14
+        }
     }
 
     CameraTileOverlay {
@@ -155,28 +125,40 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
 
-        drag.target: tile
+        drag.target: dragging ? tile : undefined
         drag.axis: Drag.XAndYAxis
 
-        onPressed: {
+        onPressed: function(mouse) {
             dragging = false
-
+            didReparent = false
+            pressX = mouse.x
+            pressY = mouse.y
             originalParent = tile.parent
             originalX = tile.x
             originalY = tile.y
             originalWidth = tile.width
             originalHeight = tile.height
-
-            tile.parent = gridRoot
-            tile.width = originalWidth
-            tile.height = originalHeight
-            tile.x = originalParent.mapToItem(gridRoot, originalX, originalY).x
-            tile.y = originalParent.mapToItem(gridRoot, originalX, originalY).y
         }
 
-        onPositionChanged: {
-            if (!dragging && drag.active)
+        onPositionChanged: function(mouse) {
+            if (!pressed)
+                return
+
+            var dx = mouse.x - pressX
+            var dy = mouse.y - pressY
+
+            if (!dragging && (dx * dx + dy * dy) >= 36) {
                 dragging = true
+                if (!didReparent && originalParent && gridRoot) {
+                    didReparent = true
+                    tile.parent = gridRoot
+                    tile.width = originalWidth
+                    tile.height = originalHeight
+                    var p = originalParent.mapToItem(gridRoot, originalX, originalY)
+                    tile.x = p.x
+                    tile.y = p.y
+                }
+            }
 
             if (dragging && gridRoot && gridRoot.updateHoverIndex) {
                 var global = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
@@ -185,21 +167,22 @@ Item {
         }
 
         onReleased: {
+            if (dragging) {
+                if (didReparent && originalParent) {
+                    tile.parent = originalParent
+                    tile.x = originalX
+                    tile.y = originalY
+                    tile.width = originalWidth
+                    tile.height = originalHeight
+                }
+                if (mainWindow && mainWindow.dropHandler) {
+                    mainWindow.dropHandler.reorderTile(tileIndex, tile)
+                    if (gridRoot && gridRoot.cameraNames && tile.tileIndex >= 0)
+                        tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
+                }
+            }
             dragging = false
-
-            if (originalParent) {
-                tile.parent = originalParent
-                tile.x = originalX
-                tile.y = originalY
-                tile.width = originalWidth
-                tile.height = originalHeight
-            }
-
-            if (mainWindow && mainWindow.dropHandler) {
-                mainWindow.dropHandler.reorderTile(tileIndex, tile)
-                tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
-                // cameraNameChanged will trigger lazy stream init
-            }
+            didReparent = false
         }
 
         onDoubleClicked: {
@@ -234,12 +217,10 @@ Item {
     }
 
     function handleRemove() {
-        if (frigateRef &&
-            cameraName !== "" &&
+        if (frigateRef && cameraName !== "" &&
             typeof frigateRef.stopStream === "function") {
             frigateRef.stopStream(cameraName)
         }
-
         if (gridRoot && gridRoot.removeTile)
             gridRoot.removeTile(tileIndex)
     }

@@ -1,10 +1,8 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import QtQuick.Layouts 1.15
 
 Item {
     id: gridContainer
-    anchors.fill: parent
     clip: false
     z: 1
 
@@ -22,25 +20,28 @@ Item {
 
     property var fullscreenCamera: null
     property var fullscreenLiveQueue: null
-    property var fullscreenPlaybackQueue: null
-    property bool fullscreenOpening: false
+    property string fullscreenName: ""
 
     property var cameraOnlineMap: ({})
 
     function cameraOnline(name) {
         cameraOnlineMap[name] = true
+        cameraOnlineMap = cameraOnlineMap
         grid.forceLayout()
     }
 
     function cameraOffline(name) {
         cameraOnlineMap[name] = false
+        cameraOnlineMap = cameraOnlineMap
         grid.forceLayout()
     }
 
     function getCamera(name) {
         if (!mainWindow || !mainWindow.cameraList)
             return null
-        return mainWindow.cameraList.find(c => c.name === name)
+        return mainWindow.cameraList.find(function(c) {
+            return c.name === name || c.id === name
+        })
     }
 
     function isCameraOnline(name) {
@@ -52,50 +53,53 @@ Item {
     onCameraNamesChanged: updateGridSize()
 
     function updateGridSize() {
-        let count = cameraNames.length
-        if (count <= 1) {
-            cols = 1; rows = 1
-        } else if (count <= 2) {
-            cols = 2; rows = 1
-        } else if (count <= 4) {
-            cols = 2; rows = 2
-        } else if (count <= 9) {
-            cols = 3; rows = 3
-        } else {
-            let side = Math.ceil(Math.sqrt(count))
-            cols = side
-            rows = side
+        var count = cameraNames.length
+        if (count <= 1) { cols = 1; rows = 1 }
+        else if (count <= 2) { cols = 2; rows = 1 }
+        else if (count <= 4) { cols = 2; rows = 2 }
+        else if (count <= 9) { cols = 3; rows = 3 }
+        else {
+            var side = Math.ceil(Math.sqrt(count))
+            cols = side; rows = side
         }
     }
 
     function dropAt(x, y, cameraName) {
-        if (!cameraName || cameraName === "") return
-        if (cameraNames.indexOf(cameraName) !== -1) return
+        if (!cameraName || cameraName === "")
+            return
+        if (cameraNames.indexOf(cameraName) !== -1)
+            return
 
         cameraNames.push(cameraName)
         cameraNames = cameraNames.slice()
         updateGridSize()
 
-        if (mainWindow && mainWindow.selectedCameraId !== cameraName)
+        if (frigateRef && typeof frigateRef.getQueue === "function")
+            frigateRef.getQueue(cameraName)
+
+        if (mainWindow)
             mainWindow.selectedCameraId = cameraName
     }
 
     function removeTile(index) {
-        if (index < 0 || index >= cameraNames.length) return
+        if (index < 0 || index >= cameraNames.length)
+            return
+        var name = cameraNames[index]
         cameraNames.splice(index, 1)
         cameraNames = cameraNames.slice()
         updateGridSize()
+        if (name && frigateRef && typeof frigateRef.stopStream === "function")
+            frigateRef.stopStream(name)
+        if (name && frigateRef && typeof frigateRef.stopFullscreenStream === "function")
+            frigateRef.stopFullscreenStream(name)
     }
 
     function updateHoverIndex(x, y, cameraName) {
-        if (cols <= 0 || rows <= 0) return
-
-        let cellW = grid.width / cols
-        let cellH = grid.height / rows
-        let col = Math.floor(x / cellW)
-        let row = Math.floor(y / cellH)
-        let idx = row * cols + col
-
+        if (cols <= 0 || rows <= 0)
+            return
+        var col = Math.floor(x / (grid.width / cols))
+        var row = Math.floor(y / (grid.height / rows))
+        var idx = row * cols + col
         hoverIndex = (idx >= 0 && idx < cameraNames.length) ? idx : -1
         hoverCameraName = cameraName
     }
@@ -103,144 +107,124 @@ Item {
     function reorderTilesByTileCenter(oldIndex, tileObj) {
         if (hoverIndex < 0 || hoverIndex >= cameraNames.length || hoverIndex === oldIndex)
             return
-
-        let arr = cameraNames.slice()
-        let tmp = arr[oldIndex]
+        var arr = cameraNames.slice()
+        var tmp = arr[oldIndex]
         arr[oldIndex] = arr[hoverIndex]
         arr[hoverIndex] = tmp
-
         cameraNames = arr
         hoverIndex = -1
-        hoverCameraName = ""
-
-        tileObj.tileIndex = arr.indexOf(tileObj.cameraName)
-        tileObj.cameraName = cameraNames[tileObj.tileIndex]
+        if (tileObj) {
+            tileObj.tileIndex = arr.indexOf(tileObj.cameraName)
+            if (tileObj.tileIndex >= 0)
+                tileObj.cameraName = cameraNames[tileObj.tileIndex]
+        }
     }
 
-    function enterFullscreen(cameraName, liveQueue) {
-        if (!cameraName || cameraName === "") {
-            console.warn("enterFullscreen: empty cameraName")
+    function enterFullscreen(cameraName) {
+        if (!cameraName || cameraName === "")
             return
-        }
 
-        if (fullscreenOpening) {
-            console.log("enterFullscreen: already opening, ignore")
-            return
-        }
-
-        fullscreenOpening = true
         console.log("enterFullscreen called for:", cameraName)
 
-        // Stop any previous fullscreen main stream first
-        if (frigateRef && typeof frigateRef.stopAllFullscreenStreams === "function")
-            frigateRef.stopAllFullscreenStreams()
+        var prevName = fullscreenName
 
-        var primaryQueue = null
-        if (frigateRef && typeof frigateRef.getFullscreenQueue === "function")
-            primaryQueue = frigateRef.getFullscreenQueue(cameraName)
+        var instantQueue = null
+        if (frigateRef && typeof frigateRef.getQueue === "function")
+            instantQueue = frigateRef.getQueue(cameraName)
 
-        console.log("primaryQueue:", primaryQueue)
+        fullscreenName = cameraName
+        fullscreenCamera = getCamera(cameraName) || { id: cameraName, name: cameraName }
+        fullscreenLiveQueue = instantQueue
 
-        var cam = getCamera(cameraName)
-        if (!cam) {
-            cam = { id: cameraName, name: cameraName }
+        // Reparent overlay to the whole application window
+        if (mainWindow && mainWindow.contentItem) {
+            fullscreenLoader.parent = mainWindow.contentItem
+            fullscreenLoader.anchors.fill = mainWindow.contentItem
+        } else {
+            fullscreenLoader.parent = gridContainer
+            fullscreenLoader.anchors.fill = gridContainer
         }
-
-        fullscreenCamera = cam
-        fullscreenLiveQueue = primaryQueue ? primaryQueue : liveQueue
-        fullscreenPlaybackQueue = frigateRef ? frigateRef.getPlaybackQueue(cameraName) : null
-
-        fullscreenLoader.source = ""
+        fullscreenLoader.z = 1000000
         fullscreenLoader.visible = true
 
-        Qt.callLater(function() {
+        if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0)
             fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
+        else if (fullscreenLoader.item)
+            applyFullscreenItem(cameraName, instantQueue)
+
+        // Stop previous main only after switch
+        if (prevName !== "" && prevName !== cameraName &&
+            frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
+            frigateRef.stopFullscreenStream(prevName)
+        }
+
+        Qt.callLater(function() {
+            if (!frigateRef || fullscreenName !== cameraName)
+                return
+            if (typeof frigateRef.getFullscreenQueue !== "function")
+                return
+            var primary = frigateRef.getFullscreenQueue(cameraName)
+            if (primary && fullscreenName === cameraName) {
+                fullscreenLiveQueue = primary
+                if (fullscreenLoader.item)
+                    fullscreenLoader.item.liveQueue = primary
+            }
         })
     }
 
-    function exitFullscreen() {
-        var name = fullscreenCamera
-                   ? (fullscreenCamera.name || fullscreenCamera.id || "")
-                   : ""
+    function applyFullscreenItem(cameraName, queue) {
+        var item = fullscreenLoader.item
+        if (!item)
+            return
 
-        if (fullscreenLoader.item && typeof fullscreenLoader.item.close === "function")
+        item.cameraId = cameraName
+        item.cameraName = cameraName
+        item.frigateRef = frigateRef
+        item.isOnline = true
+        item.liveQueue = queue
+        item._pxOpened = true
+        item._queuesBound = true
+
+        try {
+            item.requestClose.disconnect(gridContainer.exitFullscreen)
+        } catch (e) {}
+        item.requestClose.connect(gridContainer.exitFullscreen)
+
+        console.log("Opening fullscreen for", cameraName)
+        item.open()
+    }
+
+    function exitFullscreen() {
+        var name = fullscreenName
+
+        if (fullscreenLoader.item)
             fullscreenLoader.item.close()
 
         fullscreenLoader.visible = false
-        fullscreenLoader.source = ""
+        fullscreenLoader.parent = gridContainer
+        fullscreenName = ""
         fullscreenCamera = null
         fullscreenLiveQueue = null
-        fullscreenPlaybackQueue = null
-        fullscreenOpening = false
 
-        // Release main stream so next open is fresh
-        if (frigateRef) {
-            if (name !== "" && typeof frigateRef.stopFullscreenStream === "function")
-                frigateRef.stopFullscreenStream(name)
-            else if (typeof frigateRef.stopAllFullscreenStreams === "function")
-                frigateRef.stopAllFullscreenStreams()
+        if (name !== "" && frigateRef &&
+            typeof frigateRef.stopFullscreenStream === "function") {
+            frigateRef.stopFullscreenStream(name)
         }
-    }
-
-    function configureAndOpenFullscreen() {
-        if (!fullscreenLoader.item || !fullscreenCamera)
-            return
-
-        var item = fullscreenLoader.item
-
-        // Avoid double-open
-        if (item._pxOpened === true)
-            return
-        item._pxOpened = true
-
-        item.cameraId      = fullscreenCamera.id || fullscreenCamera.name || ""
-        item.cameraName    = fullscreenCamera.name || fullscreenCamera.id || ""
-        item.frigateRef    = gridContainer.frigateRef
-        item.isOnline      = isCameraOnline(item.cameraName)
-        item.liveQueue     = fullscreenLiveQueue
-        item.playbackQueue = fullscreenPlaybackQueue
-
-        // When fullscreen window closes, clean up streams
-        if (typeof item.close === "function") {
-            item.closing.connect(function() {
-                // optional if Window has closing signal
-            })
-        }
-
-        console.log("Opening fullscreen for", item.cameraName)
-
-        if (typeof item.open === "function")
-            item.open()
-
-        fullscreenOpening = false
     }
 
     function addCamera() {
-        if (serverViewRoot)
+        if (serverViewRoot && serverViewRoot.openAddCameraPopup)
             serverViewRoot.openAddCameraPopup()
     }
 
     function removeCamera(cameraId) {
-        if (serverViewRoot)
+        if (serverViewRoot && serverViewRoot.openRemoveCameraPopup)
             serverViewRoot.openRemoveCameraPopup(cameraId)
-    }
-
-    Connections {
-        target: grid
-
-        function onWidthChanged() {
-            Qt.callLater(() => grid.forceLayout())
-        }
-
-        function onHeightChanged() {
-            Qt.callLater(() => grid.forceLayout())
-        }
     }
 
     Grid {
         id: grid
         anchors.fill: parent
-        clip: false
         columns: gridContainer.cols
         rowSpacing: 6
         columnSpacing: 6
@@ -249,34 +233,22 @@ Item {
             model: gridContainer.cameraNames
 
             delegate: Item {
-                id: tileWrapper
-                z: index
-
                 property string cameraName: modelData
-                property bool isOnline: gridContainer.isCameraOnline(cameraName)
-
-                property real cellW: grid.width / gridContainer.cols - grid.columnSpacing
-                property real cellH: grid.height / gridContainer.rows - grid.rowSpacing
-
-                width:  Math.min(cellW, cellH * 16 / 9)
+                property real cellW: (grid.width / Math.max(gridContainer.cols, 1)) - grid.columnSpacing
+                property real cellH: (grid.height / Math.max(gridContainer.rows, 1)) - grid.rowSpacing
+                width: Math.min(cellW, cellH * 16 / 9)
                 height: Math.min(cellH, cellW * 9 / 16)
 
                 CameraTile {
-                    id: tile
+                    anchors.centerIn: parent
                     width: parent.width
                     height: parent.height
-                    x: (parent.width - width) / 2
-                    y: (parent.height - height) / 2
-
-                    cameraName: tileWrapper.cameraName
-                    isOnline: tileWrapper.isOnline
-
+                    cameraName: parent.cameraName
                     gridRoot: gridContainer
                     frigateRef: gridContainer.frigateRef
                     mainWindow: gridContainer.mainWindow
                     tileIndex: index
-
-                    onRemoveRequested: gridContainer.removeTile(tileIndex)
+                    onRemoveRequested: gridContainer.removeTile(index)
                 }
             }
         }
@@ -286,18 +258,13 @@ Item {
         id: fullscreenLoader
         anchors.fill: parent
         visible: false
-        z: 9999
-        asynchronous: true
-
+        z: 99999
+        asynchronous: false
         onLoaded: {
-            configureAndOpenFullscreen()
+            if (fullscreenName !== "")
+                applyFullscreenItem(fullscreenName, fullscreenLiveQueue)
         }
-
-        Keys.onEscapePressed: gridContainer.exitFullscreen()
     }
 
-    Component.onCompleted: {
-        updateGridSize()
-        Qt.callLater(() => grid.forceLayout())
-    }
+    Component.onCompleted: updateGridSize()
 }

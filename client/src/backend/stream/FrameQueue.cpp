@@ -5,9 +5,6 @@ FrameQueue::FrameQueue(QObject* parent)
 {
 }
 
-// -----------------------------
-// CPU path (QImage)
-// -----------------------------
 QImage FrameQueue::popImage()
 {
     QMutexLocker locker(&m_mutex);
@@ -20,22 +17,23 @@ QImage FrameQueue::popImage()
 
 void FrameQueue::pushImage(const QImage& img)
 {
+    if (img.isNull())
+        return;
+
     {
         QMutexLocker locker(&m_mutex);
 
-        // Drop oldest frames if queue is full
-        while (m_imageQueue.size() >= m_maxSize)
+        // Guard: never dequeue from an empty queue (avoids QList assert)
+        const int maxSize = m_maxSize > 0 ? m_maxSize : 1;
+        while (!m_imageQueue.isEmpty() && m_imageQueue.size() >= maxSize)
             m_imageQueue.dequeue();
 
-        m_imageQueue.enqueue(img);
+        m_imageQueue.enqueue(img.copy()); // deep copy — safe across threads
     }
 
     emit frameReady();
 }
 
-// -----------------------------
-// GPU path (ID3D11Texture2D*)
-// -----------------------------
 ID3D11Texture2D* FrameQueue::popTexture()
 {
     QMutexLocker locker(&m_mutex);
@@ -48,14 +46,15 @@ ID3D11Texture2D* FrameQueue::popTexture()
 
 void FrameQueue::pushTexture(ID3D11Texture2D* tex)
 {
+    if (!tex)
+        return;
+
     {
         QMutexLocker locker(&m_mutex);
 
-        while (m_textureQueue.size() >= m_maxSize) {
-            // Note: we are not releasing the D3D texture here.
-            // If you ever use the GPU path you must release the dropped textures.
+        const int maxSize = m_maxSize > 0 ? m_maxSize : 1;
+        while (!m_textureQueue.isEmpty() && m_textureQueue.size() >= maxSize)
             m_textureQueue.dequeue();
-        }
 
         m_textureQueue.enqueue(tex);
     }

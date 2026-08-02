@@ -1,13 +1,12 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import QtQuick.Window 2.15
 import PxOpen 1.0
 
-Window {
+Item {
     id: root
+    anchors.fill: parent
     visible: false
-    color: "black"
-    flags: Qt.FramelessWindowHint | Qt.Window
+    z: 100000
 
     property string cameraId: ""
     property string cameraName: ""
@@ -22,21 +21,16 @@ Window {
     property bool _pxOpened: false
     property bool _queuesBound: false
 
-    opacity: 0.0
-    Behavior on opacity { NumberAnimation { duration: 80 } }
+    // Notify parent when user requests close
+    signal requestClose()
 
-    function updateQueues() {
-        if (!frigateRef || cameraName === "")
-            return
+    onLiveQueueChanged: {
+        liveVideo.queue = liveQueue
+    }
 
-        // Only bind once per open; parent already passed liveQueue when possible
-        if (!_queuesBound) {
-            if (!liveQueue)
-                liveQueue = frigateRef.getFullscreenQueue(cameraName)
-            if (!playbackQueue)
-                playbackQueue = frigateRef.getPlaybackQueue(cameraName)
-            _queuesBound = true
-        }
+    Rectangle {
+        anchors.fill: parent
+        color: "black"
     }
 
     FocusScope {
@@ -44,51 +38,48 @@ Window {
         anchors.fill: parent
         focus: true
 
-        Keys.onReleased: {
-            if (event.key === Qt.Key_Escape)
-                root.close()
-            event.accepted = true
+        Keys.onReleased: function(event) {
+            if (event.key === Qt.Key_Escape) {
+                root.requestClose()
+                event.accepted = true
+            }
         }
     }
 
-    Rectangle {
-        id: videoArea
+    CameraVideoItem {
+        id: liveVideo
         anchors.fill: parent
-        color: "black"
+        visible: !isPlayback && liveQueue !== null
+        queue: liveQueue
+    }
 
-        CameraVideoItem {
-            id: liveVideo
-            anchors.fill: parent
-            visible: !isPlayback && liveQueue !== null
-            queue: liveQueue
+    CameraVideoItem {
+        id: playbackVideo
+        anchors.fill: parent
+        visible: isPlayback && playbackQueue !== null
+        queue: playbackQueue
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: "#222"
+        visible: liveQueue === null && !isPlayback
+        z: 1
+
+        Text {
+            anchors.centerIn: parent
+            text: "Connecting…"
+            color: "white"
+            font.pixelSize: 24
+            font.bold: true
         }
+    }
 
-        CameraVideoItem {
-            id: playbackVideo
-            anchors.fill: parent
-            visible: isPlayback && playbackQueue !== null
-            queue: playbackQueue
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            color: "#222"
-            visible: liveQueue === null && playbackQueue === null
-
-            Text {
-                anchors.centerIn: parent
-                text: "Connecting…"
-                color: "white"
-                font.pixelSize: 24
-                font.bold: true
-            }
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
-            onDoubleClicked: root.close()
-        }
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        z: 2
+        onDoubleClicked: root.requestClose()
     }
 
     Rectangle {
@@ -97,8 +88,7 @@ Window {
         width: parent.width
         anchors.top: parent.top
         color: "#00000099"
-        opacity: 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
+        z: 10
 
         Row {
             anchors.fill: parent
@@ -129,8 +119,7 @@ Window {
         anchors.margins: 10
         radius: 4
         color: "#000000AA"
-        opacity: 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
+        z: 11
 
         Text {
             anchors.centerIn: parent
@@ -141,7 +130,7 @@ Window {
 
         MouseArea {
             anchors.fill: parent
-            onClicked: root.close()
+            onClicked: root.requestClose()
         }
     }
 
@@ -151,29 +140,20 @@ Window {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: 90
+        z: 12
         asynchronous: true
         active: false
         source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
     }
 
     function open() {
-        updateQueues()
-
         visible = true
-        showFullScreen()
-        opacity = 1.0
-
         isPlayback = false
         playbackPositionMs = 0
-
-        Qt.callLater(function() {
-            topOverlay.opacity = 1.0
-            exitButton.opacity = 1.0
-        })
+        keyHandler.forceActiveFocus()
 
         Qt.callLater(function() {
             timelineLoader.active = true
-
             if (frigateRef && cameraId !== "") {
                 frigateRef.loadEvents(cameraId)
                 frigateRef.loadRecordings(cameraId)
@@ -182,34 +162,12 @@ Window {
     }
 
     function close() {
-        opacity = 0.0
-        topOverlay.opacity = 0.0
-        exitButton.opacity = 0.0
-
-        showNormal()
-
-        // Stop main stream so next fullscreen open is clean
-        if (frigateRef && cameraName !== "" &&
-            typeof frigateRef.stopFullscreenStream === "function") {
-            frigateRef.stopFullscreenStream(cameraName)
-        }
-
+        visible = false
+        timelineLoader.active = false
+        _pxOpened = false
+        _queuesBound = false
+        // Parent stops the fullscreen stream — do not stop here
         liveQueue = null
         playbackQueue = null
-        _queuesBound = false
-        _pxOpened = false
-
-        Qt.callLater(function() {
-            visible = false
-            timelineLoader.active = false
-        })
-    }
-
-    onClosing: {
-        // OS close / Alt+F4
-        if (frigateRef && cameraName !== "" &&
-            typeof frigateRef.stopFullscreenStream === "function") {
-            frigateRef.stopFullscreenStream(cameraName)
-        }
     }
 }
