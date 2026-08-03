@@ -39,13 +39,16 @@ void FrameQueue::pushImage(const QImage& img)
 bool FrameQueue::hasFrames() const
 {
     QMutexLocker locker(&m_mutex);
-    return !m_imageQueue.isEmpty() || !m_lastImage.isNull();
+    // Include GPU texture path used by HQ / fullscreen decode
+    return !m_imageQueue.isEmpty()
+        || !m_lastImage.isNull()
+        || !m_textureQueue.isEmpty();
 }
 
 int FrameQueue::frameCount() const
 {
     QMutexLocker locker(&m_mutex);
-    return m_imageQueue.size();
+    return m_imageQueue.size() + m_textureQueue.size();
 }
 
 ID3D11Texture2D* FrameQueue::popTexture()

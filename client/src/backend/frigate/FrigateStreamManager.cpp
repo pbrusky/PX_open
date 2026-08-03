@@ -94,7 +94,7 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
                                                  bool isFallback)
 {
     qDebug() << "[StreamManager] Starting fullscreen stream:"
-             << url << (isFallback ? "(hq)" : "(main)");
+             << url << (isFallback ? "(fallback/base)" : "(main)");
 
     if (m_fullscreenWorkers.contains(cameraName)) {
         FFmpegWorker* oldW = m_fullscreenWorkers.take(cameraName);
@@ -119,8 +119,17 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     connect(thread, &QThread::finished, worker, &QObject::deleteLater);
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
 
-    // No openInputFailed → *_main fallback path. URL is always the base stream.
-    Q_UNUSED(isFallback);
+    // If main (_main) fails, fall back to base stream once
+    if (!isFallback) {
+        connect(worker, &FFmpegWorker::openInputFailed, this,
+                [this, cameraName, queue](const QString& reason) {
+            qDebug() << "[StreamManager] main stream failed for"
+                     << cameraName << reason << "— falling back to base";
+            m_mainMissing.insert(cameraName);
+            const QString baseUrl = buildRtspUrl(m_serverIp, cameraName);
+            startFullscreenWorker(cameraName, queue, baseUrl, true);
+        }, Qt::QueuedConnection);
+    }
 
     thread->start();
 }
@@ -130,7 +139,6 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     if (cameraName.trimmed().isEmpty() || m_serverIp.trimmed().isEmpty())
         return nullptr;
 
-    // Reuse running worker — do not stop/restart
     if (m_fullscreenQueues.contains(cameraName) &&
         m_fullscreenWorkers.contains(cameraName)) {
         return m_fullscreenQueues[cameraName];
@@ -146,10 +154,14 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     queue->setMaxSize(3);
     m_fullscreenQueues.insert(cameraName, queue);
 
-    // Base stream only (no "_main" — those 404 on your go2rtc)
-    const QString url = buildRtspUrl(m_serverIp, cameraName);
+    // Prefer <name>_main (e.g. test4_main), else base (test1/test2/test3)
+    const bool tryMain = !m_mainMissing.contains(cameraName);
+    const QString url = tryMain
+        ? buildRtspUrl(m_serverIp, cameraName + "_main")
+        : buildRtspUrl(m_serverIp, cameraName);
+
     qDebug() << "[StreamManager] Fullscreen HQ stream:" << url;
-    startFullscreenWorker(cameraName, queue, url, true);
+    startFullscreenWorker(cameraName, queue, url, !tryMain);
 
     return queue;
 }

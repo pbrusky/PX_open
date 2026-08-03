@@ -1,12 +1,13 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Window 2.15
 import PxOpen 1.0
 
-Item {
+Window {
     id: root
-    anchors.fill: parent
     visible: false
-    z: 100000
+    color: "black"
+    flags: Qt.FramelessWindowHint | Qt.Window
 
     property string cameraId: ""
     property string cameraName: ""
@@ -139,6 +140,9 @@ Item {
         closeEnabled = false
         mainReady = false
         visible = true
+        showFullScreen()
+        raise()
+        requestActivate()
         forceActiveFocus()
         closeArmTimer.restart()
         if (mainQueue)
@@ -149,9 +153,17 @@ Item {
         mainPoll.stop()
         closeArmTimer.stop()
         closeEnabled = false
+        showNormal()
         visible = false
         mainReady = false
         subQueue = null
         mainQueue = null
+    }
+
+    onClosing: {
+        if (frigateRef && cameraName !== "" &&
+            typeof frigateRef.stopFullscreenStream === "function") {
+            frigateRef.stopFullscreenStream(cameraName)
+        }
     }
 }

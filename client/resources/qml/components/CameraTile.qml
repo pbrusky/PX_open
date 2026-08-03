@@ -1,7 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import PxOpen 1.0
-import "qrc:/app/resources/qml/components"
 
 Item {
     id: tile
@@ -25,11 +24,8 @@ Item {
     property var frameQueue: null
     property string boundCameraName: ""
 
-    property var originalParent: null
     property real originalX: 0
     property real originalY: 0
-    property real originalWidth: 0
-    property real originalHeight: 0
 
     property bool isOnline: cameraName !== "" && frameQueue !== null
 
@@ -132,34 +128,31 @@ Item {
 
             dragging = false
 
-            // Clear anchors so x/y can change (critical for drag)
             tile.anchors.centerIn = undefined
             tile.anchors.horizontalCenter = undefined
             tile.anchors.verticalCenter = undefined
             tile.anchors.fill = undefined
 
-            originalParent = tile.parent
             originalX = tile.x
             originalY = tile.y
-            originalWidth = tile.width
-            originalHeight = tile.height
 
-            if (gridRoot && originalParent) {
-                var mapped = originalParent.mapToItem(gridRoot, tile.x, tile.y)
-                tile.parent = gridRoot
-                tile.x = mapped.x
-                tile.y = mapped.y
-                tile.width = originalWidth
-                tile.height = originalHeight
-                tile.z = 99999
-            }
+            // Tile above siblings inside the cell
+            tile.z = 99999
+
+            // Cell above all other grid cells
+            if (tile.parent)
+                tile.parent.z = 99999
         }
 
         onPositionChanged: {
-            if (!drag.active)
+            if (!dragArea.drag.active)
                 return
 
             dragging = true
+
+            tile.z = 99999
+            if (tile.parent)
+                tile.parent.z = 99999
 
             if (gridRoot && gridRoot.updateHoverIndex) {
                 var g = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
@@ -168,31 +161,29 @@ Item {
         }
 
         onReleased: {
+            var didDrag = dragging || dragArea.drag.active
+            var fromIndex = tile.tileIndex
+
+            if (didDrag && gridRoot && gridRoot.updateHoverIndex) {
+                var g = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
+                gridRoot.updateHoverIndex(g.x, g.y, cameraName)
+            }
+
             dragging = false
+
             tile.z = 0
+            if (tile.parent)
+                tile.parent.z = 0
 
-            if (originalParent) {
-                tile.parent = originalParent
-                tile.x = originalX
-                tile.y = originalY
-                tile.width = originalWidth
-                tile.height = originalHeight
-            }
+            if (didDrag && fromIndex >= 0 && mainWindow && mainWindow.dropHandler)
+                mainWindow.dropHandler.reorderTile(fromIndex, tile)
 
-            if (mainWindow && mainWindow.dropHandler && dragArea.drag.active === false) {
-                // Always try reorder if we moved
-            }
-            if (mainWindow && mainWindow.dropHandler) {
-                mainWindow.dropHandler.reorderTile(tileIndex, tile)
-                if (gridRoot && gridRoot.cameraNames &&
-                    tile.tileIndex >= 0 &&
-                    tile.tileIndex < gridRoot.cameraNames.length) {
-                    tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
-                }
-            }
+            tile.x = originalX
+            tile.y = originalY
+            tile.anchors.centerIn = tile.parent
 
-            // Restore centered layout inside cell
-            tile.anchors.centerIn = originalParent ? originalParent : undefined
+            if (gridRoot)
+                gridRoot.hoverIndex = -1
         }
 
         onDoubleClicked: {

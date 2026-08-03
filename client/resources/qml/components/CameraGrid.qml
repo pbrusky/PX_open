@@ -48,6 +48,15 @@ Item {
         return frigateRef ? frigateRef.isCameraOnline(name) : false
     }
 
+    function nameAt(i) {
+        if (!cameraNames || i < 0 || i >= cameraNames.length)
+            return ""
+        var n = cameraNames[i]
+        if (n === undefined || n === null)
+            return ""
+        return "" + n
+    }
+
     onCameraNamesChanged: updateGridSize()
     function updateGridSize() {
         var count = cameraNames.length
@@ -109,11 +118,8 @@ Item {
         arr[hoverIndex] = tmp
         cameraNames = arr
         hoverIndex = -1
-        if (tileObj) {
-            var n = arr.indexOf(tileObj.cameraName)
-            if (n >= 0)
-                tileObj.tileIndex = n
-        }
+        if (tileObj)
+            tileObj.tileIndex = arr.indexOf(tileObj.cameraName)
     }
 
     function enterFullscreen(cameraName) {
@@ -137,8 +143,6 @@ Item {
         fullscreenMainQueue = null
         fullscreenLocked = true
         unlockTimer.restart()
-
-        fullscreenLoader.visible = true
 
         if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0) {
             fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
@@ -190,7 +194,9 @@ Item {
         item.mainQueue = mainQ !== undefined ? mainQ : null
         item.mainReady = false
 
-        console.log("Opening SUB layer", name)
+        item.requestClose.connect(gridContainer.exitFullscreen)
+
+        console.log("Opening fullscreen", name)
         item.open()
     }
 
@@ -206,7 +212,6 @@ Item {
         if (fullscreenLoader.item)
             fullscreenLoader.item.close()
 
-        fullscreenLoader.visible = false
         fullscreenName = ""
         fullscreenSubQueue = null
         fullscreenMainQueue = null
@@ -215,6 +220,10 @@ Item {
             typeof frigateRef.stopFullscreenStream === "function") {
             frigateRef.stopFullscreenStream(name)
         }
+
+        Qt.callLater(function() {
+            grid.forceLayout()
+        })
     }
 
     function addCamera() {
@@ -246,27 +255,38 @@ Item {
         rowSpacing: 6
         columnSpacing: 6
         opacity: fullscreenName !== "" ? 0 : 1
-        enabled: fullscreenName === ""
+        clip: false
 
         Repeater {
-            model: gridContainer.cameraNames
+            model: gridContainer.cameraNames.length
+
             delegate: Item {
-                property string cameraName: modelData !== undefined ? ("" + modelData) : ""
-                property real cellW: (grid.width / Math.max(gridContainer.cols, 1)) - grid.columnSpacing
-                property real cellH: (grid.height / Math.max(gridContainer.rows, 1)) - grid.rowSpacing
-                width: Math.min(cellW, cellH * 16 / 9)
-                height: Math.min(cellH, cellW * 9 / 16)
+                id: cell
+                clip: false
+                z: 0
+
+                width: {
+                    var cellW = (grid.width / Math.max(gridContainer.cols, 1)) - grid.columnSpacing
+                    var cellH = (grid.height / Math.max(gridContainer.rows, 1)) - grid.rowSpacing
+                    return Math.min(cellW, cellH * 16 / 9)
+                }
+                height: {
+                    var cellW = (grid.width / Math.max(gridContainer.cols, 1)) - grid.columnSpacing
+                    var cellH = (grid.height / Math.max(gridContainer.rows, 1)) - grid.rowSpacing
+                    return Math.min(cellH, cellW * 9 / 16)
+                }
 
                 CameraTile {
-                    x: (parent.width - width) / 2
-                    y: (parent.height - height) / 2
-                    width: parent.width
-                    height: parent.height
-                    cameraName: parent.cameraName
+                    anchors.centerIn: parent
+                    width: cell.width
+                    height: cell.height
+
+                    cameraName: gridContainer.nameAt(index)
+                    tileIndex: index
+
                     gridRoot: gridContainer
                     frigateRef: gridContainer.frigateRef
                     mainWindow: gridContainer.mainWindow
-                    tileIndex: index
                     onRemoveRequested: gridContainer.removeTile(index)
                 }
             }
@@ -275,9 +295,7 @@ Item {
 
     Loader {
         id: fullscreenLoader
-        anchors.fill: parent
         visible: false
-        z: 99999
         asynchronous: false
         onLoaded: {
             if (fullscreenName !== "")
