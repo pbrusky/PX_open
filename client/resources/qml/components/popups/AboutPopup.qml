@@ -43,6 +43,13 @@ Item {
 
             Rectangle { width: 360; height: 1; color: "#333" }
 
+            // ⭐ VERSION NUMBER
+            Text {
+                text: "Version: " + PX_VERSION
+                color: "lightblue"
+                font.pixelSize: 18
+            }
+
             // Multi-GPU list
             Text {
                 text: AboutInfo.gpuList.length > 0

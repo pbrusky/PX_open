@@ -1,3 +1,4 @@
+// [HEADERS — unchanged except for QFile added]
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -9,6 +10,7 @@
 #include <QIcon>
 #include <QProcess>
 #include <QLoggingCategory>
+#include <QFile>
 
 #include "FrigateAPI.h"
 #include "FrigateCameraManager.h"
@@ -34,6 +36,7 @@ extern "C" {
 #include <libavutil/log.h>
 }
 
+// [UNCHANGED GPU detection]
 bool isAmdGpuPresent()
 {
     QProcess p;
@@ -45,6 +48,7 @@ bool isAmdGpuPresent()
 
 int main(int argc, char *argv[])
 {
+    // [UNCHANGED GPU fallback + Qt setup]
     if (isAmdGpuPresent()) {
         qputenv("QT_OPENGL", "software");
     }
@@ -60,6 +64,7 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
 
+    // [UNCHANGED QML type registrations]
     qmlRegisterSingletonType<AboutInfo>("PxOpen", 1, 0, "AboutInfo",
         [](QQmlEngine*, QJSEngine*) -> QObject* {
             return new AboutInfo();
@@ -81,13 +86,25 @@ int main(int argc, char *argv[])
         });
 
     //
-    // Backend singletons
+    // ⭐ NEW VERSION.TXT SUPPORT
+    //
+    QString version = "unknown";
+    QFile vf("client/version.txt");   // version.txt lives in px_open/client/
+
+    if (vf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        version = QString::fromUtf8(vf.readAll()).trimmed();
+    }
+
+    engine.rootContext()->setContextProperty("PX_VERSION", version);
+
+    //
+    // Backend singletons (unchanged)
     //
     FrigateAPI* frigateApi = new FrigateAPI(&engine);
     FrigateStreamManager* frigateStream = new FrigateStreamManager(&engine);
 
     //
-    // Threaded DiscoveryListener + safe QML proxy
+    // DiscoveryListener thread setup (unchanged)
     //
     DiscoveryListener* discovery = new DiscoveryListener();
     DiscoveryProxy* discoveryProxy = new DiscoveryProxy();
@@ -111,18 +128,21 @@ int main(int argc, char *argv[])
     discoveryThread->start();
 
     //
-    // Load cameras
+    // Load cameras (unchanged)
     //
     frigateApi->setServer("http://10.36.24.104:5000");
     frigateApi->loadCameras();
 
     //
-    // Expose to QML
+    // Expose backend objects to QML (unchanged)
     //
     engine.rootContext()->setContextProperty("frigate", frigateApi);
     engine.rootContext()->setContextProperty("discovery", discoveryProxy);
     engine.rootContext()->setContextProperty("frigateStream", frigateStream);
 
+    //
+    // Load main window (unchanged)
+    //
     engine.load(QUrl("qrc:/app/resources/qml/MainWindow.qml"));
     if (engine.rootObjects().isEmpty())
         return -1;
@@ -131,6 +151,7 @@ int main(int argc, char *argv[])
     QWindow* mainWindow = qobject_cast<QWindow*>(mainWindowObj);
 
 #ifdef Q_OS_WIN
+    // [UNCHANGED Windows icon + window style patch]
     if (mainWindow) {
         HWND hwnd = (HWND)mainWindow->winId();
 
