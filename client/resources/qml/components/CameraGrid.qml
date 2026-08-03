@@ -47,7 +47,6 @@ Item {
             return cameraOnlineMap[name]
         return frigateRef ? frigateRef.isCameraOnline(name) : false
     }
-
     function nameAt(i) {
         if (!cameraNames || i < 0 || i >= cameraNames.length)
             return ""
@@ -85,11 +84,11 @@ Item {
     function removeTile(index) {
         if (index < 0 || index >= cameraNames.length)
             return
-        var name = cameraNames[index]
+        var name = nameAt(index)
         cameraNames.splice(index, 1)
         cameraNames = cameraNames.slice()
         updateGridSize()
-        if (name && frigateRef) {
+        if (name !== "" && frigateRef) {
             if (typeof frigateRef.stopStream === "function")
                 frigateRef.stopStream(name)
             if (typeof frigateRef.stopFullscreenStream === "function")
@@ -118,8 +117,11 @@ Item {
         arr[hoverIndex] = tmp
         cameraNames = arr
         hoverIndex = -1
-        if (tileObj)
-            tileObj.tileIndex = arr.indexOf(tileObj.cameraName)
+        if (tileObj) {
+            var n = arr.indexOf(tileObj.cameraName)
+            if (n >= 0)
+                tileObj.tileIndex = n
+        }
     }
 
     function enterFullscreen(cameraName) {
@@ -144,6 +146,13 @@ Item {
         fullscreenLocked = true
         unlockTimer.restart()
 
+        if (mainWindow && mainWindow.contentItem) {
+            fullscreenLoader.parent = mainWindow.contentItem
+            fullscreenLoader.anchors.fill = mainWindow.contentItem
+            fullscreenLoader.z = 1000000
+        }
+        fullscreenLoader.visible = true
+
         if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0) {
             fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
         } else if (fullscreenLoader.item) {
@@ -166,7 +175,7 @@ Item {
 
     Timer {
         id: unlockTimer
-        interval: 800
+        interval: 1500
         onTriggered: {
             gridContainer.fullscreenLocked = false
             if (fullscreenLoader.item) {
@@ -185,18 +194,17 @@ Item {
 
         var name = (cameraName !== undefined && cameraName !== null) ? ("" + cameraName) : ""
 
+        // Do NOT connect requestClose here — unlockTimer does it after 1.5s
         try { item.requestClose.disconnect(gridContainer.exitFullscreen) } catch (e) {}
 
         item.cameraId = name
         item.cameraName = name
         item.frigateRef = frigateRef
-        item.subQueue = subQ !== undefined ? subQ : null
-        item.mainQueue = mainQ !== undefined ? mainQ : null
+        item.subQueue = (subQ !== undefined) ? subQ : null
+        item.mainQueue = (mainQ !== undefined) ? mainQ : null
         item.mainReady = false
 
-        item.requestClose.connect(gridContainer.exitFullscreen)
-
-        console.log("Opening fullscreen", name)
+        console.log("Opening SUB layer", name)
         item.open()
     }
 
@@ -212,6 +220,12 @@ Item {
         if (fullscreenLoader.item)
             fullscreenLoader.item.close()
 
+        fullscreenLoader.visible = false
+        fullscreenLoader.z = 99999
+        fullscreenLoader.anchors.fill = undefined
+        fullscreenLoader.parent = gridContainer
+        fullscreenLoader.anchors.fill = gridContainer
+
         fullscreenName = ""
         fullscreenSubQueue = null
         fullscreenMainQueue = null
@@ -220,10 +234,6 @@ Item {
             typeof frigateRef.stopFullscreenStream === "function") {
             frigateRef.stopFullscreenStream(name)
         }
-
-        Qt.callLater(function() {
-            grid.forceLayout()
-        })
     }
 
     function addCamera() {
@@ -280,10 +290,8 @@ Item {
                     anchors.centerIn: parent
                     width: cell.width
                     height: cell.height
-
                     cameraName: gridContainer.nameAt(index)
                     tileIndex: index
-
                     gridRoot: gridContainer
                     frigateRef: gridContainer.frigateRef
                     mainWindow: gridContainer.mainWindow
@@ -295,7 +303,9 @@ Item {
 
     Loader {
         id: fullscreenLoader
+        anchors.fill: parent
         visible: false
+        z: 99999
         asynchronous: false
         onLoaded: {
             if (fullscreenName !== "")

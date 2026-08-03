@@ -1,13 +1,12 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import QtQuick.Window 2.15
 import PxOpen 1.0
 
-Window {
+Item {
     id: root
+    anchors.fill: parent
     visible: false
-    color: "black"
-    flags: Qt.FramelessWindowHint | Qt.Window
+    z: 100000
 
     property string cameraId: ""
     property string cameraName: ""
@@ -21,54 +20,80 @@ Window {
 
     signal requestClose()
 
-    onSubQueueChanged: subVideo.queue = subQueue
+    onSubQueueChanged: {
+        subVideo.queue = subQueue
+    }
+
     onMainQueueChanged: {
         mainReady = false
         mainVideo.queue = mainQueue
+        mainFrameConn.target = mainQueue
         if (mainQueue)
-            mainPoll.restart()
+            forceMainTimer.restart()
         else
-            mainPoll.stop()
+            forceMainTimer.stop()
     }
 
-    Rectangle { anchors.fill: parent; color: "black" }
+    Rectangle {
+        anchors.fill: parent
+        color: "black"
+    }
 
+    // SUB always under MAIN (never hide completely — avoids black flash)
     CameraVideoItem {
         id: subVideo
         anchors.fill: parent
         z: 0
-        visible: subQueue !== null
+        visible: true
+        opacity: 1
         queue: subQueue
     }
 
+    // MAIN on top once frames arrive
     CameraVideoItem {
         id: mainVideo
         anchors.fill: parent
         z: 1
-        visible: mainReady && mainQueue !== null
+        visible: true
+        opacity: mainReady ? 1 : 0
         queue: mainQueue
     }
 
+    Connections {
+        id: mainFrameConn
+        target: null
+        ignoreUnknownSignals: true
+
+        function onFrameReady() {
+            if (mainReady)
+                return
+            mainReady = true
+            forceMainTimer.stop()
+            console.log("Fullscreen: SUB → MAIN for", cameraName, "(frameReady)")
+        }
+    }
+
     Timer {
-        id: mainPoll
-        interval: 150
-        repeat: true
-        running: false
+        id: forceMainTimer
+        interval: 1500
+        repeat: false
         onTriggered: {
-            if (!mainQueue) { stop(); return }
+            if (mainReady || !mainQueue)
+                return
             var ok = false
-            try { ok = mainQueue.hasFrames() } catch (e) { stop(); return }
+            try { ok = mainQueue.hasFrames() } catch (e) {}
             if (ok) {
                 mainReady = true
-                console.log("Fullscreen: MAIN layer ON for", cameraName)
-                stop()
+                console.log("Fullscreen: SUB → MAIN for", cameraName, "(timer)")
+            } else {
+                console.log("Fullscreen: still waiting for MAIN frames", cameraName)
             }
         }
     }
 
     Timer {
         id: closeArmTimer
-        interval: 800
+        interval: 1200
         onTriggered: {
             root.closeEnabled = true
             console.log("Fullscreen close armed")
@@ -81,6 +106,7 @@ Window {
         z: 20
         Keys.onReleased: function(event) {
             if (event.key === Qt.Key_Escape && root.closeEnabled) {
+                console.log("Fullscreen ESC exit")
                 root.requestClose()
                 event.accepted = true
             }
@@ -91,9 +117,13 @@ Window {
         anchors.fill: parent
         z: 15
         acceptedButtons: Qt.LeftButton
+
+        // NX-style: double-click exits after arm delay
         onDoubleClicked: {
-            if (root.closeEnabled)
+            if (root.closeEnabled) {
+                console.log("Fullscreen double-click exit")
                 root.requestClose()
+            }
         }
     }
 
@@ -107,8 +137,17 @@ Window {
             anchors.fill: parent
             anchors.margins: 8
             spacing: 16
-            Text { text: root.cameraName; color: "white"; font.pixelSize: 15; font.bold: true }
-            Text { text: "LIVE"; color: "#00C853"; font.pixelSize: 13 }
+            Text {
+                text: root.cameraName
+                color: "white"
+                font.pixelSize: 15
+                font.bold: true
+            }
+            Text {
+                text: "LIVE"
+                color: "#00C853"
+                font.pixelSize: 13
+            }
             Text {
                 text: root.streamLabel
                 color: root.mainReady ? "#FFC107" : "#90CAF9"
@@ -126,12 +165,17 @@ Window {
         radius: 4
         color: "#000000AA"
         z: 31
-        Text { anchors.centerIn: parent; text: "Exit"; color: "white"; font.pixelSize: 13 }
+        Text {
+            anchors.centerIn: parent
+            text: "Exit"
+            color: "white"
+            font.pixelSize: 13
+        }
         MouseArea {
             anchors.fill: parent
             onClicked: {
-                if (root.closeEnabled)
-                    root.requestClose()
+                console.log("Fullscreen Exit button")
+                root.requestClose()
             }
         }
     }
@@ -140,30 +184,24 @@ Window {
         closeEnabled = false
         mainReady = false
         visible = true
-        showFullScreen()
-        raise()
-        requestActivate()
         forceActiveFocus()
         closeArmTimer.restart()
-        if (mainQueue)
-            mainPoll.restart()
+        if (mainQueue) {
+            mainFrameConn.target = mainQueue
+            forceMainTimer.restart()
+        }
     }
 
     function close() {
-        mainPoll.stop()
+        forceMainTimer.stop()
         closeArmTimer.stop()
+        mainFrameConn.target = null
         closeEnabled = false
-        showNormal()
         visible = false
         mainReady = false
         subQueue = null
         mainQueue = null
-    }
-
-    onClosing: {
-        if (frigateRef && cameraName !== "" &&
-            typeof frigateRef.stopFullscreenStream === "function") {
-            frigateRef.stopFullscreenStream(cameraName)
-        }
+        subVideo.queue = null
+        mainVideo.queue = null
     }
 }

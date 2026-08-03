@@ -94,7 +94,7 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
                                                  bool isFallback)
 {
     qDebug() << "[StreamManager] Starting fullscreen stream:"
-             << url << (isFallback ? "(fallback/base)" : "(main)");
+             << url << (isFallback ? "(hq-base)" : "(main)");
 
     if (m_fullscreenWorkers.contains(cameraName)) {
         FFmpegWorker* oldW = m_fullscreenWorkers.take(cameraName);
@@ -119,12 +119,12 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     connect(thread, &QThread::finished, worker, &QObject::deleteLater);
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
 
-    // If main (_main) fails, fall back to base stream once
+    // If *_main 404s, fall back to base once and remember it
     if (!isFallback) {
         connect(worker, &FFmpegWorker::openInputFailed, this,
                 [this, cameraName, queue](const QString& reason) {
-            qDebug() << "[StreamManager] main stream failed for"
-                     << cameraName << reason << "— falling back to base";
+            qDebug() << "[StreamManager] main missing for" << cameraName
+                     << ":" << reason << "— using base stream";
             m_mainMissing.insert(cameraName);
             const QString baseUrl = buildRtspUrl(m_serverIp, cameraName);
             startFullscreenWorker(cameraName, queue, baseUrl, true);
@@ -154,13 +154,14 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     queue->setMaxSize(3);
     m_fullscreenQueues.insert(cameraName, queue);
 
-    // Prefer <name>_main (e.g. test4_main), else base (test1/test2/test3)
+    // Prefer name_main (test4_main). If known missing or 404 → base.
     const bool tryMain = !m_mainMissing.contains(cameraName);
     const QString url = tryMain
-        ? buildRtspUrl(m_serverIp, cameraName + "_main")
+        ? buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"))
         : buildRtspUrl(m_serverIp, cameraName);
 
-    qDebug() << "[StreamManager] Fullscreen HQ stream:" << url;
+    qDebug() << "[StreamManager] Fullscreen HQ stream:" << url
+             << (tryMain ? "(try main)" : "(base)");
     startFullscreenWorker(cameraName, queue, url, !tryMain);
 
     return queue;
