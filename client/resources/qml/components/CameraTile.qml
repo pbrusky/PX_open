@@ -205,9 +205,11 @@ Item {
         codec: tile.codec
         onInfoRequested: {
             console.log("Camera info requested", cameraName)
+            console.log("Camera info requested", cameraName)
             infoPopup.open()
         }
         onRemoveRequested: {
+            console.log("Camera remove requested", cameraName)
             console.log("Camera remove requested", cameraName)
             tile.handleRemove()
         }
