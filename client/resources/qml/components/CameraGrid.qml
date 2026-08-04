@@ -140,9 +140,16 @@ Item {
         if (frigateRef && typeof frigateRef.getQueue === "function")
             subQ = frigateRef.getQueue(cameraName)
 
+        // Start MAIN immediately (no callLater delay)
+        var mainQ = null
+        if (frigateRef && typeof frigateRef.getFullscreenQueue === "function")
+            mainQ = frigateRef.getFullscreenQueue(cameraName)
+
+        console.log("MAIN queue", mainQ)
+
         fullscreenName = cameraName
         fullscreenSubQueue = subQ
-        fullscreenMainQueue = null
+        fullscreenMainQueue = mainQ
         fullscreenLocked = true
         unlockTimer.restart()
 
@@ -156,21 +163,8 @@ Item {
         if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0) {
             fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
         } else if (fullscreenLoader.item) {
-            applyFullscreenItem(cameraName, subQ, null)
+            applyFullscreenItem(cameraName, subQ, mainQ)
         }
-
-        Qt.callLater(function() {
-            if (fullscreenName !== cameraName || !frigateRef)
-                return
-            if (typeof frigateRef.getFullscreenQueue !== "function")
-                return
-
-            var mainQ = frigateRef.getFullscreenQueue(cameraName)
-            console.log("MAIN queue", mainQ)
-            fullscreenMainQueue = mainQ
-            if (fullscreenLoader.item)
-                fullscreenLoader.item.mainQueue = mainQ
-        })
     }
 
     Timer {
@@ -194,7 +188,6 @@ Item {
 
         var name = (cameraName !== undefined && cameraName !== null) ? ("" + cameraName) : ""
 
-        // Do NOT connect requestClose here — unlockTimer does it after 1.5s
         try { item.requestClose.disconnect(gridContainer.exitFullscreen) } catch (e) {}
 
         item.cameraId = name

@@ -257,13 +257,14 @@ void FFmpegWorker::decodeLoop()
     AVDictionary* opts = nullptr;
     av_dict_set(&opts, "rtsp_transport", "tcp", 0);
     av_dict_set(&opts, "rtsp_flags", "prefer_tcp", 0);
-    av_dict_set(&opts, "probesize", "500000", 0);
-    av_dict_set(&opts, "analyzeduration", "1000000", 0);
+    // Faster open / faster 404 on missing *_main
+    av_dict_set(&opts, "probesize", "200000", 0);
+    av_dict_set(&opts, "analyzeduration", "500000", 0);
     av_dict_set(&opts, "fflags", "discardcorrupt+nobuffer+genpts", 0);
     av_dict_set(&opts, "flags", "low_delay", 0);
-    av_dict_set(&opts, "max_delay", "500000", 0);
-    av_dict_set(&opts, "stimeout", "8000000", 0);
-    av_dict_set(&opts, "rw_timeout", "8000000", 0);
+    av_dict_set(&opts, "max_delay", "250000", 0);
+    av_dict_set(&opts, "stimeout", "2000000", 0);   // 2s (was 8s)
+    av_dict_set(&opts, "rw_timeout", "2000000", 0);  // 2s (was 8s)
 
     int ret = avformat_open_input(&fmtCtx, m_url.toUtf8().constData(), nullptr, &opts);
     av_dict_free(&opts);
@@ -278,7 +279,7 @@ void FFmpegWorker::decodeLoop()
 
     fmtCtx->flags |= AVFMT_FLAG_GENPTS;
     fmtCtx->flags |= AVFMT_FLAG_DISCARD_CORRUPT;
-    fmtCtx->max_analyze_duration = 2 * AV_TIME_BASE;
+    fmtCtx->max_analyze_duration = AV_TIME_BASE / 2;  // 0.5s (was 2s)
 
     emit openInputOk();
 
@@ -312,7 +313,8 @@ void FFmpegWorker::decodeLoop()
     }
 
     AVStream* videoStream = fmtCtx->streams[videoStreamIndex];
-    const AVCodec* codec = avcodec_find_decoder(videoStream->codecpar->codec_id);
+    AVCodecParameters* params = videoStream->codecpar;
+    const AVCodec* codec = avcodec_find_decoder(params->codec_id);
     if (!codec) {
         emit openInputFailed("Decoder not found");
         avformat_close_input(&fmtCtx);
@@ -320,146 +322,126 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
-    // ------------------------------------------------------------------
     // Grid (hq=false): software only → stable multi-camera tiles
     // Fullscreen (hq=true): try HW, then fast software fallback
-    // ------------------------------------------------------------------
     const bool tryHw = m_highQuality;
 
-    if (!openCodec(&codecCtx, codec, videoStream->codecpar, tryHw)) {
+    if (!openCodec(&codecCtx, codec, params, tryHw)) {
         emit openInputFailed("Failed to open codec");
         avformat_close_input(&fmtCtx);
         emit finished();
         return;
     }
 
-    bool usingHw = tryHw && (m_hwDeviceCtx != nullptr && m_hwPixFmt != AV_PIX_FMT_NONE);
+    const bool usingHwInitial = (codecCtx->hw_device_ctx != nullptr);
 
-    qDebug() << "[FFmpegWorker] Decoder started"
-             << "codec:" << codec->name
+    qDebug() << "[FFmpegWorker] Decoder started codec:"
+             << (codec->name ? codec->name : "?")
              << "size:" << codecCtx->width << "x" << codecCtx->height
              << "hq:" << m_highQuality
-             << "hw:" << usingHw;
-
-    updateStats(fmtCtx, codecCtx, videoStream);
+             << "hw:" << usingHwInitial;
 
     frame = av_frame_alloc();
     swFrame = av_frame_alloc();
-    emit streamStarted();
+    if (!frame || !swFrame) {
+        if (frame) av_frame_free(&frame);
+        if (swFrame) av_frame_free(&swFrame);
+        avcodec_free_context(&codecCtx);
+        avformat_close_input(&fmtCtx);
+        emit finished();
+        return;
+    }
 
-    qint64 lastStatsMs = QDateTime::currentMSecsSinceEpoch();
-    int lastSrcW = 0, lastSrcH = 0, lastDstW = 0, lastDstH = 0;
-    int consecutiveErrors = 0;
+    AVPacket* packet = av_packet_alloc();
+    if (!packet) {
+        av_frame_free(&frame);
+        av_frame_free(&swFrame);
+        avcodec_free_context(&codecCtx);
+        avformat_close_input(&fmtCtx);
+        emit finished();
+        return;
+    }
+
+    bool usingHw = usingHwInitial;
     int goodFrames = 0;
     int packetsSinceStart = 0;
-    bool triedSwFallback = false;
-
-    const int kMaxOutW = m_highQuality ? 1920 : 640;
-    const int kMaxOutH = m_highQuality ? 1080 : 360;
-
-    auto flushSws = [&]() {
-        if (rgbSws) {
-            sws_freeContext(rgbSws);
-            rgbSws = nullptr;
-        }
-        lastSrcW = lastSrcH = lastDstW = lastDstH = 0;
-    };
+    int lastSrcW = 0, lastSrcH = 0, lastDstW = 0, lastDstH = 0;
+    qint64 lastStatsMs = 0;
 
     auto switchToSoftware = [&](const char* reason) -> bool {
-        if (triedSwFallback || !usingHw)
+        if (!usingHw)
             return false;
 
         qWarning() << "[FFmpegWorker]" << reason << "→ software fallback";
-        flushSws();
-
-        if (!openCodec(&codecCtx, codec, videoStream->codecpar, false))
-            return false;
 
         usingHw = false;
-        triedSwFallback = true;
-        consecutiveErrors = 0;
-        packetsSinceStart = 0;
         goodFrames = 0;
+        packetsSinceStart = 0;
 
-        qDebug() << "[FFmpegWorker] Software decoder active"
-                 << "codec:" << codec->name;
+        if (!openCodec(&codecCtx, codec, params, false)) {
+            qWarning() << "[FFmpegWorker] software fallback open failed";
+            return false;
+        }
         return true;
     };
 
+    // Output caps: grid ~640, fullscreen ~1920
+    const int kMaxOutW = m_highQuality ? 1920 : 640;
+    const int kMaxOutH = m_highQuality ? 1080 : 360;
+
     while (!m_abort) {
-        AVPacket pkt;
-        av_init_packet(&pkt);
-
-        ret = av_read_frame(fmtCtx, &pkt);
-        if (m_abort) {
-            av_packet_unref(&pkt);
-            break;
-        }
-
+        ret = av_read_frame(fmtCtx, packet);
         if (ret < 0) {
-            av_packet_unref(&pkt);
+            if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN)) {
+                QThread::msleep(5);
+                continue;
+            }
             break;
         }
 
-        if (pkt.stream_index != videoStreamIndex) {
-            av_packet_unref(&pkt);
+        if (packet->stream_index != videoStreamIndex) {
+            av_packet_unref(packet);
             continue;
         }
 
         packetsSinceStart++;
 
-        ret = avcodec_send_packet(codecCtx, &pkt);
-        av_packet_unref(&pkt);
-
-        if (m_abort)
-            break;
+        ret = avcodec_send_packet(codecCtx, packet);
+        av_packet_unref(packet);
 
         if (ret < 0) {
-            consecutiveErrors++;
-            if (usingHw && consecutiveErrors >= 3) {
-                switchToSoftware("HW send_packet failing");
-                continue;
+            if (usingHw && packetsSinceStart > 8) {
+                if (!switchToSoftware("HW send_packet failing"))
+                    break;
             }
-            if (consecutiveErrors > 80)
-                break;
             continue;
         }
 
         while (!m_abort) {
             ret = avcodec_receive_frame(codecCtx, frame);
-            if (m_abort)
-                break;
-
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;
-
             if (ret < 0) {
-                consecutiveErrors++;
-                if (usingHw && consecutiveErrors >= 3) {
-                    switchToSoftware("HW receive_frame failing");
-                    break;
+                if (usingHw) {
+                    if (!switchToSoftware("HW receive_frame failing"))
+                        break;
+                    continue;
                 }
-                continue;
+                break;
             }
 
-            consecutiveErrors = 0;
             AVFrame* srcFrame = frame;
 
-            if (usingHw && m_hwPixFmt != AV_PIX_FMT_NONE &&
-                frame->format == m_hwPixFmt) {
-                if (av_hwframe_transfer_data(swFrame, frame, 0) < 0) {
-                    consecutiveErrors++;
-                    if (usingHw && consecutiveErrors >= 3) {
-                        switchToSoftware("HW transfer failing");
+            if (usingHw && frame->format == m_hwPixFmt) {
+                ret = av_hwframe_transfer_data(swFrame, frame, 0);
+                if (ret < 0) {
+                    av_frame_unref(frame);
+                    if (!switchToSoftware("HW transfer failing"))
                         break;
-                    }
                     continue;
                 }
                 srcFrame = swFrame;
             }
-
-            if (srcFrame->width <= 16 || srcFrame->height <= 16)
-                continue;
 
             goodFrames++;
 
@@ -473,8 +455,10 @@ void FFmpegWorker::decodeLoop()
                 dstH = int(dstH * scale) & ~1;
             }
 
-            if (dstW < 2 || dstH < 2)
+            if (dstW < 2 || dstH < 2) {
+                av_frame_unref(frame);
                 continue;
+            }
 
             qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
             if (nowMs - lastStatsMs > 1000) {
@@ -501,12 +485,16 @@ void FFmpegWorker::decodeLoop()
                 lastDstH = dstH;
             }
 
-            if (!rgbSws)
+            if (!rgbSws) {
+                av_frame_unref(frame);
                 continue;
+            }
 
             QImage img(dstW, dstH, QImage::Format_RGB32);
-            if (img.isNull())
+            if (img.isNull()) {
+                av_frame_unref(frame);
                 continue;
+            }
 
             uint8_t* dest[4] = { img.bits(), nullptr, nullptr, nullptr };
             int destStride[4] = { int(img.bytesPerLine()), 0, 0, 0 };
@@ -521,6 +509,8 @@ void FFmpegWorker::decodeLoop()
 
             if (m_queue && !img.isNull() && img.width() > 16 && img.height() > 16)
                 m_queue->pushImage(img);
+
+            av_frame_unref(frame);
         }
 
         // No picture after enough packets while still on HW
@@ -529,6 +519,7 @@ void FFmpegWorker::decodeLoop()
         }
     }
 
+    av_packet_free(&packet);
     if (rgbSws)
         sws_freeContext(rgbSws);
     if (frame)
