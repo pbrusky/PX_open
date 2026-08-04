@@ -75,6 +75,17 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
         emit cameraOffline(cameraName);
     }, Qt::QueuedConnection);
 
+    // Stats on main thread — safe for QML (never connect QML to worker)
+    connect(worker, &FFmpegWorker::statsUpdated, this,
+            [this, cameraName](const QString& resolution, double fps,
+                               int bitrateKbps, const QString& codec) {
+        m_statResolution[cameraName] = resolution;
+        m_statFps[cameraName] = fps;
+        m_statBitrate[cameraName] = bitrateKbps;
+        m_statCodec[cameraName] = codec;
+        emit cameraStatsChanged(cameraName, resolution, fps, bitrateKbps, codec);
+    }, Qt::QueuedConnection);
+
     QThread* thread = new QThread(nullptr);
     m_threads.insert(cameraName, thread);
 
@@ -119,7 +130,6 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     connect(thread, &QThread::finished, worker, &QObject::deleteLater);
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
 
-    // If *_main 404s, fall back to base once and remember it
     if (!isFallback) {
         connect(worker, &FFmpegWorker::openInputFailed, this,
                 [this, cameraName, queue](const QString& reason) {
@@ -154,7 +164,6 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     queue->setMaxSize(3);
     m_fullscreenQueues.insert(cameraName, queue);
 
-    // Prefer name_main (test4_main). If known missing or 404 → base.
     const bool tryMain = !m_mainMissing.contains(cameraName);
     const QString url = tryMain
         ? buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"))
@@ -247,6 +256,11 @@ void FrigateStreamManager::stopStream(const QString& cameraName)
             q->deleteLater();
     }
 
+    m_statResolution.remove(cameraName);
+    m_statFps.remove(cameraName);
+    m_statBitrate.remove(cameraName);
+    m_statCodec.remove(cameraName);
+
     if (m_playbackWorkers.contains(cameraName)) {
         FFmpegWorker* worker = m_playbackWorkers.take(cameraName);
         QThread* thread = m_playbackThreads.take(cameraName);
@@ -295,4 +309,24 @@ QObject* FrigateStreamManager::getWorker(const QString& cameraName)
 QObject* FrigateStreamManager::getPlaybackWorker(const QString& cameraName)
 {
     return m_playbackWorkers.value(cameraName, nullptr);
+}
+
+QString FrigateStreamManager::cameraResolution(const QString& cameraName) const
+{
+    return m_statResolution.value(cameraName);
+}
+
+double FrigateStreamManager::cameraFps(const QString& cameraName) const
+{
+    return m_statFps.value(cameraName, 0.0);
+}
+
+int FrigateStreamManager::cameraBitrateKbps(const QString& cameraName) const
+{
+    return m_statBitrate.value(cameraName, 0);
+}
+
+QString FrigateStreamManager::cameraCodec(const QString& cameraName) const
+{
+    return m_statCodec.value(cameraName);
 }

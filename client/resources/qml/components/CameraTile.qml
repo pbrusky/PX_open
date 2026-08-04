@@ -32,18 +32,58 @@ Item {
     signal removeRequested()
 
     function bindQueue() {
-        if (tile.boundCameraName === tile.cameraName && tile.frameQueue !== null)
-            return
-
         if (tile.frigateRef &&
             tile.cameraName !== "" &&
             typeof tile.frigateRef.getQueue === "function") {
-            tile.boundCameraName = tile.cameraName
-            tile.frameQueue = tile.frigateRef.getQueue(tile.cameraName)
+
+            if (tile.boundCameraName !== tile.cameraName || tile.frameQueue === null) {
+                tile.boundCameraName = tile.cameraName
+                tile.frameQueue = tile.frigateRef.getQueue(tile.cameraName)
+            }
+            pullStats()
         } else {
             tile.boundCameraName = ""
             tile.frameQueue = null
+            tile.resolution = ""
+            tile.fps = 0
+            tile.bitrateKbps = 0
+            tile.codec = ""
         }
+    }
+
+    function pullStats() {
+        if (!frigateRef || cameraName === "")
+            return
+        try {
+            if (typeof frigateRef.cameraResolution === "function")
+                resolution = frigateRef.cameraResolution(cameraName) || ""
+            if (typeof frigateRef.cameraFps === "function")
+                fps = frigateRef.cameraFps(cameraName) || 0
+            if (typeof frigateRef.cameraBitrateKbps === "function")
+                bitrateKbps = frigateRef.cameraBitrateKbps(cameraName) || 0
+            if (typeof frigateRef.cameraCodec === "function")
+                codec = frigateRef.cameraCodec(cameraName) || ""
+        } catch (e) {}
+    }
+
+    Connections {
+        target: frigateRef
+        ignoreUnknownSignals: true
+        function onCameraStatsChanged(name, res, f, br, c) {
+            if (name !== cameraName)
+                return
+            resolution = res || ""
+            fps = f || 0
+            bitrateKbps = br || 0
+            codec = c || ""
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: cameraName !== ""
+        repeat: true
+        onTriggered: pullStats()
     }
 
     onCameraNameChanged: bindQueue()
@@ -80,43 +120,14 @@ Item {
         }
     }
 
-    CameraTileOverlay {
-        anchors.fill: parent
-        z: 100
-        visible: cameraName !== ""
-        cameraName: tile.cameraName
-        resolution: tile.resolution
-        fps: tile.fps
-        bitrateKbps: tile.bitrateKbps
-        codec: tile.codec
-        onInfoRequested: infoPopup.open()
-        onRemoveRequested: tile.handleRemove()
-    }
-
-    Popup {
-        id: infoPopup
-        modal: true
-        focus: true
-        width: 260
-        height: 180
-        background: Rectangle { color: "#222"; radius: 8 }
-        Column {
-            anchors.centerIn: parent
-            spacing: 6
-            Text { text: cameraName; color: "white"; font.pixelSize: 18 }
-            Text { text: "Resolution: " + resolution; color: "white" }
-            Text { text: "Codec: " + codec; color: "white" }
-            Text { text: "FPS: " + fps; color: "white" }
-            Text { text: "Bitrate: " + bitrateKbps + " kbps"; color: "white" }
-        }
-    }
-
+    // Drag layer — BELOW overlay
     MouseArea {
         id: dragArea
         anchors.fill: parent
-        hoverEnabled: true
+        z: 100
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        preventStealing: true
+        hoverEnabled: false
+        propagateComposedEvents: true
 
         drag.target: tile
         drag.axis: Drag.XAndYAxis
@@ -125,42 +136,28 @@ Item {
         onPressed: function(mouse) {
             if (mouse.button !== Qt.LeftButton)
                 return
-
-            dragging = false
-
-            tile.anchors.centerIn = undefined
-            tile.anchors.horizontalCenter = undefined
-            tile.anchors.verticalCenter = undefined
-            tile.anchors.fill = undefined
-
             originalX = tile.x
             originalY = tile.y
-
-            // Tile above siblings inside the cell
+            tile.anchors.centerIn = undefined
             tile.z = 99999
-
-            // Cell above all other grid cells
             if (tile.parent)
                 tile.parent.z = 99999
         }
 
-        onPositionChanged: {
+        onPositionChanged: function(mouse) {
             if (!dragArea.drag.active)
                 return
-
             dragging = true
-
             tile.z = 99999
             if (tile.parent)
                 tile.parent.z = 99999
-
             if (gridRoot && gridRoot.updateHoverIndex) {
                 var g = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
                 gridRoot.updateHoverIndex(g.x, g.y, cameraName)
             }
         }
 
-        onReleased: {
+        onReleased: function(mouse) {
             var didDrag = dragging || dragArea.drag.active
             var fromIndex = tile.tileIndex
 
@@ -170,7 +167,6 @@ Item {
             }
 
             dragging = false
-
             tile.z = 0
             if (tile.parent)
                 tile.parent.z = 0
@@ -186,7 +182,7 @@ Item {
                 gridRoot.hoverIndex = -1
         }
 
-        onDoubleClicked: {
+        onDoubleClicked: function(mouse) {
             if (gridRoot && gridRoot.enterFullscreen && cameraName !== "")
                 gridRoot.enterFullscreen(cameraName)
         }
@@ -194,6 +190,130 @@ Item {
         onClicked: function(mouse) {
             if (mouse.button === Qt.RightButton)
                 contextMenu.open()
+        }
+    }
+
+    // Overlay ABOVE drag — i / x get clicks
+    CameraTileOverlay {
+        anchors.fill: parent
+        z: 300
+        visible: cameraName !== ""
+        cameraName: tile.cameraName
+        resolution: tile.resolution
+        fps: tile.fps
+        bitrateKbps: tile.bitrateKbps
+        codec: tile.codec
+        onInfoRequested: {
+            console.log("Camera info requested", cameraName)
+            infoPopup.open()
+        }
+        onRemoveRequested: {
+            console.log("Camera remove requested", cameraName)
+            tile.handleRemove()
+        }
+    }
+
+    Popup {
+        id: infoPopup
+        modal: true
+        focus: true
+        padding: 0
+        width: 280
+        height: contentCol.implicitHeight + 24
+        x: Math.max(0, (tile.width - width) / 2)
+        y: Math.max(0, (tile.height - height) / 2)
+        background: Rectangle {
+            color: "#1E1E1E"
+            radius: 8
+            border.color: "#3A3A3A"
+            border.width: 1
+        }
+
+        Column {
+            id: contentCol
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 14
+            spacing: 10
+
+            Text {
+                text: cameraName !== "" ? cameraName : "Camera"
+                color: "white"
+                font.pixelSize: 16
+                font.bold: true
+            }
+
+            Rectangle { width: parent.width; height: 1; color: "#333" }
+
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "Status"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: isOnline ? "Online" : "Offline"
+                    color: isOnline ? "#00C853" : "#FF5252"
+                    font.pixelSize: 13
+                }
+            }
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "Resolution"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: resolution !== "" ? resolution : "—"
+                    color: "white"
+                    font.pixelSize: 13
+                }
+            }
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "Codec"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: codec !== "" ? codec.toUpperCase() : "—"
+                    color: "white"
+                    font.pixelSize: 13
+                }
+            }
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "FPS"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: fps > 0 ? fps.toFixed(1) : "—"
+                    color: "white"
+                    font.pixelSize: 13
+                }
+            }
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "Bitrate"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: bitrateKbps > 0 ? (bitrateKbps + " kbps") : "—"
+                    color: "white"
+                    font.pixelSize: 13
+                }
+            }
+
+            Item { width: 1; height: 4 }
+
+            Button {
+                text: "Close"
+                width: parent.width
+                onClicked: infoPopup.close()
+                background: Rectangle {
+                    radius: 6
+                    color: parent.down ? "#444" : "#2A2A2A"
+                }
+                contentItem: Text {
+                    text: parent.text
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
         }
     }
 
@@ -207,6 +327,11 @@ Item {
                 if (gridRoot && gridRoot.enterFullscreen)
                     gridRoot.enterFullscreen(cameraName)
             }
+        }
+        MenuItem {
+            text: "Camera info"
+            enabled: cameraName !== ""
+            onTriggered: infoPopup.open()
         }
         MenuItem {
             text: "Remove Camera"
