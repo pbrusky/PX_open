@@ -1,7 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import PxOpen 1.0
-import "qrc:/app/resources/qml/components"
 
 Item {
     id: tile
@@ -23,16 +22,10 @@ Item {
     property string streamType: ""
 
     property var frameQueue: null
+    property string boundCameraName: ""
 
-    property var originalParent: null
     property real originalX: 0
     property real originalY: 0
-    property real originalWidth: 0
-    property real originalHeight: 0
-
-    property real pressX: 0
-    property real pressY: 0
-    property bool didReparent: false
 
     property bool isOnline: cameraName !== "" && frameQueue !== null
 
@@ -42,16 +35,60 @@ Item {
         if (tile.frigateRef &&
             tile.cameraName !== "" &&
             typeof tile.frigateRef.getQueue === "function") {
-            tile.frameQueue = tile.frigateRef.getQueue(tile.cameraName)
+
+            if (tile.boundCameraName !== tile.cameraName || tile.frameQueue === null) {
+                tile.boundCameraName = tile.cameraName
+                tile.frameQueue = tile.frigateRef.getQueue(tile.cameraName)
+            }
+            pullStats()
         } else {
+            tile.boundCameraName = ""
             tile.frameQueue = null
+            tile.resolution = ""
+            tile.fps = 0
+            tile.bitrateKbps = 0
+            tile.codec = ""
         }
+    }
+
+    function pullStats() {
+        if (!frigateRef || cameraName === "")
+            return
+        try {
+            if (typeof frigateRef.cameraResolution === "function")
+                resolution = frigateRef.cameraResolution(cameraName) || ""
+            if (typeof frigateRef.cameraFps === "function")
+                fps = frigateRef.cameraFps(cameraName) || 0
+            if (typeof frigateRef.cameraBitrateKbps === "function")
+                bitrateKbps = frigateRef.cameraBitrateKbps(cameraName) || 0
+            if (typeof frigateRef.cameraCodec === "function")
+                codec = frigateRef.cameraCodec(cameraName) || ""
+        } catch (e) {}
+    }
+
+    Connections {
+        target: frigateRef
+        ignoreUnknownSignals: true
+        function onCameraStatsChanged(name, res, f, br, c) {
+            if (name !== cameraName)
+                return
+            resolution = res || ""
+            fps = f || 0
+            bitrateKbps = br || 0
+            codec = c || ""
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: cameraName !== ""
+        repeat: true
+        onTriggered: pullStats()
     }
 
     onCameraNameChanged: bindQueue()
     Component.onCompleted: bindQueue()
 
-    // NEVER stopStream here — hiding under fullscreen would kill the main stream
     onVisibleChanged: {
         if (visible && cameraName !== "")
             bindQueue()
@@ -65,7 +102,6 @@ Item {
     }
 
     CameraVideoItem {
-        id: videoFrame
         anchors.fill: parent
         queue: frameQueue
         visible: frameQueue !== null
@@ -76,7 +112,6 @@ Item {
         color: "#000000AA"
         visible: cameraName !== "" && frameQueue === null
         z: 50
-
         Text {
             anchors.centerIn: parent
             text: "Connecting…"
@@ -85,107 +120,69 @@ Item {
         }
     }
 
-    CameraTileOverlay {
-        id: overlay
+    // Drag layer — BELOW overlay
+    MouseArea {
+        id: dragArea
         anchors.fill: parent
         z: 100
-        visible: cameraName !== ""
-
-        cameraName: tile.cameraName
-        resolution: tile.resolution
-        fps: tile.fps
-        bitrateKbps: tile.bitrateKbps
-        codec: tile.codec
-
-        onInfoRequested: infoPopup.open()
-        onRemoveRequested: tile.handleRemove()
-    }
-
-    Popup {
-        id: infoPopup
-        modal: true
-        focus: true
-        width: 260
-        height: 180
-        background: Rectangle { color: "#222"; radius: 8 }
-
-        Column {
-            anchors.centerIn: parent
-            spacing: 6
-            Text { text: cameraName; color: "white"; font.pixelSize: 18 }
-            Text { text: "Resolution: " + resolution; color: "white" }
-            Text { text: "Codec: " + codec; color: "white" }
-            Text { text: "FPS: " + fps; color: "white" }
-            Text { text: "Bitrate: " + bitrateKbps + " kbps"; color: "white" }
-        }
-    }
-
-    MouseArea {
-        anchors.fill: parent
-        hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
+        hoverEnabled: false
+        propagateComposedEvents: true
 
-        drag.target: dragging ? tile : undefined
+        drag.target: tile
         drag.axis: Drag.XAndYAxis
+        drag.threshold: 8
 
         onPressed: function(mouse) {
-            dragging = false
-            didReparent = false
-            pressX = mouse.x
-            pressY = mouse.y
-            originalParent = tile.parent
+            if (mouse.button !== Qt.LeftButton)
+                return
             originalX = tile.x
             originalY = tile.y
-            originalWidth = tile.width
-            originalHeight = tile.height
+            tile.anchors.centerIn = undefined
+            tile.z = 99999
+            if (tile.parent)
+                tile.parent.z = 99999
         }
 
         onPositionChanged: function(mouse) {
-            if (!pressed)
+            if (!dragArea.drag.active)
                 return
-
-            var dx = mouse.x - pressX
-            var dy = mouse.y - pressY
-
-            if (!dragging && (dx * dx + dy * dy) >= 36) {
-                dragging = true
-                if (!didReparent && originalParent && gridRoot) {
-                    didReparent = true
-                    tile.parent = gridRoot
-                    tile.width = originalWidth
-                    tile.height = originalHeight
-                    var p = originalParent.mapToItem(gridRoot, originalX, originalY)
-                    tile.x = p.x
-                    tile.y = p.y
-                }
-            }
-
-            if (dragging && gridRoot && gridRoot.updateHoverIndex) {
-                var global = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
-                gridRoot.updateHoverIndex(global.x, global.y, cameraName)
+            dragging = true
+            tile.z = 99999
+            if (tile.parent)
+                tile.parent.z = 99999
+            if (gridRoot && gridRoot.updateHoverIndex) {
+                var g = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
+                gridRoot.updateHoverIndex(g.x, g.y, cameraName)
             }
         }
 
-        onReleased: {
-            if (dragging) {
-                if (didReparent && originalParent) {
-                    tile.parent = originalParent
-                    tile.x = originalX
-                    tile.y = originalY
-                    tile.width = originalWidth
-                    tile.height = originalHeight
-                }
-                if (mainWindow && mainWindow.dropHandler) {
-                    mainWindow.dropHandler.reorderTile(tileIndex, tile)
-                    if (gridRoot && gridRoot.cameraNames && tile.tileIndex >= 0)
-                        tile.cameraName = gridRoot.cameraNames[tile.tileIndex]
-                }
+        onReleased: function(mouse) {
+            var didDrag = dragging || dragArea.drag.active
+            var fromIndex = tile.tileIndex
+
+            if (didDrag && gridRoot && gridRoot.updateHoverIndex) {
+                var g = tile.mapToItem(gridRoot, tile.width / 2, tile.height / 2)
+                gridRoot.updateHoverIndex(g.x, g.y, cameraName)
             }
+
             dragging = false
-            didReparent = false
+            tile.z = 0
+            if (tile.parent)
+                tile.parent.z = 0
+
+            if (didDrag && fromIndex >= 0 && mainWindow && mainWindow.dropHandler)
+                mainWindow.dropHandler.reorderTile(fromIndex, tile)
+
+            tile.x = originalX
+            tile.y = originalY
+            tile.anchors.centerIn = tile.parent
+
+            if (gridRoot)
+                gridRoot.hoverIndex = -1
         }
 
-        onDoubleClicked: {
+        onDoubleClicked: function(mouse) {
             if (gridRoot && gridRoot.enterFullscreen && cameraName !== "")
                 gridRoot.enterFullscreen(cameraName)
         }
@@ -196,10 +193,135 @@ Item {
         }
     }
 
+    // Overlay ABOVE drag — i / x get clicks
+    CameraTileOverlay {
+        anchors.fill: parent
+        z: 300
+        visible: cameraName !== ""
+        cameraName: tile.cameraName
+        resolution: tile.resolution
+        fps: tile.fps
+        bitrateKbps: tile.bitrateKbps
+        codec: tile.codec
+        onInfoRequested: {
+            console.log("Camera info requested", cameraName)
+            console.log("Camera info requested", cameraName)
+            infoPopup.open()
+        }
+        onRemoveRequested: {
+            console.log("Camera remove requested", cameraName)
+            console.log("Camera remove requested", cameraName)
+            tile.handleRemove()
+        }
+    }
+
+    Popup {
+        id: infoPopup
+        modal: true
+        focus: true
+        padding: 0
+        width: 280
+        height: contentCol.implicitHeight + 24
+        x: Math.max(0, (tile.width - width) / 2)
+        y: Math.max(0, (tile.height - height) / 2)
+        background: Rectangle {
+            color: "#1E1E1E"
+            radius: 8
+            border.color: "#3A3A3A"
+            border.width: 1
+        }
+
+        Column {
+            id: contentCol
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 14
+            spacing: 10
+
+            Text {
+                text: cameraName !== "" ? cameraName : "Camera"
+                color: "white"
+                font.pixelSize: 16
+                font.bold: true
+            }
+
+            Rectangle { width: parent.width; height: 1; color: "#333" }
+
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "Status"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: isOnline ? "Online" : "Offline"
+                    color: isOnline ? "#00C853" : "#FF5252"
+                    font.pixelSize: 13
+                }
+            }
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "Resolution"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: resolution !== "" ? resolution : "—"
+                    color: "white"
+                    font.pixelSize: 13
+                }
+            }
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "Codec"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: codec !== "" ? codec.toUpperCase() : "—"
+                    color: "white"
+                    font.pixelSize: 13
+                }
+            }
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "FPS"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: fps > 0 ? fps.toFixed(1) : "—"
+                    color: "white"
+                    font.pixelSize: 13
+                }
+            }
+            Row {
+                spacing: 8
+                width: parent.width
+                Text { text: "Bitrate"; color: "#888"; font.pixelSize: 13; width: 90 }
+                Text {
+                    text: bitrateKbps > 0 ? (bitrateKbps + " kbps") : "—"
+                    color: "white"
+                    font.pixelSize: 13
+                }
+            }
+
+            Item { width: 1; height: 4 }
+
+            Button {
+                text: "Close"
+                width: parent.width
+                onClicked: infoPopup.close()
+                background: Rectangle {
+                    radius: 6
+                    color: parent.down ? "#444" : "#2A2A2A"
+                }
+                contentItem: Text {
+                    text: parent.text
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+        }
+    }
+
     Menu {
         id: contextMenu
         title: cameraName !== "" ? cameraName : "Camera"
-
         MenuItem {
             text: "Fullscreen"
             enabled: cameraName !== ""
@@ -208,7 +330,11 @@ Item {
                     gridRoot.enterFullscreen(cameraName)
             }
         }
-
+        MenuItem {
+            text: "Camera info"
+            enabled: cameraName !== ""
+            onTriggered: infoPopup.open()
+        }
         MenuItem {
             text: "Remove Camera"
             enabled: cameraName !== ""
@@ -218,9 +344,8 @@ Item {
 
     function handleRemove() {
         if (frigateRef && cameraName !== "" &&
-            typeof frigateRef.stopStream === "function") {
+            typeof frigateRef.stopStream === "function")
             frigateRef.stopStream(cameraName)
-        }
         if (gridRoot && gridRoot.removeTile)
             gridRoot.removeTile(tileIndex)
     }

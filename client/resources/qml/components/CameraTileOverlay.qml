@@ -14,106 +14,126 @@ Item {
     signal infoRequested()
     signal removeRequested()
 
-    property bool hovered: false
-
-    // Hover detection
-    MouseArea {
-        anchors.fill: parent
-        hoverEnabled: true
-        acceptedButtons: Qt.NoButton
-        onEntered: overlay.hovered = true
-        onExited: overlay.hovered = false
+    // Qt 6: stays true while over children (buttons) — no flicker
+    HoverHandler {
+        id: hover
     }
 
-    // NX-style dark tint
+    property bool hovered: hover.hovered
+
     Rectangle {
         anchors.fill: parent
         radius: 6
         color: "#000000"
-        opacity: hovered ? 0.28 : 0.0
+        opacity: hovered ? 0.22 : 0.0
         Behavior on opacity { NumberAnimation { duration: 120 } }
     }
 
-    // Camera name pill (bottom-left)
     Rectangle {
-        id: namePill
         anchors.left: parent.left
         anchors.bottom: parent.bottom
-        anchors.leftMargin: 10
-        anchors.bottomMargin: 10
-        radius: 12
-        color: "#000000AA"
-        opacity: hovered ? 1.0 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
-
-        height: 26
-        width: textName.contentWidth + 20
+        anchors.leftMargin: 8
+        anchors.bottomMargin: 8
+        radius: 10
+        color: "#000000B0"
+        height: 24
+        width: nameText.contentWidth + 16
+        opacity: cameraName !== "" ? 1.0 : 0.0
 
         Text {
-            id: textName
+            id: nameText
             anchors.centerIn: parent
             text: cameraName
             color: "white"
-            font.pixelSize: 14
+            font.pixelSize: 12
+            font.bold: true
         }
     }
 
-    // Top-right button row
-    Row {
-        id: buttonRow
-        spacing: 8
-        anchors.top: parent.top
+    Rectangle {
         anchors.right: parent.right
-        anchors.topMargin: 10
-        anchors.rightMargin: 10
-
-        opacity: hovered ? 1.0 : 0.0
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 8
+        anchors.bottomMargin: 8
+        radius: 10
+        color: "#000000B0"
+        height: 24
+        width: statsText.contentWidth + 16
+        opacity: hovered && (resolution !== "" || fps > 0) ? 1.0 : 0.0
         Behavior on opacity { NumberAnimation { duration: 120 } }
 
-        // Info button
-        Rectangle {
-            id: infoBtn
-            width: 26
-            height: 26
-            radius: 13
-            color: "#000000AA"
+        Text {
+            id: statsText
+            anchors.centerIn: parent
+            color: "#E0E0E0"
+            font.pixelSize: 11
+            text: {
+                var parts = []
+                if (resolution !== "")
+                    parts.push(resolution)
+                if (fps > 0)
+                    parts.push(fps.toFixed(0) + " fps")
+                if (bitrateKbps > 0)
+                    parts.push(bitrateKbps + " kbps")
+                if (codec !== "")
+                    parts.push(codec.toUpperCase())
+                return parts.join("  ·  ")
+            }
+        }
+    }
 
-            scale: hovered ? 1.0 : 0.85
-            Behavior on scale { NumberAnimation { duration: 120 } }
+    Row {
+        spacing: 6
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 8
+        anchors.rightMargin: 8
+        opacity: hovered ? 1.0 : 0.0
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+        z: 10
+
+        Rectangle {
+            width: 28
+            height: 28
+            radius: 14
+            color: infoMa.containsMouse ? "#333333EE" : "#000000B0"
 
             Text {
                 anchors.centerIn: parent
                 text: "\u2139"
                 color: "white"
-                font.pixelSize: 16
+                font.pixelSize: 15
             }
 
             MouseArea {
+                id: infoMa
                 anchors.fill: parent
+                hoverEnabled: true
+                preventStealing: true
+                acceptedButtons: Qt.LeftButton
                 onClicked: overlay.infoRequested()
             }
         }
 
-        // Close button
         Rectangle {
-            id: closeBtn
-            width: 26
-            height: 26
-            radius: 13
-            color: "#000000AA"
-
-            scale: hovered ? 1.0 : 0.85
-            Behavior on scale { NumberAnimation { duration: 120 } }
+            width: 28
+            height: 28
+            radius: 14
+            color: closeMa.containsMouse ? "#5A1A1AEE" : "#000000B0"
 
             Text {
                 anchors.centerIn: parent
                 text: "\u2715"
                 color: "white"
-                font.pixelSize: 16
+                font.pixelSize: 14
             }
 
             MouseArea {
+                id: closeMa
                 anchors.fill: parent
+                hoverEnabled: true
+                preventStealing: true
+                acceptedButtons: Qt.LeftButton
                 onClicked: overlay.removeRequested()
             }
         }

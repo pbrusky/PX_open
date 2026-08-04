@@ -18,9 +18,10 @@ Item {
     property int hoverIndex: -1
     property string hoverCameraName: ""
 
-    property var fullscreenCamera: null
-    property var fullscreenLiveQueue: null
     property string fullscreenName: ""
+    property var fullscreenSubQueue: null
+    property var fullscreenMainQueue: null
+    property bool fullscreenLocked: false
 
     property var cameraOnlineMap: ({})
 
@@ -29,13 +30,11 @@ Item {
         cameraOnlineMap = cameraOnlineMap
         grid.forceLayout()
     }
-
     function cameraOffline(name) {
         cameraOnlineMap[name] = false
         cameraOnlineMap = cameraOnlineMap
         grid.forceLayout()
     }
-
     function getCamera(name) {
         if (!mainWindow || !mainWindow.cameraList)
             return null
@@ -43,15 +42,21 @@ Item {
             return c.name === name || c.id === name
         })
     }
-
     function isCameraOnline(name) {
         if (cameraOnlineMap.hasOwnProperty(name))
             return cameraOnlineMap[name]
         return frigateRef ? frigateRef.isCameraOnline(name) : false
     }
+    function nameAt(i) {
+        if (!cameraNames || i < 0 || i >= cameraNames.length)
+            return ""
+        var n = cameraNames[i]
+        if (n === undefined || n === null)
+            return ""
+        return "" + n
+    }
 
     onCameraNamesChanged: updateGridSize()
-
     function updateGridSize() {
         var count = cameraNames.length
         if (count <= 1) { cols = 1; rows = 1 }
@@ -65,18 +70,13 @@ Item {
     }
 
     function dropAt(x, y, cameraName) {
-        if (!cameraName || cameraName === "")
+        if (!cameraName || cameraNames.indexOf(cameraName) !== -1)
             return
-        if (cameraNames.indexOf(cameraName) !== -1)
-            return
-
         cameraNames.push(cameraName)
         cameraNames = cameraNames.slice()
         updateGridSize()
-
         if (frigateRef && typeof frigateRef.getQueue === "function")
             frigateRef.getQueue(cameraName)
-
         if (mainWindow)
             mainWindow.selectedCameraId = cameraName
     }
@@ -84,28 +84,32 @@ Item {
     function removeTile(index) {
         if (index < 0 || index >= cameraNames.length)
             return
-        var name = cameraNames[index]
+        var name = nameAt(index)
         cameraNames.splice(index, 1)
         cameraNames = cameraNames.slice()
         updateGridSize()
-        if (name && frigateRef && typeof frigateRef.stopStream === "function")
-            frigateRef.stopStream(name)
-        if (name && frigateRef && typeof frigateRef.stopFullscreenStream === "function")
-            frigateRef.stopFullscreenStream(name)
+        if (name !== "" && frigateRef) {
+            if (typeof frigateRef.stopStream === "function")
+                frigateRef.stopStream(name)
+            if (typeof frigateRef.stopFullscreenStream === "function")
+                frigateRef.stopFullscreenStream(name)
+        }
     }
 
     function updateHoverIndex(x, y, cameraName) {
-        if (cols <= 0 || rows <= 0)
+        if (cols <= 0 || rows <= 0 || grid.width <= 0)
             return
         var col = Math.floor(x / (grid.width / cols))
         var row = Math.floor(y / (grid.height / rows))
         var idx = row * cols + col
         hoverIndex = (idx >= 0 && idx < cameraNames.length) ? idx : -1
-        hoverCameraName = cameraName
+        hoverCameraName = cameraName || ""
     }
 
     function reorderTilesByTileCenter(oldIndex, tileObj) {
-        if (hoverIndex < 0 || hoverIndex >= cameraNames.length || hoverIndex === oldIndex)
+        if (hoverIndex < 0 || oldIndex < 0 || hoverIndex === oldIndex)
+            return
+        if (hoverIndex >= cameraNames.length || oldIndex >= cameraNames.length)
             return
         var arr = cameraNames.slice()
         var tmp = arr[oldIndex]
@@ -114,9 +118,9 @@ Item {
         cameraNames = arr
         hoverIndex = -1
         if (tileObj) {
-            tileObj.tileIndex = arr.indexOf(tileObj.cameraName)
-            if (tileObj.tileIndex >= 0)
-                tileObj.cameraName = cameraNames[tileObj.tileIndex]
+            var n = arr.indexOf(tileObj.cameraName)
+            if (n >= 0)
+                tileObj.tileIndex = n
         }
     }
 
@@ -124,87 +128,100 @@ Item {
         if (!cameraName || cameraName === "")
             return
 
-        console.log("enterFullscreen called for:", cameraName)
+        console.log("enterFullscreen", cameraName)
 
         var prevName = fullscreenName
-
-        var instantQueue = null
-        if (frigateRef && typeof frigateRef.getQueue === "function")
-            instantQueue = frigateRef.getQueue(cameraName)
-
-        fullscreenName = cameraName
-        fullscreenCamera = getCamera(cameraName) || { id: cameraName, name: cameraName }
-        fullscreenLiveQueue = instantQueue
-
-        // Reparent overlay to the whole application window
-        if (mainWindow && mainWindow.contentItem) {
-            fullscreenLoader.parent = mainWindow.contentItem
-            fullscreenLoader.anchors.fill = mainWindow.contentItem
-        } else {
-            fullscreenLoader.parent = gridContainer
-            fullscreenLoader.anchors.fill = gridContainer
-        }
-        fullscreenLoader.z = 1000000
-        fullscreenLoader.visible = true
-
-        if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0)
-            fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
-        else if (fullscreenLoader.item)
-            applyFullscreenItem(cameraName, instantQueue)
-
-        // Stop previous main only after switch
         if (prevName !== "" && prevName !== cameraName &&
             frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
             frigateRef.stopFullscreenStream(prevName)
         }
 
-        Qt.callLater(function() {
-            if (!frigateRef || fullscreenName !== cameraName)
-                return
-            if (typeof frigateRef.getFullscreenQueue !== "function")
-                return
-            var primary = frigateRef.getFullscreenQueue(cameraName)
-            if (primary && fullscreenName === cameraName) {
-                fullscreenLiveQueue = primary
-                if (fullscreenLoader.item)
-                    fullscreenLoader.item.liveQueue = primary
-            }
-        })
+        var subQ = null
+        if (frigateRef && typeof frigateRef.getQueue === "function")
+            subQ = frigateRef.getQueue(cameraName)
+
+        // Start MAIN immediately (no callLater delay)
+        var mainQ = null
+        if (frigateRef && typeof frigateRef.getFullscreenQueue === "function")
+            mainQ = frigateRef.getFullscreenQueue(cameraName)
+
+        console.log("MAIN queue", mainQ)
+
+        fullscreenName = cameraName
+        fullscreenSubQueue = subQ
+        fullscreenMainQueue = mainQ
+        fullscreenLocked = true
+        unlockTimer.restart()
+
+        if (mainWindow && mainWindow.contentItem) {
+            fullscreenLoader.parent = mainWindow.contentItem
+            fullscreenLoader.anchors.fill = mainWindow.contentItem
+            fullscreenLoader.z = 1000000
+        }
+        fullscreenLoader.visible = true
+
+        if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0) {
+            fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
+        } else if (fullscreenLoader.item) {
+            applyFullscreenItem(cameraName, subQ, mainQ)
+        }
     }
 
-    function applyFullscreenItem(cameraName, queue) {
+    Timer {
+        id: unlockTimer
+        interval: 1500
+        onTriggered: {
+            gridContainer.fullscreenLocked = false
+            if (fullscreenLoader.item) {
+                try {
+                    fullscreenLoader.item.requestClose.disconnect(gridContainer.exitFullscreen)
+                } catch (e) {}
+                fullscreenLoader.item.requestClose.connect(gridContainer.exitFullscreen)
+            }
+        }
+    }
+
+    function applyFullscreenItem(cameraName, subQ, mainQ) {
         var item = fullscreenLoader.item
         if (!item)
             return
 
-        item.cameraId = cameraName
-        item.cameraName = cameraName
+        var name = (cameraName !== undefined && cameraName !== null) ? ("" + cameraName) : ""
+
+        try { item.requestClose.disconnect(gridContainer.exitFullscreen) } catch (e) {}
+
+        item.cameraId = name
+        item.cameraName = name
         item.frigateRef = frigateRef
-        item.isOnline = true
-        item.liveQueue = queue
-        item._pxOpened = true
-        item._queuesBound = true
+        item.subQueue = (subQ !== undefined) ? subQ : null
+        item.mainQueue = (mainQ !== undefined) ? mainQ : null
+        item.mainReady = false
 
-        try {
-            item.requestClose.disconnect(gridContainer.exitFullscreen)
-        } catch (e) {}
-        item.requestClose.connect(gridContainer.exitFullscreen)
-
-        console.log("Opening fullscreen for", cameraName)
+        console.log("Opening SUB layer", name)
         item.open()
     }
 
     function exitFullscreen() {
-        var name = fullscreenName
+        if (fullscreenLocked) {
+            console.log("exitFullscreen BLOCKED")
+            return
+        }
 
+        console.log("exitFullscreen OK for", fullscreenName)
+
+        var name = fullscreenName
         if (fullscreenLoader.item)
             fullscreenLoader.item.close()
 
         fullscreenLoader.visible = false
+        fullscreenLoader.z = 99999
+        fullscreenLoader.anchors.fill = undefined
         fullscreenLoader.parent = gridContainer
+        fullscreenLoader.anchors.fill = gridContainer
+
         fullscreenName = ""
-        fullscreenCamera = null
-        fullscreenLiveQueue = null
+        fullscreenSubQueue = null
+        fullscreenMainQueue = null
 
         if (name !== "" && frigateRef &&
             typeof frigateRef.stopFullscreenStream === "function") {
@@ -216,10 +233,22 @@ Item {
         if (serverViewRoot && serverViewRoot.openAddCameraPopup)
             serverViewRoot.openAddCameraPopup()
     }
-
-    function removeCamera(cameraId) {
+    function removeCamera(id) {
         if (serverViewRoot && serverViewRoot.openRemoveCameraPopup)
-            serverViewRoot.openRemoveCameraPopup(cameraId)
+            serverViewRoot.openRemoveCameraPopup(id)
+    }
+
+    Rectangle {
+        visible: hoverIndex >= 0 && hoverIndex < cameraNames.length
+        color: "#2244AA44"
+        border.color: "#4488FF"
+        border.width: 2
+        radius: 6
+        z: 50
+        width: grid.width / Math.max(cols, 1) - grid.columnSpacing
+        height: grid.height / Math.max(rows, 1) - grid.rowSpacing
+        x: grid.x + (hoverIndex % cols) * (width + grid.columnSpacing)
+        y: grid.y + Math.floor(hoverIndex / cols) * (height + grid.rowSpacing)
     }
 
     Grid {
@@ -228,26 +257,37 @@ Item {
         columns: gridContainer.cols
         rowSpacing: 6
         columnSpacing: 6
+        opacity: fullscreenName !== "" ? 0 : 1
+        clip: false
 
         Repeater {
-            model: gridContainer.cameraNames
+            model: gridContainer.cameraNames.length
 
             delegate: Item {
-                property string cameraName: modelData
-                property real cellW: (grid.width / Math.max(gridContainer.cols, 1)) - grid.columnSpacing
-                property real cellH: (grid.height / Math.max(gridContainer.rows, 1)) - grid.rowSpacing
-                width: Math.min(cellW, cellH * 16 / 9)
-                height: Math.min(cellH, cellW * 9 / 16)
+                id: cell
+                clip: false
+                z: 0
+
+                width: {
+                    var cellW = (grid.width / Math.max(gridContainer.cols, 1)) - grid.columnSpacing
+                    var cellH = (grid.height / Math.max(gridContainer.rows, 1)) - grid.rowSpacing
+                    return Math.min(cellW, cellH * 16 / 9)
+                }
+                height: {
+                    var cellW = (grid.width / Math.max(gridContainer.cols, 1)) - grid.columnSpacing
+                    var cellH = (grid.height / Math.max(gridContainer.rows, 1)) - grid.rowSpacing
+                    return Math.min(cellH, cellW * 9 / 16)
+                }
 
                 CameraTile {
                     anchors.centerIn: parent
-                    width: parent.width
-                    height: parent.height
-                    cameraName: parent.cameraName
+                    width: cell.width
+                    height: cell.height
+                    cameraName: gridContainer.nameAt(index)
+                    tileIndex: index
                     gridRoot: gridContainer
                     frigateRef: gridContainer.frigateRef
                     mainWindow: gridContainer.mainWindow
-                    tileIndex: index
                     onRemoveRequested: gridContainer.removeTile(index)
                 }
             }
@@ -262,7 +302,7 @@ Item {
         asynchronous: false
         onLoaded: {
             if (fullscreenName !== "")
-                applyFullscreenItem(fullscreenName, fullscreenLiveQueue)
+                applyFullscreenItem(fullscreenName, fullscreenSubQueue, fullscreenMainQueue)
         }
     }
 

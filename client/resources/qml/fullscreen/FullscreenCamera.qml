@@ -11,21 +11,27 @@ Item {
     property string cameraId: ""
     property string cameraName: ""
     property var frigateRef: null
-
-    property var liveQueue: null
-    property var playbackQueue: null
-
+    property var subQueue: null
+    property var mainQueue: null
     property bool isOnline: false
-    property bool isPlayback: false
-    property int playbackPositionMs: 0
-    property bool _pxOpened: false
-    property bool _queuesBound: false
+    property bool closeEnabled: false
+    property bool mainReady: false
+    property string streamLabel: mainReady ? "MAIN" : "SUB"
 
-    // Notify parent when user requests close
     signal requestClose()
 
-    onLiveQueueChanged: {
-        liveVideo.queue = liveQueue
+    onSubQueueChanged: {
+        subVideo.queue = subQueue
+    }
+
+    onMainQueueChanged: {
+        mainReady = false
+        mainVideo.queue = mainQueue
+        mainFrameConn.target = mainQueue
+        if (mainQueue)
+            forceMainTimer.restart()
+        else
+            forceMainTimer.stop()
     }
 
     Rectangle {
@@ -33,85 +39,124 @@ Item {
         color: "black"
     }
 
+    // SUB always under MAIN (never hide completely — avoids black flash)
+    CameraVideoItem {
+        id: subVideo
+        anchors.fill: parent
+        z: 0
+        visible: true
+        opacity: 1
+        queue: subQueue
+    }
+
+    // MAIN on top once frames arrive
+    CameraVideoItem {
+        id: mainVideo
+        anchors.fill: parent
+        z: 1
+        visible: true
+        opacity: mainReady ? 1 : 0
+        queue: mainQueue
+    }
+
+    Connections {
+        id: mainFrameConn
+        target: null
+        ignoreUnknownSignals: true
+
+        function onFrameReady() {
+            if (mainReady)
+                return
+            mainReady = true
+            forceMainTimer.stop()
+            console.log("Fullscreen: SUB → MAIN for", cameraName, "(frameReady)")
+        }
+    }
+
+    Timer {
+        id: forceMainTimer
+        interval: 1500
+        repeat: false
+        onTriggered: {
+            if (mainReady || !mainQueue)
+                return
+            var ok = false
+            try { ok = mainQueue.hasFrames() } catch (e) {}
+            if (ok) {
+                mainReady = true
+                console.log("Fullscreen: SUB → MAIN for", cameraName, "(timer)")
+            } else {
+                console.log("Fullscreen: still waiting for MAIN frames", cameraName)
+            }
+        }
+    }
+
+    Timer {
+        id: closeArmTimer
+        interval: 1200
+        onTriggered: {
+            root.closeEnabled = true
+            console.log("Fullscreen close armed")
+        }
+    }
+
     FocusScope {
-        id: keyHandler
         anchors.fill: parent
         focus: true
-
+        z: 20
         Keys.onReleased: function(event) {
-            if (event.key === Qt.Key_Escape) {
+            if (event.key === Qt.Key_Escape && root.closeEnabled) {
+                console.log("Fullscreen ESC exit")
                 root.requestClose()
                 event.accepted = true
             }
         }
     }
 
-    CameraVideoItem {
-        id: liveVideo
+    MouseArea {
         anchors.fill: parent
-        visible: !isPlayback && liveQueue !== null
-        queue: liveQueue
-    }
+        z: 15
+        acceptedButtons: Qt.LeftButton
 
-    CameraVideoItem {
-        id: playbackVideo
-        anchors.fill: parent
-        visible: isPlayback && playbackQueue !== null
-        queue: playbackQueue
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        color: "#222"
-        visible: liveQueue === null && !isPlayback
-        z: 1
-
-        Text {
-            anchors.centerIn: parent
-            text: "Connecting…"
-            color: "white"
-            font.pixelSize: 24
-            font.bold: true
+        // NX-style: double-click exits after arm delay
+        onDoubleClicked: {
+            if (root.closeEnabled) {
+                console.log("Fullscreen double-click exit")
+                root.requestClose()
+            }
         }
     }
 
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.LeftButton
-        z: 2
-        onDoubleClicked: root.requestClose()
-    }
-
     Rectangle {
-        id: topOverlay
         height: 36
         width: parent.width
         anchors.top: parent.top
         color: "#00000099"
-        z: 10
-
+        z: 30
         Row {
             anchors.fill: parent
             anchors.margins: 8
             spacing: 16
-
             Text {
-                text: cameraName
+                text: root.cameraName
                 color: "white"
                 font.pixelSize: 15
                 font.bold: true
             }
-
             Text {
-                text: isPlayback ? "PLAYBACK" : "LIVE"
-                color: isPlayback ? "#FFC107" : "#00C853"
+                text: "LIVE"
+                color: "#00C853"
+                font.pixelSize: 13
+            }
+            Text {
+                text: root.streamLabel
+                color: root.mainReady ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
             }
         }
     }
 
     Rectangle {
-        id: exitButton
         width: 70
         height: 28
         anchors.top: parent.top
@@ -119,55 +164,44 @@ Item {
         anchors.margins: 10
         radius: 4
         color: "#000000AA"
-        z: 11
-
+        z: 31
         Text {
             anchors.centerIn: parent
             text: "Exit"
             color: "white"
             font.pixelSize: 13
         }
-
         MouseArea {
             anchors.fill: parent
-            onClicked: root.requestClose()
+            onClicked: {
+                console.log("Fullscreen Exit button")
+                root.requestClose()
+            }
         }
     }
 
-    Loader {
-        id: timelineLoader
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: 90
-        z: 12
-        asynchronous: true
-        active: false
-        source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
-    }
-
     function open() {
+        closeEnabled = false
+        mainReady = false
         visible = true
-        isPlayback = false
-        playbackPositionMs = 0
-        keyHandler.forceActiveFocus()
-
-        Qt.callLater(function() {
-            timelineLoader.active = true
-            if (frigateRef && cameraId !== "") {
-                frigateRef.loadEvents(cameraId)
-                frigateRef.loadRecordings(cameraId)
-            }
-        })
+        forceActiveFocus()
+        closeArmTimer.restart()
+        if (mainQueue) {
+            mainFrameConn.target = mainQueue
+            forceMainTimer.restart()
+        }
     }
 
     function close() {
+        forceMainTimer.stop()
+        closeArmTimer.stop()
+        mainFrameConn.target = null
+        closeEnabled = false
         visible = false
-        timelineLoader.active = false
-        _pxOpened = false
-        _queuesBound = false
-        // Parent stops the fullscreen stream — do not stop here
-        liveQueue = null
-        playbackQueue = null
+        mainReady = false
+        subQueue = null
+        mainQueue = null
+        subVideo.queue = null
+        mainVideo.queue = null
     }
 }

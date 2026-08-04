@@ -63,6 +63,9 @@ FrigateAPI::FrigateAPI(QObject* parent)
     connect(m_streamManager, &FrigateStreamManager::cameraOffline,
             this, &FrigateAPI::cameraOffline);
 
+    connect(m_streamManager, &FrigateStreamManager::cameraStatsChanged,
+            this, &FrigateAPI::cameraStatsChanged);
+
     connect(m_cameraManager, &FrigateCameraManager::moduleInformationReceived,
             this, &FrigateAPI::moduleInformationReceived);
 }
@@ -154,7 +157,7 @@ QObject* FrigateAPI::getFullscreenQueue(const QString& cameraName)
 
 QObject* FrigateAPI::getPlaybackQueue(const QString& cameraName)
 {
-    return m_playback->getPlaybackQueue(cameraName);
+    return m_streamManager->getPlaybackQueue(cameraName);
 }
 
 void FrigateAPI::stopStream(const QString& cameraName)
@@ -179,7 +182,8 @@ void FrigateAPI::stopAllStreams()
 
 QObject* FrigateAPI::getWorker(const QString& cameraName)
 {
-    return m_streamManager->getWorker(cameraName);
+    Q_UNUSED(cameraName);
+    return nullptr;
 }
 
 void FrigateAPI::loadRecordings(const QString& cameraId)
@@ -273,4 +277,24 @@ void FrigateAPI::testRtsp(const QString& url)
     });
 
     ff->start(program, args);
+}
+
+QString FrigateAPI::cameraResolution(const QString& cameraName) const
+{
+    return m_streamManager ? m_streamManager->cameraResolution(cameraName) : QString();
+}
+
+double FrigateAPI::cameraFps(const QString& cameraName) const
+{
+    return m_streamManager ? m_streamManager->cameraFps(cameraName) : 0.0;
+}
+
+int FrigateAPI::cameraBitrateKbps(const QString& cameraName) const
+{
+    return m_streamManager ? m_streamManager->cameraBitrateKbps(cameraName) : 0;
+}
+
+QString FrigateAPI::cameraCodec(const QString& cameraName) const
+{
+    return m_streamManager ? m_streamManager->cameraCodec(cameraName) : QString();
 }

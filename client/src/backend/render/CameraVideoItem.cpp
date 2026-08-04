@@ -3,7 +3,7 @@
 
 #include <QSGSimpleTextureNode>
 #include <QQuickWindow>
-#include <QDebug>
+#include <QDateTime>
 
 CameraVideoItem::CameraVideoItem(QQuickItem* parent)
     : QQuickItem(parent)
@@ -17,6 +17,10 @@ void CameraVideoItem::setQueue(QObject* q)
         disconnect(m_queue, nullptr, this, nullptr);
 
     m_queue = q ? qobject_cast<FrameQueue*>(q) : nullptr;
+
+    // Drop SUB frame so MAIN is visible when it arrives
+    m_lastImage = QImage();
+    m_lastPaintMs = 0;
 
     if (m_queue) {
         connect(m_queue, &FrameQueue::frameReady,
@@ -33,12 +37,11 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
 {
     QSGSimpleTextureNode* node = static_cast<QSGSimpleTextureNode*>(oldNode);
 
-    // Pop latest QImage frame
     if (m_queue) {
         QImage img = m_queue->popImage();
         if (!img.isNull()) {
             m_lastImage = img;
-            // qDebug() << "CameraVideoItem: got image" << img.size();
+            m_lastPaintMs = QDateTime::currentMSecsSinceEpoch();
         }
     }
 
@@ -55,18 +58,15 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
     node->setTexture(tex);
     node->setOwnsTexture(true);
 
-    // Aspect ratio preservation
     QRectF bounds = boundingRect();
-    float tileW = bounds.width();
-    float tileH = bounds.height();
+    const float tileW = bounds.width();
+    const float tileH = bounds.height();
+    const float frameW = m_lastImage.width();
+    const float frameH = m_lastImage.height();
 
-    float frameW = m_lastImage.width();
-    float frameH = m_lastImage.height();
-
-    if (frameW > 0 && frameH > 0) {
-        float frameAspect = frameW / frameH;
-        float tileAspect = tileW / tileH;
-
+    if (frameW > 0 && frameH > 0 && tileW > 0 && tileH > 0) {
+        const float frameAspect = frameW / frameH;
+        const float tileAspect = tileW / tileH;
         float renderW, renderH;
 
         if (frameAspect > tileAspect) {
@@ -77,10 +77,9 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
             renderW = tileH * frameAspect;
         }
 
-        float x = (tileW - renderW) / 2.0f;
-        float y = (tileH - renderH) / 2.0f;
-
-        node->setRect(QRectF(x, y, renderW, renderH));
+        node->setRect(QRectF((tileW - renderW) * 0.5f,
+                             (tileH - renderH) * 0.5f,
+                             renderW, renderH));
     }
 
     return node;

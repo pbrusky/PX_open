@@ -30,7 +30,7 @@ public:
     void setUrl(const QString& url);
     void setTestMode(bool enabled);
     void setFrameQueue(FrameQueue* queue);
-    void setHighQuality(bool enabled);   // false = grid, true = fullscreen
+    void setHighQuality(bool enabled);
 
     QString resolution() const { return m_resolution; }
     double fps() const { return m_fps; }
@@ -51,6 +51,8 @@ signals:
     void streamError(const QString& reason);
     void finished();
     void statsChanged();
+    void statsUpdated(const QString& resolution, double fps,
+                      int bitrateKbps, const QString& codec);
 
 private:
     void decodeLoop();

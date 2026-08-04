@@ -35,9 +35,16 @@ public:
     Q_INVOKABLE QObject* getWorker(const QString& cameraName);
     Q_INVOKABLE QObject* getPlaybackWorker(const QString& cameraName);
 
+    Q_INVOKABLE QString cameraResolution(const QString& cameraName) const;
+    Q_INVOKABLE double cameraFps(const QString& cameraName) const;
+    Q_INVOKABLE int cameraBitrateKbps(const QString& cameraName) const;
+    Q_INVOKABLE QString cameraCodec(const QString& cameraName) const;
+
 signals:
     void cameraOnline(QString id);
     void cameraOffline(QString id);
+    void cameraStatsChanged(QString cameraName, QString resolution,
+                            double fps, int bitrateKbps, QString codec);
 
 private:
     void stopFullscreenInternal(const QString& cameraName);
@@ -49,7 +56,6 @@ private:
     QString m_server;
     QString m_serverIp;
 
-    // Cameras where name_main returned 404 — skip main next time
     QSet<QString> m_mainMissing;
 
     QHash<QString, FrameQueue*>   m_queues;
@@ -63,6 +69,11 @@ private:
     QHash<QString, FrameQueue*>   m_playbackQueues;
     QHash<QString, FFmpegWorker*> m_playbackWorkers;
     QHash<QString, QThread*>      m_playbackThreads;
+
+    QHash<QString, QString> m_statResolution;
+    QHash<QString, double>  m_statFps;
+    QHash<QString, int>     m_statBitrate;
+    QHash<QString, QString> m_statCodec;
 };
 
 #endif
