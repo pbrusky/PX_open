@@ -1,5 +1,4 @@
 #include "FrameQueue.h"
-#include <QDateTime>
 
 FrameQueue::FrameQueue(QObject* parent)
     : QObject(parent)
@@ -19,8 +18,6 @@ void FrameQueue::pushImage(const QImage& img)
     if (img.isNull())
         return;
 
-    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-
     {
         QMutexLocker locker(&m_mutex);
 
@@ -28,9 +25,9 @@ void FrameQueue::pushImage(const QImage& img)
         while (!m_imageQueue.isEmpty() && m_imageQueue.size() >= maxSize)
             m_imageQueue.dequeue();
 
+        // Deep copy so producer can reuse buffers safely
         m_lastImage = img.copy();
         m_imageQueue.enqueue(m_lastImage);
-        m_lastEmitMs = nowMs;
     }
 
     emit frameReady();
@@ -39,7 +36,6 @@ void FrameQueue::pushImage(const QImage& img)
 bool FrameQueue::hasFrames() const
 {
     QMutexLocker locker(&m_mutex);
-    // Include GPU texture path used by HQ / fullscreen decode
     return !m_imageQueue.isEmpty()
         || !m_lastImage.isNull()
         || !m_textureQueue.isEmpty();

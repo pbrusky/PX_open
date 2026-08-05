@@ -39,7 +39,6 @@ Item {
         color: "black"
     }
 
-    // SUB always under MAIN (never hide completely — avoids black flash)
     CameraVideoItem {
         id: subVideo
         anchors.fill: parent
@@ -49,7 +48,6 @@ Item {
         queue: subQueue
     }
 
-    // MAIN on top once frames arrive
     CameraVideoItem {
         id: mainVideo
         anchors.fill: parent
@@ -73,20 +71,22 @@ Item {
         }
     }
 
+    // Keep polling until MAIN frames arrive (covers late open + _main→base fallback)
     Timer {
         id: forceMainTimer
-        interval: 1500
-        repeat: false
+        interval: 400
+        repeat: true
         onTriggered: {
-            if (mainReady || !mainQueue)
+            if (mainReady || !mainQueue) {
+                stop()
                 return
+            }
             var ok = false
             try { ok = mainQueue.hasFrames() } catch (e) {}
             if (ok) {
                 mainReady = true
+                stop()
                 console.log("Fullscreen: SUB → MAIN for", cameraName, "(timer)")
-            } else {
-                console.log("Fullscreen: still waiting for MAIN frames", cameraName)
             }
         }
     }
@@ -118,7 +118,6 @@ Item {
         z: 15
         acceptedButtons: Qt.LeftButton
 
-        // NX-style: double-click exits after arm delay
         onDoubleClicked: {
             if (root.closeEnabled) {
                 console.log("Fullscreen double-click exit")
