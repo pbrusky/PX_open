@@ -67,11 +67,9 @@ Item {
                 return
             mainReady = true
             forceMainTimer.stop()
-            console.log("Fullscreen: SUB → MAIN for", cameraName, "(frameReady)")
         }
     }
 
-    // Keep polling until MAIN frames arrive (covers late open + _main→base fallback)
     Timer {
         id: forceMainTimer
         interval: 400
@@ -86,7 +84,6 @@ Item {
             if (ok) {
                 mainReady = true
                 stop()
-                console.log("Fullscreen: SUB → MAIN for", cameraName, "(timer)")
             }
         }
     }
@@ -94,10 +91,7 @@ Item {
     Timer {
         id: closeArmTimer
         interval: 1200
-        onTriggered: {
-            root.closeEnabled = true
-            console.log("Fullscreen close armed")
-        }
+        onTriggered: root.closeEnabled = true
     }
 
     FocusScope {
@@ -106,7 +100,6 @@ Item {
         z: 20
         Keys.onReleased: function(event) {
             if (event.key === Qt.Key_Escape && root.closeEnabled) {
-                console.log("Fullscreen ESC exit")
                 root.requestClose()
                 event.accepted = true
             }
@@ -119,10 +112,8 @@ Item {
         acceptedButtons: Qt.LeftButton
 
         onDoubleClicked: {
-            if (root.closeEnabled) {
-                console.log("Fullscreen double-click exit")
+            if (root.closeEnabled)
                 root.requestClose()
-            }
         }
     }
 
@@ -172,10 +163,7 @@ Item {
         }
         MouseArea {
             anchors.fill: parent
-            onClicked: {
-                console.log("Fullscreen Exit button")
-                root.requestClose()
-            }
+            onClicked: root.requestClose()
         }
     }
 

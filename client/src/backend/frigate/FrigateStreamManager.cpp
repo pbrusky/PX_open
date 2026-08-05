@@ -35,10 +35,16 @@ static QString buildRtspUrl(const QString& serverIp, const QString& cameraName)
     return QStringLiteral("rtsp://%1:8554/%2").arg(serverIp, cameraName);
 }
 
+// Stop without blocking the UI. Keep finished→quit/deleteLater intact.
 static void stopWorkerThreadAsync(FFmpegWorker* worker, QThread* thread)
 {
     if (worker) {
-        QObject::disconnect(worker, nullptr, nullptr, nullptr);
+        // Do NOT disconnect finished → quit / deleteLater
+        QObject::disconnect(worker, &FFmpegWorker::openInputFailed, nullptr, nullptr);
+        QObject::disconnect(worker, &FFmpegWorker::openInputOk, nullptr, nullptr);
+        QObject::disconnect(worker, &FFmpegWorker::statsUpdated, nullptr, nullptr);
+        QObject::disconnect(worker, &FFmpegWorker::streamStarted, nullptr, nullptr);
+        QObject::disconnect(worker, &FFmpegWorker::streamStopped, nullptr, nullptr);
         worker->stopDecoding();
     }
     if (thread)
@@ -128,7 +134,6 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
                 [this, cameraName](const QString&) {
             m_mainMissing.insert(cameraName);
 
-            // Remove from maps BEFORE finished → deleteLater runs
             m_fullscreenWorkers.remove(cameraName);
             m_fullscreenThreads.remove(cameraName);
 
@@ -166,8 +171,10 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
 
     if (m_fullscreenQueues.contains(cameraName)) {
         FrameQueue* stale = m_fullscreenQueues.take(cameraName);
-        if (stale)
-            stale->deleteLater();
+        if (stale) {
+            stale->setParent(nullptr);
+            QTimer::singleShot(200, stale, &QObject::deleteLater);
+        }
     }
 
     FrameQueue* queue = new FrameQueue(this);
@@ -226,8 +233,10 @@ void FrigateStreamManager::stopFullscreenInternal(const QString& cameraName)
 
     if (m_fullscreenQueues.contains(cameraName)) {
         FrameQueue* q = m_fullscreenQueues.take(cameraName);
-        if (q)
-            q->deleteLater();
+        if (q) {
+            q->setParent(nullptr);
+            QTimer::singleShot(200, q, &QObject::deleteLater);
+        }
     }
 }
 
@@ -238,8 +247,9 @@ void FrigateStreamManager::stopFullscreenStream(const QString& cameraName)
 
 void FrigateStreamManager::stopAllFullscreenStreams()
 {
-    const QStringList names = m_fullscreenWorkers.keys();
-    for (const QString& name : names)
+    const QStringList names = m_fullscreenWorkers.keys() + m_fullscreenQueues.keys();
+    const QSet<QString> unique(names.begin(), names.end());
+    for (const QString& name : unique)
         stopFullscreenInternal(name);
 }
 
@@ -253,8 +263,10 @@ void FrigateStreamManager::stopStream(const QString& cameraName)
 
     if (m_queues.contains(cameraName)) {
         FrameQueue* q = m_queues.take(cameraName);
-        if (q)
-            q->deleteLater();
+        if (q) {
+            q->setParent(nullptr);
+            QTimer::singleShot(200, q, &QObject::deleteLater);
+        }
     }
 
     m_statResolution.remove(cameraName);
@@ -270,8 +282,10 @@ void FrigateStreamManager::stopStream(const QString& cameraName)
 
     if (m_playbackQueues.contains(cameraName)) {
         FrameQueue* q = m_playbackQueues.take(cameraName);
-        if (q)
-            q->deleteLater();
+        if (q) {
+            q->setParent(nullptr);
+            QTimer::singleShot(200, q, &QObject::deleteLater);
+        }
     }
 }
 

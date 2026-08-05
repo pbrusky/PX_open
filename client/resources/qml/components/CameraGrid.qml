@@ -128,8 +128,6 @@ Item {
         if (!cameraName || cameraName === "")
             return
 
-        console.log("enterFullscreen", cameraName)
-
         var prevName = fullscreenName
         if (prevName !== "" && prevName !== cameraName &&
             frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
@@ -140,12 +138,9 @@ Item {
         if (frigateRef && typeof frigateRef.getQueue === "function")
             subQ = frigateRef.getQueue(cameraName)
 
-        // Start MAIN immediately (no callLater delay)
         var mainQ = null
         if (frigateRef && typeof frigateRef.getFullscreenQueue === "function")
             mainQ = frigateRef.getFullscreenQueue(cameraName)
-
-        console.log("MAIN queue", mainQ)
 
         fullscreenName = cameraName
         fullscreenSubQueue = subQ
@@ -197,17 +192,12 @@ Item {
         item.mainQueue = (mainQ !== undefined) ? mainQ : null
         item.mainReady = false
 
-        console.log("Opening SUB layer", name)
         item.open()
     }
 
     function exitFullscreen() {
-        if (fullscreenLocked) {
-            console.log("exitFullscreen BLOCKED")
+        if (fullscreenLocked)
             return
-        }
-
-        console.log("exitFullscreen OK for", fullscreenName)
 
         var name = fullscreenName
         if (fullscreenLoader.item)
@@ -229,11 +219,11 @@ Item {
         }
     }
 
-    function addCamera() {
-        if (serverViewRoot && serverViewRoot.openAddCameraPopup)
-            serverViewRoot.openAddCameraPopup()
+    function openEditCamera(id) {
+        if (serverViewRoot && serverViewRoot.openEditCameraPopup)
+            serverViewRoot.openEditCameraPopup(id)
     }
-    function removeCamera(id) {
+    function openRemoveCamera(id) {
         if (serverViewRoot && serverViewRoot.openRemoveCameraPopup)
             serverViewRoot.openRemoveCameraPopup(id)
     }
