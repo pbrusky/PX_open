@@ -26,6 +26,16 @@ Item {
     onMainQueueChanged: {
         mainReady = false
         mainVideo.queue = mainQueue
+        // Restart backup only when a new MAIN queue appears
+        if (visible && mainQueue)
+            forceMainTimer.restart()
+        else
+            forceMainTimer.stop()
+    }
+
+    onMainReadyChanged: {
+        if (mainReady)
+            forceMainTimer.stop()
     }
 
     onFrigateRefChanged: {
@@ -61,45 +71,56 @@ Item {
         ignoreUnknownSignals: true
 
         function onFullscreenFrameReady(name) {
-            if (name === root.cameraName)
+            if (name === root.cameraName) {
                 root.mainReady = true
+                forceMainTimer.stop()
+            }
         }
 
         function onFullscreenUsingSub(name) {
-            if (name === root.cameraName)
+            if (name === root.cameraName) {
                 root.mainReady = false
+                forceMainTimer.stop()
+            }
         }
     }
 
+    // Backup only — signal is primary. 400ms is enough; no need for 200ms spam.
     Timer {
         id: forceMainTimer
-        interval: 200
+        interval: 400
         repeat: true
-        running: root.visible && !root.mainReady && root.mainQueue !== null
+        running: false
         onTriggered: {
-            if (mainVideo.hasFrame) {
-                root.mainReady = true
+            if (root.mainReady || !root.mainQueue) {
+                stop()
                 return
             }
-            if (root.mainQueue) {
-                var ok = false
-                try {
-                    if (root.mainQueue.hasReceivedFrames)
-                        ok = root.mainQueue.hasReceivedFrames()
-                } catch (e1) {}
-                try {
-                    if (!ok && root.mainQueue.hasFrames)
-                        ok = root.mainQueue.hasFrames()
-                } catch (e2) {}
-                if (ok)
-                    root.mainReady = true
+            if (mainVideo.hasFrame) {
+                root.mainReady = true
+                stop()
+                return
+            }
+            var ok = false
+            try {
+                if (root.mainQueue.hasReceivedFrames)
+                    ok = root.mainQueue.hasReceivedFrames()
+            } catch (e1) {}
+            try {
+                if (!ok && root.mainQueue.hasFrames)
+                    ok = root.mainQueue.hasFrames()
+            } catch (e2) {}
+            if (ok) {
+                root.mainReady = true
+                stop()
             }
         }
     }
 
+    // Allow exit sooner (was 1200ms)
     Timer {
         id: closeArmTimer
-        interval: 1200
+        interval: 400
         onTriggered: root.closeEnabled = true
     }
 
@@ -182,10 +203,15 @@ Item {
         forceActiveFocus()
         closeArmTimer.restart()
         apiConn.target = frigateRef
+        if (mainQueue)
+            forceMainTimer.restart()
+        else
+            forceMainTimer.stop()
     }
 
     function close() {
         closeArmTimer.stop()
+        forceMainTimer.stop()
         closeEnabled = false
         visible = false
         mainReady = false
