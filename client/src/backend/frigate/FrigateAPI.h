@@ -48,6 +48,7 @@ public:
     Q_INVOKABLE void stopFullscreenStream(const QString& cameraName);
     Q_INVOKABLE void stopAllFullscreenStreams();
     Q_INVOKABLE void stopAllStreams();
+    Q_INVOKABLE void stopAllStreamsAndWait(int timeoutMs = 3000);
     Q_INVOKABLE QObject* getWorker(const QString& cameraName);
 
     Q_INVOKABLE QString cameraResolution(const QString& cameraName) const;

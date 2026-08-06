@@ -19,28 +19,14 @@ Item {
 
     signal requestClose()
 
-    onSubQueueChanged: {
-        subVideo.queue = subQueue
-    }
-
+    onSubQueueChanged: subVideo.queue = subQueue
     onMainQueueChanged: {
         mainReady = false
         mainVideo.queue = mainQueue
-        // Restart backup only when a new MAIN queue appears
         if (visible && mainQueue)
             forceMainTimer.restart()
-        else
-            forceMainTimer.stop()
     }
-
-    onMainReadyChanged: {
-        if (mainReady)
-            forceMainTimer.stop()
-    }
-
-    onFrigateRefChanged: {
-        apiConn.target = frigateRef
-    }
+    onFrigateRefChanged: apiConn.target = frigateRef
 
     Rectangle {
         anchors.fill: parent
@@ -51,8 +37,7 @@ Item {
         id: subVideo
         anchors.fill: parent
         z: 0
-        visible: true
-        opacity: 1
+        opacity: mainReady ? 0.0 : 1.0
         queue: subQueue
     }
 
@@ -60,9 +45,20 @@ Item {
         id: mainVideo
         anchors.fill: parent
         z: 1
-        visible: true
-        opacity: mainReady ? 1.0 : 0.01
+        opacity: mainReady ? 1.0 : 0.0
         queue: mainQueue
+
+        onFramePresented: {
+            root.mainReady = true
+            forceMainTimer.stop()
+        }
+
+        onHasFrameChanged: {
+            if (hasFrame) {
+                root.mainReady = true
+                forceMainTimer.stop()
+            }
+        }
     }
 
     Connections {
@@ -71,28 +67,18 @@ Item {
         ignoreUnknownSignals: true
 
         function onFullscreenFrameReady(name) {
-            if (name === root.cameraName) {
-                root.mainReady = true
-                forceMainTimer.stop()
-            }
-        }
-
-        function onFullscreenUsingSub(name) {
-            if (name === root.cameraName) {
-                root.mainReady = false
-                forceMainTimer.stop()
-            }
+            if (name === root.cameraName || name === root.cameraId)
+                forceMainTimer.restart()
         }
     }
 
-    // Backup only — signal is primary. 400ms is enough; no need for 200ms spam.
     Timer {
         id: forceMainTimer
-        interval: 400
+        interval: 100
         repeat: true
         running: false
         onTriggered: {
-            if (root.mainReady || !root.mainQueue) {
+            if (root.mainReady) {
                 stop()
                 return
             }
@@ -101,23 +87,14 @@ Item {
                 stop()
                 return
             }
-            var ok = false
-            try {
-                if (root.mainQueue.hasReceivedFrames)
-                    ok = root.mainQueue.hasReceivedFrames()
-            } catch (e1) {}
-            try {
-                if (!ok && root.mainQueue.hasFrames)
-                    ok = root.mainQueue.hasFrames()
-            } catch (e2) {}
-            if (ok) {
+            if (root.mainQueue && typeof root.mainQueue.hasReceivedFrames === "function"
+                    && root.mainQueue.hasReceivedFrames()) {
                 root.mainReady = true
                 stop()
             }
         }
     }
 
-    // Allow exit sooner (was 1200ms)
     Timer {
         id: closeArmTimer
         interval: 400
@@ -140,10 +117,7 @@ Item {
         anchors.fill: parent
         z: 15
         acceptedButtons: Qt.LeftButton
-        onDoubleClicked: {
-            if (root.closeEnabled)
-                root.requestClose()
-        }
+        onDoubleClicked: if (root.closeEnabled) root.requestClose()
     }
 
     Rectangle {
@@ -203,6 +177,8 @@ Item {
         forceActiveFocus()
         closeArmTimer.restart()
         apiConn.target = frigateRef
+        subVideo.queue = subQueue
+        mainVideo.queue = mainQueue
         if (mainQueue)
             forceMainTimer.restart()
         else

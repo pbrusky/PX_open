@@ -6,6 +6,7 @@
 #include <QSet>
 #include <QThread>
 #include <QTimer>
+#include <QDateTime>
 
 FrigateStreamManager::FrigateStreamManager(QObject* parent)
     : QObject(parent)
@@ -14,7 +15,7 @@ FrigateStreamManager::FrigateStreamManager(QObject* parent)
 
 FrigateStreamManager::~FrigateStreamManager()
 {
-    stopAllStreams();
+    stopAllStreamsAndWait(2000);
 }
 
 void FrigateStreamManager::setServer(const QString& server)
@@ -37,16 +38,15 @@ static QString buildRtspUrl(const QString& serverIp, const QString& cameraName)
 
 static void stopWorkerThreadAsync(FFmpegWorker* worker, QThread* thread)
 {
-    if (worker) {
-        QObject::disconnect(worker, &FFmpegWorker::openInputFailed, nullptr, nullptr);
-        QObject::disconnect(worker, &FFmpegWorker::openInputOk, nullptr, nullptr);
-        QObject::disconnect(worker, &FFmpegWorker::statsUpdated, nullptr, nullptr);
-        QObject::disconnect(worker, &FFmpegWorker::streamStarted, nullptr, nullptr);
-        QObject::disconnect(worker, &FFmpegWorker::streamStopped, nullptr, nullptr);
-        worker->stopDecoding();
-    }
-    if (thread)
-        thread->quit();
+    Q_UNUSED(thread);
+    if (!worker)
+        return;
+    QObject::disconnect(worker, &FFmpegWorker::openInputFailed, nullptr, nullptr);
+    QObject::disconnect(worker, &FFmpegWorker::openInputOk, nullptr, nullptr);
+    QObject::disconnect(worker, &FFmpegWorker::statsUpdated, nullptr, nullptr);
+    QObject::disconnect(worker, &FFmpegWorker::streamStarted, nullptr, nullptr);
+    QObject::disconnect(worker, &FFmpegWorker::streamStopped, nullptr, nullptr);
+    worker->stopDecoding();
 }
 
 QObject* FrigateStreamManager::getQueue(const QString& cameraName)
@@ -131,29 +131,29 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
         connect(worker, &FFmpegWorker::openInputFailed, this,
                 [this, cameraName](const QString&) {
             m_mainMissing.insert(cameraName);
-            m_fullscreenWorkers.remove(cameraName);
-            m_fullscreenThreads.remove(cameraName);
+
+            FFmpegWorker* w = m_fullscreenWorkers.take(cameraName);
+            QThread* t = m_fullscreenThreads.take(cameraName);
+            stopWorkerThreadAsync(w, t);
 
             QTimer::singleShot(50, this, [this, cameraName]() {
-                FrameQueue* queue = m_fullscreenQueues.value(cameraName, nullptr);
-                if (!queue)
+                if (!m_fullscreenQueues.contains(cameraName))
                     return;
+                FrameQueue* q = m_fullscreenQueues.value(cameraName);
+                if (!q)
+                    return;
+                m_fullscreenFrameNotified.remove(cameraName);
+                q->resetReceived();
                 const QString baseUrl = buildRtspUrl(m_serverIp, cameraName);
-                startFullscreenWorker(cameraName, queue, baseUrl, true);
+                startFullscreenWorker(cameraName, q, baseUrl, true);
             });
         }, Qt::QueuedConnection);
     } else {
         connect(worker, &FFmpegWorker::openInputFailed, this,
                 [this, cameraName](const QString&) {
-            m_fullscreenWorkers.remove(cameraName);
-            m_fullscreenThreads.remove(cameraName);
-            if (m_fullscreenQueues.contains(cameraName)) {
-                FrameQueue* q = m_fullscreenQueues.take(cameraName);
-                if (q) {
-                    q->setParent(nullptr);
-                    QTimer::singleShot(200, q, &QObject::deleteLater);
-                }
-            }
+            FFmpegWorker* w = m_fullscreenWorkers.take(cameraName);
+            QThread* t = m_fullscreenThreads.take(cameraName);
+            stopWorkerThreadAsync(w, t);
             emit fullscreenUsingSub(cameraName);
         }, Qt::QueuedConnection);
     }
@@ -192,6 +192,7 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
 
     FrameQueue* queue = new FrameQueue(this);
     queue->setMaxSize(3);
+    queue->resetReceived();
     m_fullscreenQueues.insert(cameraName, queue);
 
     connect(queue, &FrameQueue::frameReady, this,
@@ -204,12 +205,28 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
         emit fullscreenFrameReady(cameraName);
     }, Qt::QueuedConnection);
 
-    const bool tryMain = !m_mainMissing.contains(cameraName);
-    const QString url = tryMain
-        ? buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"))
-        : buildRtspUrl(m_serverIp, cameraName);
+    const QString baseUrl = buildRtspUrl(m_serverIp, cameraName);
+    const QString mainUrl = buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"));
 
-    startFullscreenWorker(cameraName, queue, url, !tryMain);
+    // Always start BASE first so fullscreen always gets frames
+    startFullscreenWorker(cameraName, queue, baseUrl, true);
+
+    // Then try MAIN profile if not known missing
+    if (!m_mainMissing.contains(cameraName)) {
+        QTimer::singleShot(400, this, [this, cameraName, mainUrl]() {
+            if (!m_fullscreenQueues.contains(cameraName))
+                return;
+            if (m_mainMissing.contains(cameraName))
+                return;
+            FrameQueue* q = m_fullscreenQueues.value(cameraName);
+            if (!q)
+                return;
+            m_fullscreenFrameNotified.remove(cameraName);
+            q->resetReceived();
+            startFullscreenWorker(cameraName, q, mainUrl, false);
+        });
+    }
+
     return queue;
 }
 
@@ -226,7 +243,7 @@ QObject* FrigateStreamManager::getPlaybackQueue(const QString& cameraName)
     m_playbackQueues.insert(cameraName, queue);
 
     const QString url = QStringLiteral("%1/api/playback/%2").arg(m_server, cameraName);
-
+    
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
@@ -330,6 +347,76 @@ void FrigateStreamManager::stopAllStreams()
     m_playbackThreads.clear();
     m_queues.clear();
     m_playbackQueues.clear();
+}
+
+void FrigateStreamManager::stopAllStreamsAndWait(int timeoutMs)
+{
+    if (timeoutMs < 100)
+        timeoutMs = 100;
+
+    QList<FFmpegWorker*> workers;
+    QList<QThread*> threads;
+
+    auto harvest = [&](QHash<QString, FFmpegWorker*>& wh,
+                       QHash<QString, QThread*>& th) {
+        const QStringList keys = wh.keys();
+        for (const QString& k : keys) {
+            workers.append(wh.take(k));
+            if (th.contains(k))
+                threads.append(th.take(k));
+        }
+        th.clear();
+    };
+
+    harvest(m_workers, m_threads);
+    harvest(m_fullscreenWorkers, m_fullscreenThreads);
+    harvest(m_playbackWorkers, m_playbackThreads);
+
+    auto dropQueues = [](QHash<QString, FrameQueue*>& qs) {
+        for (FrameQueue* q : qs) {
+            if (!q)
+                continue;
+            q->setParent(nullptr);
+            q->deleteLater();
+        }
+        qs.clear();
+    };
+    dropQueues(m_queues);
+    dropQueues(m_fullscreenQueues);
+    dropQueues(m_playbackQueues);
+    m_fullscreenFrameNotified.clear();
+    m_statResolution.clear();
+    m_statFps.clear();
+    m_statBitrate.clear();
+    m_statCodec.clear();
+
+    for (FFmpegWorker* w : workers) {
+        if (!w)
+            continue;
+        QObject::disconnect(w, &FFmpegWorker::openInputFailed, nullptr, nullptr);
+        QObject::disconnect(w, &FFmpegWorker::openInputOk, nullptr, nullptr);
+        QObject::disconnect(w, &FFmpegWorker::statsUpdated, nullptr, nullptr);
+        QObject::disconnect(w, &FFmpegWorker::streamStarted, nullptr, nullptr);
+        QObject::disconnect(w, &FFmpegWorker::streamStopped, nullptr, nullptr);
+        w->stopDecoding();
+    }
+
+    for (QThread* t : threads) {
+        if (t)
+            t->quit();
+    }
+
+    const qint64 startMs = QDateTime::currentMSecsSinceEpoch();
+    for (QThread* t : threads) {
+        if (!t)
+            continue;
+        const int left = timeoutMs - int(QDateTime::currentMSecsSinceEpoch() - startMs);
+        const unsigned long waitMs = left > 0 ? unsigned(left) : 1u;
+        if (!t->wait(waitMs)) {
+            t->terminate();
+            t->wait(300);
+        }
+    }
 }
 
 void FrigateStreamManager::restartStream(const QString& cameraName)

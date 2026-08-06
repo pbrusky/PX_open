@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QImage>
+#include <QSet>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -38,6 +39,7 @@ public:
     QString codec() const { return m_codec; }
 
     AVPixelFormat hwPixFmt() const { return m_hwPixFmt; }
+    bool isAbortRequested() const { return m_abort; }
 
 public slots:
     void startDecoding();
@@ -67,6 +69,10 @@ private:
                    bool tryHw);
     void clearHw();
 
+    static QSet<QString>& hwBlacklist();
+    static void markHwFailed(const QString& url);
+    static bool isHwBlacklisted(const QString& url);
+
     QString m_url;
     bool m_abort = false;
     bool m_testMode = false;
@@ -81,4 +87,5 @@ private:
 
     AVBufferRef* m_hwDeviceCtx = nullptr;
     AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
+    bool m_usingHw = false;
 };
