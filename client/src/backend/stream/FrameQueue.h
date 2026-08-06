@@ -24,6 +24,8 @@ public:
 
     Q_INVOKABLE bool hasFrames() const;
     Q_INVOKABLE int frameCount() const;
+    Q_INVOKABLE bool hasReceivedFrames() const;
+    Q_INVOKABLE void resetReceived();
 
 signals:
     void frameReady();
@@ -31,6 +33,7 @@ signals:
 private:
     mutable QMutex m_mutex;
     int m_maxSize = 2;
+    bool m_receivedAny = false;
 
     QImage m_lastImage;
     QQueue<QImage> m_imageQueue;

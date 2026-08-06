@@ -66,38 +66,54 @@ FrigateAPI::FrigateAPI(QObject* parent)
     connect(m_streamManager, &FrigateStreamManager::cameraStatsChanged,
             this, &FrigateAPI::cameraStatsChanged);
 
+    connect(m_streamManager, &FrigateStreamManager::fullscreenFrameReady,
+            this, &FrigateAPI::fullscreenFrameReady);
+
+    connect(m_streamManager, &FrigateStreamManager::fullscreenUsingSub,
+            this, &FrigateAPI::fullscreenUsingSub);
+
     connect(m_cameraManager, &FrigateCameraManager::moduleInformationReceived,
             this, &FrigateAPI::moduleInformationReceived);
 }
 
 void FrigateAPI::setServer(QString server)
 {
+    if (m_server == server)
+        return;
+
     m_server = server;
-    emit serverChanged();
 
     m_cameraManager->setServer(server);
-    m_timeline->setServer(server);
     m_streamManager->setServer(server);
+    m_timeline->setServer(server);
     m_playback->setServer(server);
+
+    emit serverChanged();
 }
 
 void FrigateAPI::setModuleServer(QString server)
 {
+    if (m_moduleServer == server)
+        return;
+
     m_moduleServer = server;
-    emit moduleServerChanged();
 
     m_cameraManager->setModuleServer(server);
-    m_onvif->setModuleServer(server);
     m_timeline->setModuleServer(server);
+    m_onvif->setModuleServer(server);
+
+    emit moduleServerChanged();
 }
 
 void FrigateAPI::setServerIp(QString ip)
 {
-    m_serverIp = ip;
-    emit serverIpChanged();
+    if (m_serverIp == ip)
+        return;
 
+    m_serverIp = ip;
     m_streamManager->setServerIp(ip);
-    m_playback->setServerIp(ip);
+
+    emit serverIpChanged();
 }
 
 void FrigateAPI::loadCameras()
@@ -182,8 +198,7 @@ void FrigateAPI::stopAllStreams()
 
 QObject* FrigateAPI::getWorker(const QString& cameraName)
 {
-    Q_UNUSED(cameraName);
-    return nullptr;
+    return m_streamManager->getWorker(cameraName);
 }
 
 void FrigateAPI::loadRecordings(const QString& cameraId)

@@ -45,6 +45,8 @@ signals:
     void cameraOffline(QString id);
     void cameraStatsChanged(QString cameraName, QString resolution,
                             double fps, int bitrateKbps, QString codec);
+    void fullscreenFrameReady(QString cameraName);
+    void fullscreenUsingSub(QString cameraName);
 
 private:
     void stopFullscreenInternal(const QString& cameraName);
@@ -57,6 +59,7 @@ private:
     QString m_serverIp;
 
     QSet<QString> m_mainMissing;
+    QSet<QString> m_fullscreenFrameNotified;
 
     QHash<QString, FrameQueue*>   m_queues;
     QHash<QString, FFmpegWorker*> m_workers;

@@ -50,7 +50,6 @@ public:
     Q_INVOKABLE void stopAllStreams();
     Q_INVOKABLE QObject* getWorker(const QString& cameraName);
 
-    // Tile info (main-thread cache from StreamManager)
     Q_INVOKABLE QString cameraResolution(const QString& cameraName) const;
     Q_INVOKABLE double cameraFps(const QString& cameraName) const;
     Q_INVOKABLE int cameraBitrateKbps(const QString& cameraName) const;
@@ -85,6 +84,9 @@ signals:
 
     void cameraStatsChanged(QString cameraName, QString resolution,
                             double fps, int bitrateKbps, QString codec);
+
+    void fullscreenFrameReady(QString cameraName);
+    void fullscreenUsingSub(QString cameraName);
 
     void onvifDevicesDiscovered(QVariantList devices);
     void onvifProgress(QVariantList devices);

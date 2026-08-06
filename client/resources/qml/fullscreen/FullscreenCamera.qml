@@ -16,7 +16,6 @@ Item {
     property bool isOnline: false
     property bool closeEnabled: false
     property bool mainReady: false
-    property string streamLabel: mainReady ? "MAIN" : "SUB"
 
     signal requestClose()
 
@@ -27,11 +26,10 @@ Item {
     onMainQueueChanged: {
         mainReady = false
         mainVideo.queue = mainQueue
-        mainFrameConn.target = mainQueue
-        if (mainQueue)
-            forceMainTimer.restart()
-        else
-            forceMainTimer.stop()
+    }
+
+    onFrigateRefChanged: {
+        apiConn.target = frigateRef
     }
 
     Rectangle {
@@ -53,37 +51,48 @@ Item {
         anchors.fill: parent
         z: 1
         visible: true
-        opacity: mainReady ? 1 : 0
+        opacity: mainReady ? 1.0 : 0.01
         queue: mainQueue
     }
 
     Connections {
-        id: mainFrameConn
-        target: null
+        id: apiConn
+        target: frigateRef
         ignoreUnknownSignals: true
 
-        function onFrameReady() {
-            if (mainReady)
-                return
-            mainReady = true
-            forceMainTimer.stop()
+        function onFullscreenFrameReady(name) {
+            if (name === root.cameraName)
+                root.mainReady = true
+        }
+
+        function onFullscreenUsingSub(name) {
+            if (name === root.cameraName)
+                root.mainReady = false
         }
     }
 
     Timer {
         id: forceMainTimer
-        interval: 400
+        interval: 200
         repeat: true
+        running: root.visible && !root.mainReady && root.mainQueue !== null
         onTriggered: {
-            if (mainReady || !mainQueue) {
-                stop()
+            if (mainVideo.hasFrame) {
+                root.mainReady = true
                 return
             }
-            var ok = false
-            try { ok = mainQueue.hasFrames() } catch (e) {}
-            if (ok) {
-                mainReady = true
-                stop()
+            if (root.mainQueue) {
+                var ok = false
+                try {
+                    if (root.mainQueue.hasReceivedFrames)
+                        ok = root.mainQueue.hasReceivedFrames()
+                } catch (e1) {}
+                try {
+                    if (!ok && root.mainQueue.hasFrames)
+                        ok = root.mainQueue.hasFrames()
+                } catch (e2) {}
+                if (ok)
+                    root.mainReady = true
             }
         }
     }
@@ -110,7 +119,6 @@ Item {
         anchors.fill: parent
         z: 15
         acceptedButtons: Qt.LeftButton
-
         onDoubleClicked: {
             if (root.closeEnabled)
                 root.requestClose()
@@ -139,7 +147,7 @@ Item {
                 font.pixelSize: 13
             }
             Text {
-                text: root.streamLabel
+                text: root.mainReady ? "MAIN" : "SUB"
                 color: root.mainReady ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
             }
@@ -173,16 +181,11 @@ Item {
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
-        if (mainQueue) {
-            mainFrameConn.target = mainQueue
-            forceMainTimer.restart()
-        }
+        apiConn.target = frigateRef
     }
 
     function close() {
-        forceMainTimer.stop()
         closeArmTimer.stop()
-        mainFrameConn.target = null
         closeEnabled = false
         visible = false
         mainReady = false

@@ -35,11 +35,9 @@ static QString buildRtspUrl(const QString& serverIp, const QString& cameraName)
     return QStringLiteral("rtsp://%1:8554/%2").arg(serverIp, cameraName);
 }
 
-// Stop without blocking the UI. Keep finished→quit/deleteLater intact.
 static void stopWorkerThreadAsync(FFmpegWorker* worker, QThread* thread)
 {
     if (worker) {
-        // Do NOT disconnect finished → quit / deleteLater
         QObject::disconnect(worker, &FFmpegWorker::openInputFailed, nullptr, nullptr);
         QObject::disconnect(worker, &FFmpegWorker::openInputOk, nullptr, nullptr);
         QObject::disconnect(worker, &FFmpegWorker::statsUpdated, nullptr, nullptr);
@@ -133,17 +131,30 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
         connect(worker, &FFmpegWorker::openInputFailed, this,
                 [this, cameraName](const QString&) {
             m_mainMissing.insert(cameraName);
-
             m_fullscreenWorkers.remove(cameraName);
             m_fullscreenThreads.remove(cameraName);
 
-            QTimer::singleShot(100, this, [this, cameraName]() {
+            QTimer::singleShot(50, this, [this, cameraName]() {
                 FrameQueue* queue = m_fullscreenQueues.value(cameraName, nullptr);
                 if (!queue)
                     return;
                 const QString baseUrl = buildRtspUrl(m_serverIp, cameraName);
                 startFullscreenWorker(cameraName, queue, baseUrl, true);
             });
+        }, Qt::QueuedConnection);
+    } else {
+        connect(worker, &FFmpegWorker::openInputFailed, this,
+                [this, cameraName](const QString&) {
+            m_fullscreenWorkers.remove(cameraName);
+            m_fullscreenThreads.remove(cameraName);
+            if (m_fullscreenQueues.contains(cameraName)) {
+                FrameQueue* q = m_fullscreenQueues.take(cameraName);
+                if (q) {
+                    q->setParent(nullptr);
+                    QTimer::singleShot(200, q, &QObject::deleteLater);
+                }
+            }
+            emit fullscreenUsingSub(cameraName);
         }, Qt::QueuedConnection);
     }
 
@@ -177,9 +188,21 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
         }
     }
 
+    m_fullscreenFrameNotified.remove(cameraName);
+
     FrameQueue* queue = new FrameQueue(this);
     queue->setMaxSize(3);
     m_fullscreenQueues.insert(cameraName, queue);
+
+    connect(queue, &FrameQueue::frameReady, this,
+            [this, cameraName]() {
+        if (m_fullscreenFrameNotified.contains(cameraName))
+            return;
+        if (!m_fullscreenQueues.contains(cameraName))
+            return;
+        m_fullscreenFrameNotified.insert(cameraName);
+        emit fullscreenFrameReady(cameraName);
+    }, Qt::QueuedConnection);
 
     const bool tryMain = !m_mainMissing.contains(cameraName);
     const QString url = tryMain
@@ -225,6 +248,8 @@ QObject* FrigateStreamManager::getPlaybackQueue(const QString& cameraName)
 
 void FrigateStreamManager::stopFullscreenInternal(const QString& cameraName)
 {
+    m_fullscreenFrameNotified.remove(cameraName);
+
     if (m_fullscreenWorkers.contains(cameraName)) {
         FFmpegWorker* worker = m_fullscreenWorkers.take(cameraName);
         QThread* thread = m_fullscreenThreads.take(cameraName);

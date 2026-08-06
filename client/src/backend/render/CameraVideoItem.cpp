@@ -18,9 +18,12 @@ void CameraVideoItem::setQueue(QObject* q)
 
     m_queue = q ? qobject_cast<FrameQueue*>(q) : nullptr;
 
-    // Drop SUB frame so MAIN is visible when it arrives
     m_lastImage = QImage();
     m_lastPaintMs = 0;
+    if (m_hasFrame) {
+        m_hasFrame = false;
+        emit hasFrameChanged();
+    }
 
     if (m_queue) {
         connect(m_queue, &FrameQueue::frameReady,
@@ -42,6 +45,13 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
         if (!img.isNull()) {
             m_lastImage = img;
             m_lastPaintMs = QDateTime::currentMSecsSinceEpoch();
+            if (!m_hasFrame) {
+                m_hasFrame = true;
+                QMetaObject::invokeMethod(this, [this]() {
+                    emit hasFrameChanged();
+                    emit framePresented();
+                }, Qt::QueuedConnection);
+            }
         }
     }
 
