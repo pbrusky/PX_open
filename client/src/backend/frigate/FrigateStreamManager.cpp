@@ -128,6 +128,7 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     }, Qt::QueuedConnection);
 
     if (!isFallback) {
+        // Trying real main profile (camera_main). On fail → base once.
         connect(worker, &FFmpegWorker::openInputFailed, this,
                 [this, cameraName](const QString&) {
             m_mainMissing.insert(cameraName);
@@ -195,36 +196,24 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     queue->resetReceived();
     m_fullscreenQueues.insert(cameraName, queue);
 
+    // Always notify QML so SUB→HQ promotion works (main or base).
     connect(queue, &FrameQueue::frameReady, this,
             [this, cameraName]() {
-        if (m_fullscreenFrameNotified.contains(cameraName))
-            return;
         if (!m_fullscreenQueues.contains(cameraName))
             return;
-        m_fullscreenFrameNotified.insert(cameraName);
         emit fullscreenFrameReady(cameraName);
     }, Qt::QueuedConnection);
 
-    const QString baseUrl = buildRtspUrl(m_serverIp, cameraName);
-    const QString mainUrl = buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"));
-
-    // Always start BASE first so fullscreen always gets frames
-    startFullscreenWorker(cameraName, queue, baseUrl, true);
-
-    // Then try MAIN profile if not known missing
-    if (!m_mainMissing.contains(cameraName)) {
-        QTimer::singleShot(400, this, [this, cameraName, mainUrl]() {
-            if (!m_fullscreenQueues.contains(cameraName))
-                return;
-            if (m_mainMissing.contains(cameraName))
-                return;
-            FrameQueue* q = m_fullscreenQueues.value(cameraName);
-            if (!q)
-                return;
-            m_fullscreenFrameNotified.remove(cameraName);
-            q->resetReceived();
-            startFullscreenWorker(cameraName, q, mainUrl, false);
-        });
+    // Prefer real main profile when not known missing.
+    // test4 → rtsp://.../test4_main ; cameras without _main fall back once.
+    const bool tryMain = !m_mainMissing.contains(cameraName);
+    if (tryMain) {
+        const QString mainUrl =
+            buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"));
+        startFullscreenWorker(cameraName, queue, mainUrl, false);
+    } else {
+        const QString baseUrl = buildRtspUrl(m_serverIp, cameraName);
+        startFullscreenWorker(cameraName, queue, baseUrl, true);
     }
 
     return queue;
@@ -243,7 +232,7 @@ QObject* FrigateStreamManager::getPlaybackQueue(const QString& cameraName)
     m_playbackQueues.insert(cameraName, queue);
 
     const QString url = QStringLiteral("%1/api/playback/%2").arg(m_server, cameraName);
-    
+
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);

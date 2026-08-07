@@ -142,6 +142,8 @@ Item {
                 font.pixelSize: 13
             }
             Text {
+                // MAIN = fullscreen HQ stream is showing
+                // (main profile when go2rtc has camera_main, else base HQ)
                 text: root.mainReady ? "MAIN" : "SUB"
                 color: root.mainReady ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
