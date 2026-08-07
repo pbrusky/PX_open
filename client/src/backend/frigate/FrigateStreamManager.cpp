@@ -128,7 +128,7 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     }, Qt::QueuedConnection);
 
     if (!isFallback) {
-        // Trying real main profile (camera_main). On fail → base once.
+        // Trying camera_main. On fail → mark missing and start base once.
         connect(worker, &FFmpegWorker::openInputFailed, this,
                 [this, cameraName](const QString&) {
             m_mainMissing.insert(cameraName);
@@ -196,7 +196,7 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     queue->resetReceived();
     m_fullscreenQueues.insert(cameraName, queue);
 
-    // Always notify QML so SUB→HQ promotion works (main or base).
+    // Notify QML whenever HQ frames arrive (main or base fallback).
     connect(queue, &FrameQueue::frameReady, this,
             [this, cameraName]() {
         if (!m_fullscreenQueues.contains(cameraName))
@@ -204,10 +204,9 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
         emit fullscreenFrameReady(cameraName);
     }, Qt::QueuedConnection);
 
-    // Prefer real main profile when not known missing.
-    // test4 → rtsp://.../test4_main ; cameras without _main fall back once.
-    const bool tryMain = !m_mainMissing.contains(cameraName);
-    if (tryMain) {
+    // Prefer real main profile first (test4 → test4_main).
+    // Cameras without _main get one 404 then base.
+    if (!m_mainMissing.contains(cameraName)) {
         const QString mainUrl =
             buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"));
         startFullscreenWorker(cameraName, queue, mainUrl, false);
