@@ -1,4 +1,5 @@
 #pragma once
+
 #include <QObject>
 #include <QImage>
 #include <QMutex>
@@ -21,9 +22,10 @@ public:
 
     void setMaxSize(int size) { m_maxSize = size; }
 
-    // QML can poll this to know MAIN has real frames
     Q_INVOKABLE bool hasFrames() const;
     Q_INVOKABLE int frameCount() const;
+    Q_INVOKABLE bool hasReceivedFrames() const;
+    Q_INVOKABLE void resetReceived();
 
 signals:
     void frameReady();
@@ -31,9 +33,9 @@ signals:
 private:
     mutable QMutex m_mutex;
     int m_maxSize = 2;
+    bool m_receivedAny = false;
 
     QImage m_lastImage;
-    qint64 m_lastEmitMs = 0;
     QQueue<QImage> m_imageQueue;
     QQueue<ID3D11Texture2D*> m_textureQueue;
 };

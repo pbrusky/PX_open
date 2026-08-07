@@ -20,37 +20,28 @@ FrigateAPI::FrigateAPI(QObject* parent)
 
     connect(m_cameraManager, &FrigateCameraManager::camerasLoaded,
             this, &FrigateAPI::camerasLoaded);
-
     connect(m_cameraManager, &FrigateCameraManager::cameraOnline,
             this, &FrigateAPI::cameraOnline);
-
     connect(m_cameraManager, &FrigateCameraManager::cameraOffline,
             this, &FrigateAPI::cameraOffline);
-
     connect(m_cameraManager, &FrigateCameraManager::cameraAddResult,
             this, &FrigateAPI::cameraAddResult);
-
     connect(m_cameraManager, &FrigateCameraManager::cameraEditResult,
             this, &FrigateAPI::cameraEditResult);
-
     connect(m_cameraManager, &FrigateCameraManager::cameraRemoveResult,
             this, &FrigateAPI::cameraRemoveResult);
 
     connect(m_onvif, &FrigateOnvif::onvifDevicesDiscovered,
             this, &FrigateAPI::onvifDevicesDiscovered);
-
     connect(m_onvif, &FrigateOnvif::onvifProgress,
             this, &FrigateAPI::onvifProgress);
-
     connect(m_onvif, &FrigateOnvif::rtspResolved,
             this, &FrigateAPI::rtspResolved);
-
     connect(m_onvif, &FrigateOnvif::onvifError,
             this, &FrigateAPI::onvifError);
 
     connect(m_timeline, &FrigateTimeline::recordingsLoaded,
             this, &FrigateAPI::recordingsLoaded);
-
     connect(m_timeline, &FrigateTimeline::eventsLoaded,
             this, &FrigateAPI::eventsLoaded);
 
@@ -59,12 +50,14 @@ FrigateAPI::FrigateAPI(QObject* parent)
 
     connect(m_streamManager, &FrigateStreamManager::cameraOnline,
             this, &FrigateAPI::cameraOnline);
-
     connect(m_streamManager, &FrigateStreamManager::cameraOffline,
             this, &FrigateAPI::cameraOffline);
-
     connect(m_streamManager, &FrigateStreamManager::cameraStatsChanged,
             this, &FrigateAPI::cameraStatsChanged);
+    connect(m_streamManager, &FrigateStreamManager::fullscreenFrameReady,
+            this, &FrigateAPI::fullscreenFrameReady);
+    connect(m_streamManager, &FrigateStreamManager::fullscreenUsingSub,
+            this, &FrigateAPI::fullscreenUsingSub);
 
     connect(m_cameraManager, &FrigateCameraManager::moduleInformationReceived,
             this, &FrigateAPI::moduleInformationReceived);
@@ -72,32 +65,34 @@ FrigateAPI::FrigateAPI(QObject* parent)
 
 void FrigateAPI::setServer(QString server)
 {
+    if (m_server == server)
+        return;
     m_server = server;
-    emit serverChanged();
-
     m_cameraManager->setServer(server);
-    m_timeline->setServer(server);
     m_streamManager->setServer(server);
+    m_timeline->setServer(server);
     m_playback->setServer(server);
+    emit serverChanged();
 }
 
 void FrigateAPI::setModuleServer(QString server)
 {
+    if (m_moduleServer == server)
+        return;
     m_moduleServer = server;
-    emit moduleServerChanged();
-
     m_cameraManager->setModuleServer(server);
-    m_onvif->setModuleServer(server);
     m_timeline->setModuleServer(server);
+    m_onvif->setModuleServer(server);
+    emit moduleServerChanged();
 }
 
 void FrigateAPI::setServerIp(QString ip)
 {
+    if (m_serverIp == ip)
+        return;
     m_serverIp = ip;
-    emit serverIpChanged();
-
     m_streamManager->setServerIp(ip);
-    m_playback->setServerIp(ip);
+    emit serverIpChanged();
 }
 
 void FrigateAPI::loadCameras()
@@ -180,10 +175,14 @@ void FrigateAPI::stopAllStreams()
     m_streamManager->stopAllStreams();
 }
 
+void FrigateAPI::stopAllStreamsAndWait(int timeoutMs)
+{
+    m_streamManager->stopAllStreamsAndWait(timeoutMs);
+}
+
 QObject* FrigateAPI::getWorker(const QString& cameraName)
 {
-    Q_UNUSED(cameraName);
-    return nullptr;
+    return m_streamManager->getWorker(cameraName);
 }
 
 void FrigateAPI::loadRecordings(const QString& cameraId)
@@ -236,7 +235,6 @@ void FrigateAPI::testRtsp(const QString& url)
     qDebug() << "FrigateAPI::testRtsp REAL TEST for URL:" << url;
 
     QString program = "ffmpeg";
-
     QStringList args;
     args << "-rtsp_transport" << "tcp"
          << "-i" << url
@@ -245,11 +243,9 @@ void FrigateAPI::testRtsp(const QString& url)
          << "-";
 
     QProcess* ff = new QProcess(this);
-
     connect(ff, &QProcess::finished, this, [this, ff](int exitCode, QProcess::ExitStatus status) {
         QByteArray err = ff->readAllStandardError();
         QString errorText = QString(err);
-
         QString shortError;
 
         if (errorText.contains("401") || errorText.contains("Unauthorized"))
@@ -267,15 +263,13 @@ void FrigateAPI::testRtsp(const QString& url)
         else
             shortError = "Unknown RTSP error";
 
-        if (status == QProcess::NormalExit && exitCode == 0) {
+        if (status == QProcess::NormalExit && exitCode == 0)
             emit rtspTestResult(true, "RTSP Test Passed");
-        } else {
+        else
             emit rtspTestResult(false, "RTSP Test Failed: " + shortError);
-        }
 
         ff->deleteLater();
     });
-
     ff->start(program, args);
 }
 

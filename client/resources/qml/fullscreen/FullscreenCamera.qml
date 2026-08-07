@@ -16,88 +16,89 @@ Item {
     property bool isOnline: false
     property bool closeEnabled: false
     property bool mainReady: false
-    property string streamLabel: mainReady ? "MAIN" : "SUB"
 
     signal requestClose()
 
-    onSubQueueChanged: {
-        subVideo.queue = subQueue
-    }
-
+    onSubQueueChanged: subVideo.queue = subQueue
     onMainQueueChanged: {
         mainReady = false
         mainVideo.queue = mainQueue
-        mainFrameConn.target = mainQueue
-        if (mainQueue)
+        if (visible && mainQueue)
             forceMainTimer.restart()
-        else
-            forceMainTimer.stop()
     }
+    onFrigateRefChanged: apiConn.target = frigateRef
 
     Rectangle {
         anchors.fill: parent
         color: "black"
     }
 
-    // SUB always under MAIN (never hide completely — avoids black flash)
     CameraVideoItem {
         id: subVideo
         anchors.fill: parent
         z: 0
-        visible: true
-        opacity: 1
+        opacity: mainReady ? 0.0 : 1.0
         queue: subQueue
     }
 
-    // MAIN on top once frames arrive
     CameraVideoItem {
         id: mainVideo
         anchors.fill: parent
         z: 1
-        visible: true
-        opacity: mainReady ? 1 : 0
+        opacity: mainReady ? 1.0 : 0.0
         queue: mainQueue
+
+        onFramePresented: {
+            root.mainReady = true
+            forceMainTimer.stop()
+        }
+
+        onHasFrameChanged: {
+            if (hasFrame) {
+                root.mainReady = true
+                forceMainTimer.stop()
+            }
+        }
     }
 
     Connections {
-        id: mainFrameConn
-        target: null
+        id: apiConn
+        target: frigateRef
         ignoreUnknownSignals: true
 
-        function onFrameReady() {
-            if (mainReady)
-                return
-            mainReady = true
-            forceMainTimer.stop()
-            console.log("Fullscreen: SUB → MAIN for", cameraName, "(frameReady)")
+        function onFullscreenFrameReady(name) {
+            if (name === root.cameraName || name === root.cameraId)
+                forceMainTimer.restart()
         }
     }
 
     Timer {
         id: forceMainTimer
-        interval: 1500
-        repeat: false
+        interval: 100
+        repeat: true
+        running: false
         onTriggered: {
-            if (mainReady || !mainQueue)
+            if (root.mainReady) {
+                stop()
                 return
-            var ok = false
-            try { ok = mainQueue.hasFrames() } catch (e) {}
-            if (ok) {
-                mainReady = true
-                console.log("Fullscreen: SUB → MAIN for", cameraName, "(timer)")
-            } else {
-                console.log("Fullscreen: still waiting for MAIN frames", cameraName)
+            }
+            if (mainVideo.hasFrame) {
+                root.mainReady = true
+                stop()
+                return
+            }
+            if (root.mainQueue && typeof root.mainQueue.hasReceivedFrames === "function"
+                    && root.mainQueue.hasReceivedFrames()) {
+                root.mainReady = true
+                stop()
             }
         }
     }
 
     Timer {
         id: closeArmTimer
-        interval: 1200
-        onTriggered: {
-            root.closeEnabled = true
-            console.log("Fullscreen close armed")
-        }
+        interval: 400
+        onTriggered: root.closeEnabled = true
     }
 
     FocusScope {
@@ -106,7 +107,6 @@ Item {
         z: 20
         Keys.onReleased: function(event) {
             if (event.key === Qt.Key_Escape && root.closeEnabled) {
-                console.log("Fullscreen ESC exit")
                 root.requestClose()
                 event.accepted = true
             }
@@ -117,14 +117,7 @@ Item {
         anchors.fill: parent
         z: 15
         acceptedButtons: Qt.LeftButton
-
-        // NX-style: double-click exits after arm delay
-        onDoubleClicked: {
-            if (root.closeEnabled) {
-                console.log("Fullscreen double-click exit")
-                root.requestClose()
-            }
-        }
+        onDoubleClicked: if (root.closeEnabled) root.requestClose()
     }
 
     Rectangle {
@@ -149,7 +142,9 @@ Item {
                 font.pixelSize: 13
             }
             Text {
-                text: root.streamLabel
+                // MAIN = fullscreen HQ stream is showing
+                // (main profile when go2rtc has camera_main, else base HQ)
+                text: root.mainReady ? "MAIN" : "SUB"
                 color: root.mainReady ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
             }
@@ -173,10 +168,7 @@ Item {
         }
         MouseArea {
             anchors.fill: parent
-            onClicked: {
-                console.log("Fullscreen Exit button")
-                root.requestClose()
-            }
+            onClicked: root.requestClose()
         }
     }
 
@@ -186,16 +178,18 @@ Item {
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
-        if (mainQueue) {
-            mainFrameConn.target = mainQueue
+        apiConn.target = frigateRef
+        subVideo.queue = subQueue
+        mainVideo.queue = mainQueue
+        if (mainQueue)
             forceMainTimer.restart()
-        }
+        else
+            forceMainTimer.stop()
     }
 
     function close() {
-        forceMainTimer.stop()
         closeArmTimer.stop()
-        mainFrameConn.target = null
+        forceMainTimer.stop()
         closeEnabled = false
         visible = false
         mainReady = false

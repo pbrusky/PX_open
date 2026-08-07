@@ -31,6 +31,7 @@ public:
     Q_INVOKABLE void stopFullscreenStream(const QString& cameraName);
     Q_INVOKABLE void stopAllFullscreenStreams();
     Q_INVOKABLE void stopAllStreams();
+    Q_INVOKABLE void stopAllStreamsAndWait(int timeoutMs = 3000);
 
     Q_INVOKABLE QObject* getWorker(const QString& cameraName);
     Q_INVOKABLE QObject* getPlaybackWorker(const QString& cameraName);
@@ -45,6 +46,8 @@ signals:
     void cameraOffline(QString id);
     void cameraStatsChanged(QString cameraName, QString resolution,
                             double fps, int bitrateKbps, QString codec);
+    void fullscreenFrameReady(QString cameraName);
+    void fullscreenUsingSub(QString cameraName);
 
 private:
     void stopFullscreenInternal(const QString& cameraName);
@@ -57,6 +60,7 @@ private:
     QString m_serverIp;
 
     QSet<QString> m_mainMissing;
+    QSet<QString> m_fullscreenFrameNotified;
 
     QHash<QString, FrameQueue*>   m_queues;
     QHash<QString, FFmpegWorker*> m_workers;
