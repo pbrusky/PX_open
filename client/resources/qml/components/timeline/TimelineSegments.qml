@@ -12,31 +12,31 @@ Item {
     property real timelineWidth: width
     property var timestampToX
 
+    // NX-style continuous recording track
     Repeater {
         model: recordings
 
         Rectangle {
-            height: Math.max(12, parent.height - 4)
-            y: 2
-            radius: 3
-            border.color: "#5BA3FF"
+            height: Math.max(16, parent ? parent.height - 2 : 16)
+            y: 1
+            radius: 2
+            color: "#2F6FED"
+            border.color: "#5B9BFF"
             border.width: 1
-            clip: true
-
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#3A8DFFAA" }
-                GradientStop { position: 1.0; color: "#2E6BFF66" }
-            }
 
             width: {
-                if (!timestampToX)
-                    return 8
-                var x1 = timestampToX(modelData.start * 1000)
-                var x2 = timestampToX(modelData.end * 1000)
-                return Math.max(6, x2 - x1)
+                if (typeof timestampToX !== "function")
+                    return Math.max(8, parent ? parent.width : 8)
+                var x1 = timestampToX(Number(modelData.start) * 1000)
+                var x2 = timestampToX(Number(modelData.end) * 1000)
+                return Math.max(8, x2 - x1)
             }
 
-            x: timestampToX ? timestampToX(modelData.start * 1000) : 0
+            x: {
+                if (typeof timestampToX !== "function")
+                    return 0
+                return timestampToX(Number(modelData.start) * 1000)
+            }
         }
     }
 }

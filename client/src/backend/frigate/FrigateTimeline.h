@@ -31,6 +31,8 @@ signals:
     void eventsLoaded(const QString& cameraId, const QVariantList& events);
 
 private:
+    void loadRecordingsFallback(const QString& cameraId);
+
     QString m_server;
     QString m_moduleServer;
     QNetworkAccessManager* m_net;

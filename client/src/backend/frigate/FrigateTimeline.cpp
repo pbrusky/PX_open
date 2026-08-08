@@ -7,50 +7,92 @@
 #include <QNetworkReply>
 #include <QUrlQuery>
 #include <QDateTime>
+#include <QTimeZone>
 #include <QDebug>
-#include <algorithm>
 
 namespace {
 
-// Merge tiny Frigate segments into continuous blocks (gap <= 3 seconds)
-QVariantList mergeRecordingSegments(QVariantList segments)
+QVariantList mergeBlocks(QVariantList blocks)
 {
-    if (segments.isEmpty())
-        return segments;
+    if (blocks.isEmpty())
+        return blocks;
 
-    std::sort(segments.begin(), segments.end(), [](const QVariant& a, const QVariant& b) {
+    std::sort(blocks.begin(), blocks.end(), [](const QVariant& a, const QVariant& b) {
         return a.toMap().value(QStringLiteral("start")).toDouble()
              < b.toMap().value(QStringLiteral("start")).toDouble();
     });
 
-    QVariantList merged;
-    QVariantMap current = segments.first().toMap();
+    QVariantList out;
+    QVariantMap cur = blocks.first().toMap();
 
-    for (int i = 1; i < segments.size(); ++i) {
-        const QVariantMap next = segments.at(i).toMap();
-        const double curEnd = current.value(QStringLiteral("end")).toDouble();
+    for (int i = 1; i < blocks.size(); ++i) {
+        const QVariantMap next = blocks.at(i).toMap();
+        const double curEnd = cur.value(QStringLiteral("end")).toDouble();
         const double nextStart = next.value(QStringLiteral("start")).toDouble();
         const double nextEnd = next.value(QStringLiteral("end")).toDouble();
 
-        // Continuous (or almost continuous) → extend current block
-        if (nextStart <= curEnd + 3.0) {
+        // Merge if touching / overlapping within 2 minutes
+        if (nextStart <= curEnd + 120.0) {
             if (nextEnd > curEnd)
-                current.insert(QStringLiteral("end"), nextEnd);
-            current.insert(
-                QStringLiteral("motion"),
-                current.value(QStringLiteral("motion")).toInt()
-                    + next.value(QStringLiteral("motion")).toInt());
-            current.insert(
-                QStringLiteral("objects"),
-                current.value(QStringLiteral("objects")).toInt()
-                    + next.value(QStringLiteral("objects")).toInt());
+                cur.insert(QStringLiteral("end"), nextEnd);
         } else {
-            merged.append(current);
-            current = next;
+            out.append(cur);
+            cur = next;
         }
     }
-    merged.append(current);
-    return merged;
+    out.append(cur);
+    return out;
+}
+
+// Build timeline blocks from Frigate hourly summary (fast path)
+QVariantList blocksFromSummary(const QJsonArray& days, qint64 windowStart, qint64 windowEnd)
+{
+    QVariantList blocks;
+
+    for (const QJsonValue& dayVal : days) {
+        const QJsonObject dayObj = dayVal.toObject();
+        const QString dayStr = dayObj.value(QStringLiteral("day")).toString(); // "YYYY-MM-DD"
+        if (dayStr.isEmpty())
+            continue;
+
+        const QJsonArray hours = dayObj.value(QStringLiteral("hours")).toArray();
+        for (const QJsonValue& hourVal : hours) {
+            const QJsonObject h = hourVal.toObject();
+            const double duration = h.value(QStringLiteral("duration")).toDouble();
+            if (duration <= 0.0)
+                continue;
+
+            // hour is "00" .. "23"
+            const QString hourStr = h.value(QStringLiteral("hour")).toString();
+            bool ok = false;
+            const int hour = hourStr.toInt(&ok);
+            if (!ok)
+                continue;
+
+            // Interpret day+hour as local time, convert to epoch seconds
+            QDate date = QDate::fromString(dayStr, QStringLiteral("yyyy-MM-dd"));
+            if (!date.isValid())
+                continue;
+
+            QDateTime dt(date, QTime(hour, 0, 0));
+            dt.setTimeZone(QTimeZone::systemTimeZone());
+            const qint64 start = dt.toSecsSinceEpoch();
+            const qint64 end = start + qint64(duration);
+
+            // Keep only hours overlapping the requested window
+            if (end < windowStart || start > windowEnd)
+                continue;
+
+            QVariantMap seg;
+            seg.insert(QStringLiteral("start"), double(qMax(start, windowStart)));
+            seg.insert(QStringLiteral("end"), double(qMin(end, windowEnd)));
+            seg.insert(QStringLiteral("motion"), h.value(QStringLiteral("motion")).toInt());
+            seg.insert(QStringLiteral("objects"), h.value(QStringLiteral("objects")).toInt());
+            blocks.append(seg);
+        }
+    }
+
+    return mergeBlocks(blocks);
 }
 
 } // namespace
@@ -83,7 +125,60 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         return;
     }
 
-    // Last 24 hours
+    // Serve cache immediately if we already loaded this camera
+    if (m_recordingsByCamera.contains(cameraId)
+            && !m_recordingsByCamera.value(cameraId).isEmpty()) {
+        emit recordingsLoaded(cameraId, m_recordingsByCamera.value(cameraId));
+        // Still refresh in background below
+    }
+
+    // FAST PATH: hourly summary (tiny payload, NX-style overview)
+    QUrl url(QStringLiteral("%1/api/%2/recordings/summary").arg(m_server, cameraId));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("timezone"), QStringLiteral("browser"));
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    QNetworkReply* reply = m_net->get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId]() {
+        const QByteArray data = reply->readAll();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError netErr = reply->error();
+        reply->deleteLater();
+
+        const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
+        const qint64 afterSec = nowSec - 24 * 3600;
+
+        QVariantList segments;
+
+        if (netErr != QNetworkReply::NoError || status >= 400) {
+            qWarning() << "[Timeline] summary failed for" << cameraId
+                       << "status" << status << "— falling back to segments";
+            loadRecordingsFallback(cameraId);
+            return;
+        }
+
+        const QJsonDocument doc = QJsonDocument::fromJson(data);
+        if (!doc.isArray()) {
+            qWarning() << "[Timeline] summary not array for" << cameraId
+                       << "— falling back to segments";
+            loadRecordingsFallback(cameraId);
+            return;
+        }
+
+        segments = blocksFromSummary(doc.array(), afterSec, nowSec);
+
+        m_recordingsByCamera[cameraId] = segments;
+        qDebug() << "[Timeline] summary for" << cameraId
+                 << ":" << segments.size() << "blocks (fast)";
+        emit recordingsLoaded(cameraId, segments);
+    });
+}
+
+// Slow fallback: raw segment list (only if summary fails)
+void FrigateTimeline::loadRecordingsFallback(const QString& cameraId)
+{
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
     const qint64 afterSec = nowSec - 24 * 3600;
 
@@ -94,32 +189,38 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
     url.setQuery(query);
 
     QNetworkRequest req(url);
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-
     QNetworkReply* reply = m_net->get(req);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId]() {
         const QByteArray data = reply->readAll();
-        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QNetworkReply::NetworkError err = reply->error();
         reply->deleteLater();
 
         QVariantList segments;
-
-        if (err != QNetworkReply::NoError || status >= 400) {
-            qWarning() << "[Timeline] recordings failed for" << cameraId
-                       << "status" << status << "error" << err;
-            m_recordingsByCamera[cameraId] = segments;
-            emit recordingsLoaded(cameraId, segments);
-            return;
-        }
+        double rangeStart = 0.0;
+        double rangeEnd = 0.0;
+        int rawCount = 0;
 
         const QJsonDocument doc = QJsonDocument::fromJson(data);
         if (doc.isArray()) {
             const QJsonArray arr = doc.array();
+            rawCount = arr.size();
+
+            double blockStart = 0.0;
+            double blockEnd = 0.0;
+            bool haveBlock = false;
+            const double gapTol = 3.0;
+
+            auto flush = [&]() {
+                if (!haveBlock || blockEnd <= blockStart)
+                    return;
+                QVariantMap seg;
+                seg.insert(QStringLiteral("start"), blockStart);
+                seg.insert(QStringLiteral("end"), blockEnd);
+                segments.append(seg);
+            };
+
             for (const QJsonValue& v : arr) {
                 const QJsonObject o = v.toObject();
-
                 double start = o.value(QStringLiteral("start_time")).toDouble();
                 double end   = o.value(QStringLiteral("end_time")).toDouble();
                 if (start <= 0.0)
@@ -129,23 +230,38 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
                 if (end <= start)
                     continue;
 
-                QVariantMap seg;
-                seg.insert(QStringLiteral("start"), start);
-                seg.insert(QStringLiteral("end"), end);
-                seg.insert(QStringLiteral("id"), o.value(QStringLiteral("id")).toString());
-                seg.insert(QStringLiteral("duration"), o.value(QStringLiteral("duration")).toDouble());
-                seg.insert(QStringLiteral("motion"), o.value(QStringLiteral("motion")).toInt());
-                seg.insert(QStringLiteral("objects"), o.value(QStringLiteral("objects")).toInt());
-                segments.append(seg);
+                if (rangeStart == 0.0 || start < rangeStart)
+                    rangeStart = start;
+                if (end > rangeEnd)
+                    rangeEnd = end;
+
+                if (!haveBlock) {
+                    blockStart = start;
+                    blockEnd = end;
+                    haveBlock = true;
+                } else if (start <= blockEnd + gapTol) {
+                    if (end > blockEnd)
+                        blockEnd = end;
+                } else {
+                    flush();
+                    blockStart = start;
+                    blockEnd = end;
+                }
+            }
+            flush();
+
+            if (rawCount > 50 && segments.size() <= 3 && rangeEnd > rangeStart) {
+                QVariantMap one;
+                one.insert(QStringLiteral("start"), rangeStart);
+                one.insert(QStringLiteral("end"), rangeEnd);
+                segments.clear();
+                segments.append(one);
             }
         }
 
-        const int rawCount = segments.size();
-        segments = mergeRecordingSegments(segments);
-
         m_recordingsByCamera[cameraId] = segments;
-        qDebug() << "[Timeline] recordings for" << cameraId
-                 << ":" << rawCount << "raw ->" << segments.size() << "merged";
+        qDebug() << "[Timeline] fallback segments for" << cameraId
+                 << ":" << rawCount << "raw ->" << segments.size() << "blocks";
         emit recordingsLoaded(cameraId, segments);
     });
 }
@@ -163,6 +279,9 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
         return;
     }
 
+    if (m_eventsByCamera.contains(cameraId))
+        emit eventsLoaded(cameraId, m_eventsByCamera.value(cameraId));
+
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
     const qint64 afterSec = nowSec - 24 * 3600;
 
@@ -171,7 +290,7 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
     query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
     query.addQueryItem(QStringLiteral("before"), QString::number(nowSec));
-    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("500"));
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("300"));
     query.addQueryItem(QStringLiteral("include_thumbnails"), QStringLiteral("0"));
     url.setQuery(query);
 
@@ -180,24 +299,12 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId]() {
         const QByteArray data = reply->readAll();
-        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QNetworkReply::NetworkError err = reply->error();
         reply->deleteLater();
 
         QVariantList events;
-
-        if (err != QNetworkReply::NoError || status >= 400) {
-            qWarning() << "[Timeline] events failed for" << cameraId
-                       << "status" << status;
-            m_eventsByCamera[cameraId] = events;
-            emit eventsLoaded(cameraId, events);
-            return;
-        }
-
         const QJsonDocument doc = QJsonDocument::fromJson(data);
         if (doc.isArray()) {
-            const QJsonArray arr = doc.array();
-            for (const QJsonValue& v : arr) {
+            for (const QJsonValue& v : doc.array()) {
                 const QJsonObject o = v.toObject();
                 const QString cam = o.value(QStringLiteral("camera")).toString();
                 if (!cam.isEmpty() && cam != cameraId)
