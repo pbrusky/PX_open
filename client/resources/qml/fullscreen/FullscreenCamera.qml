@@ -13,9 +13,11 @@ Item {
     property var frigateRef: null
     property var subQueue: null
     property var mainQueue: null
+    property var playbackQueue: null
     property bool isOnline: false
     property bool closeEnabled: false
     property bool mainReady: false
+    property bool isPlayback: false
 
     signal requestClose()
 
@@ -23,7 +25,7 @@ Item {
     onMainQueueChanged: {
         mainReady = false
         mainVideo.queue = mainQueue
-        if (visible && mainQueue)
+        if (visible && mainQueue && !isPlayback)
             forceMainTimer.restart()
     }
     onFrigateRefChanged: apiConn.target = frigateRef
@@ -33,32 +35,44 @@ Item {
         color: "black"
     }
 
+    // LIVE sub (until main ready)
     CameraVideoItem {
         id: subVideo
         anchors.fill: parent
         z: 0
-        opacity: mainReady ? 0.0 : 1.0
+        opacity: (!isPlayback && !mainReady) ? 1.0 : 0.0
         queue: subQueue
     }
 
+    // LIVE main / HQ
     CameraVideoItem {
         id: mainVideo
         anchors.fill: parent
         z: 1
-        opacity: mainReady ? 1.0 : 0.0
+        opacity: (!isPlayback && mainReady) ? 1.0 : 0.0
         queue: mainQueue
 
         onFramePresented: {
-            root.mainReady = true
-            forceMainTimer.stop()
-        }
-
-        onHasFrameChanged: {
-            if (hasFrame) {
+            if (!root.isPlayback) {
                 root.mainReady = true
                 forceMainTimer.stop()
             }
         }
+        onHasFrameChanged: {
+            if (hasFrame && !root.isPlayback) {
+                root.mainReady = true
+                forceMainTimer.stop()
+            }
+        }
+    }
+
+    // PLAYBACK layer
+    CameraVideoItem {
+        id: playbackVideo
+        anchors.fill: parent
+        z: 2
+        opacity: isPlayback ? 1.0 : 0.0
+        queue: playbackQueue
     }
 
     Connections {
@@ -67,7 +81,7 @@ Item {
         ignoreUnknownSignals: true
 
         function onFullscreenFrameReady(name) {
-            if (name === root.cameraName || name === root.cameraId)
+            if (!root.isPlayback && (name === root.cameraName || name === root.cameraId))
                 forceMainTimer.restart()
         }
 
@@ -80,7 +94,15 @@ Item {
         function onEventsLoaded(id, list) {
             if (id !== root.cameraId && id !== root.cameraName)
                 return
-            applyEvents(list)
+            if (timelineLoader.item)
+                timelineLoader.item.events = list
+        }
+
+        function onPlaybackPositionChanged(id, posMs) {
+            if (id !== root.cameraId && id !== root.cameraName)
+                return
+            if (timelineLoader.item)
+                timelineLoader.item.playbackPositionMs = posMs
         }
     }
 
@@ -90,17 +112,11 @@ Item {
         repeat: true
         running: false
         onTriggered: {
-            if (root.mainReady) {
+            if (root.isPlayback || root.mainReady) {
                 stop()
                 return
             }
             if (mainVideo.hasFrame) {
-                root.mainReady = true
-                stop()
-                return
-            }
-            if (root.mainQueue && typeof root.mainQueue.hasReceivedFrames === "function"
-                    && root.mainQueue.hasReceivedFrames()) {
                 root.mainReady = true
                 stop()
             }
@@ -122,7 +138,6 @@ Item {
         }
     }
 
-    // Pull recordings if the signal was missed (race on open)
     Timer {
         id: recordingsPollTimer
         interval: 400
@@ -131,13 +146,8 @@ Item {
         property int tries: 0
         onTriggered: {
             tries++
-            if (!frigateRef || !timelineLoader.item) {
-                if (tries >= 15)
-                    stop()
-                return
-            }
             var id = root.cameraId !== "" ? root.cameraId : root.cameraName
-            if (typeof frigateRef.getRecordingsForCamera === "function") {
+            if (frigateRef && typeof frigateRef.getRecordingsForCamera === "function") {
                 var segs = frigateRef.getRecordingsForCamera(id)
                 if (segs && segs.length > 0) {
                     applyRecordings(segs)
@@ -145,7 +155,7 @@ Item {
                     return
                 }
             }
-            if (tries >= 15)
+            if (tries >= 20)
                 stop()
         }
     }
@@ -172,6 +182,7 @@ Item {
         onDoubleClicked: if (root.closeEnabled) root.requestClose()
     }
 
+    // Top bar
     Rectangle {
         height: 36
         width: parent.width
@@ -189,15 +200,42 @@ Item {
                 font.bold: true
             }
             Text {
-                text: "LIVE"
-                color: "#00C853"
+                text: root.isPlayback ? "PLAYBACK" : "LIVE"
+                color: root.isPlayback ? "#FFC107" : "#00C853"
                 font.pixelSize: 13
+                font.bold: true
             }
             Text {
-                text: root.mainReady ? "MAIN" : "SUB"
+                text: root.isPlayback ? "" : (root.mainReady ? "MAIN" : "SUB")
                 color: root.mainReady ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
             }
+        }
+    }
+
+    // LIVE button (visible in playback)
+    Rectangle {
+        width: 70
+        height: 28
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.rightMargin: 90
+        anchors.topMargin: 10
+        radius: 4
+        color: root.isPlayback ? "#1B5E20" : "#00000055"
+        border.color: root.isPlayback ? "#00C853" : "#444"
+        border.width: 1
+        z: 31
+        visible: true
+        Text {
+            anchors.centerIn: parent
+            text: "Live"
+            color: "white"
+            font.pixelSize: 13
+        }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.returnToLive()
         }
     }
 
@@ -231,7 +269,12 @@ Item {
         height: item ? Math.max(item.height, 0) : 0
         source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
         active: true
-        onLoaded: applyTimelineCamera()
+        onLoaded: {
+            applyTimelineCamera()
+            if (item) {
+                item.seekRequested.connect(root.onTimelineSeek)
+            }
+        }
     }
 
     MouseArea {
@@ -243,7 +286,6 @@ Item {
         z: 60
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
-
         onEntered: {
             showTimelineBar()
             timelineHideTimer.stop()
@@ -271,6 +313,7 @@ Item {
         timelineLoader.item.frigateRef = root.frigateRef
         timelineLoader.item.allowAutoReveal = true
         timelineLoader.item.collapsed = false
+        timelineLoader.item.isPlayback = root.isPlayback
         timelineHideTimer.restart()
     }
 
@@ -281,14 +324,45 @@ Item {
         if (segments && segments.length > 0) {
             timelineLoader.item.startTs = segments[0].start
             timelineLoader.item.endTs = segments[segments.length - 1].end
-            console.log("Timeline UI: applied", segments.length, "blocks for", root.cameraName)
         }
     }
 
-    function applyEvents(list) {
-        if (!timelineLoader.item)
+    function onTimelineSeek(tsMs) {
+        if (!frigateRef || !root.cameraName)
             return
-        timelineLoader.item.events = list
+
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        console.log("Seek playback", id, "at", tsMs)
+
+        // Bind playback queue
+        if (typeof frigateRef.getPlaybackQueue === "function") {
+            root.playbackQueue = frigateRef.getPlaybackQueue(id)
+            playbackVideo.queue = root.playbackQueue
+        }
+
+        if (typeof frigateRef.startPlayback === "function")
+            frigateRef.startPlayback(id, Math.floor(tsMs))
+
+        root.isPlayback = true
+        if (timelineLoader.item) {
+            timelineLoader.item.isPlayback = true
+            timelineLoader.item.playbackPositionMs = tsMs
+        }
+    }
+
+    function returnToLive() {
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        if (frigateRef && typeof frigateRef.switchToLive === "function")
+            frigateRef.switchToLive(id)
+
+        root.isPlayback = false
+        playbackVideo.queue = null
+        root.playbackQueue = null
+
+        if (timelineLoader.item) {
+            timelineLoader.item.isPlayback = false
+            timelineLoader.item.playbackPositionMs = 0
+        }
     }
 
     function loadTimelineData() {
@@ -301,7 +375,6 @@ Item {
             frigateRef.loadRecordings(id)
         if (typeof frigateRef.loadEvents === "function")
             frigateRef.loadEvents(id)
-
         recordingsPollTimer.tries = 0
         recordingsPollTimer.start()
     }
@@ -309,22 +382,22 @@ Item {
     function open() {
         closeEnabled = false
         mainReady = false
+        isPlayback = false
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
         apiConn.target = frigateRef
         subVideo.queue = subQueue
         mainVideo.queue = mainQueue
+        playbackVideo.queue = null
         if (mainQueue)
             forceMainTimer.restart()
-        else
-            forceMainTimer.stop()
-
         applyTimelineCamera()
         loadTimelineData()
     }
 
     function close() {
+        returnToLive()
         closeArmTimer.stop()
         forceMainTimer.stop()
         timelineHideTimer.stop()
@@ -334,18 +407,17 @@ Item {
         mainReady = false
         subQueue = null
         mainQueue = null
+        playbackQueue = null
         subVideo.queue = null
         mainVideo.queue = null
+        playbackVideo.queue = null
 
         if (timelineLoader.item) {
             timelineLoader.item.allowAutoReveal = false
             timelineLoader.item.collapsed = true
             timelineLoader.item.cameraId = ""
-            timelineLoader.item.cameraName = ""
             timelineLoader.item.recordings = []
             timelineLoader.item.events = []
-            timelineLoader.item.startTs = 0
-            timelineLoader.item.endTs = 0
         }
     }
 }

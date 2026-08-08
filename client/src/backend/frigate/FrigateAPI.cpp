@@ -152,7 +152,7 @@ QObject* FrigateAPI::getFullscreenQueue(const QString& cameraName)
 
 QObject* FrigateAPI::getPlaybackQueue(const QString& cameraName)
 {
-    return m_streamManager->getPlaybackQueue(cameraName);
+    return m_playback->getPlaybackQueue(cameraName);
 }
 
 void FrigateAPI::stopStream(const QString& cameraName)
