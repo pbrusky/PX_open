@@ -48,7 +48,7 @@ QObject* FrigatePlayback::getPlaybackQueue(const QString& cameraId)
         return m_playbackQueues.value(cameraId);
 
     FrameQueue* queue = new FrameQueue(this);
-    queue->setMaxSize(3);
+    queue->setMaxSize(2);
     m_playbackQueues.insert(cameraId, queue);
     return queue;
 }
@@ -67,37 +67,27 @@ void FrigatePlayback::stopWorkerSync(const QString& cameraId)
     if (!worker && !thread)
         return;
 
-    // Prevent auto-cleanup slots from racing with this function
     if (worker)
         QObject::disconnect(worker, nullptr, this, nullptr);
-    if (thread)
-        QObject::disconnect(thread, nullptr, this, nullptr);
 
-    if (worker) {
-        if (thread)
-            QObject::disconnect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
+    if (worker)
         worker->stopDecoding();
-    }
 
     if (thread) {
         if (thread->isRunning()) {
-            thread->quit();
-            if (!thread->wait(10000)) {
-                qWarning() << "[Playback] thread wait timeout, terminate" << cameraId;
-                thread->terminate();
-                thread->wait(1000);
+            if (!thread->wait(8000)) {
+                qWarning() << "[Playback] thread still stopping (async)" << cameraId;
+                QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+                if (worker)
+                    QObject::connect(thread, &QThread::finished, worker, &QObject::deleteLater);
+                return;
             }
         }
-        // Thread is fully stopped — safe to delete
         delete thread;
-        thread = nullptr;
     }
 
-    if (worker) {
-        // Worker is no longer running on a thread
+    if (worker)
         delete worker;
-        worker = nullptr;
-    }
 }
 
 void FrigatePlayback::stopPlayback(const QString& cameraId)
@@ -123,31 +113,32 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 
     const qint64 wall = QDateTime::currentMSecsSinceEpoch();
     if (m_lastSeekMs.contains(cameraId) &&
-        (wall - m_lastSeekMs.value(cameraId) < 800)) {
-        qDebug() << "[Playback] debounced seek" << cameraId;
+        (wall - m_lastSeekMs.value(cameraId) < 1200)) {
+        qDebug() << "[Playback] debounced" << cameraId;
         return;
     }
     m_lastSeekMs[cameraId] = wall;
 
     qint64 startSec = timestampMs;
-    if (timestampMs > 100000000000LL) // ms → sec
+    if (timestampMs > 100000000000LL)
         startSec = timestampMs / 1000;
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    qint64 endSec = startSec + 30;
+    // 60s window is fine for HLS (no full re-mux)
+    qint64 endSec = startSec + 60;
     if (endSec > nowSec)
         endSec = nowSec;
     if (endSec <= startSec)
-        endSec = startSec + 10;
+        endSec = startSec + 15;
 
-    const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
+    // Frigate HLS VOD — more reliable than progressive clip.mp4
+    const QString url = QStringLiteral("%1/vod/%2/start/%3/end/%4/index.m3u8")
                             .arg(m_server, cameraId)
                             .arg(startSec)
                             .arg(endSec);
 
-    qDebug() << "[Playback] start" << cameraId << startSec << "->" << endSec << url;
+    qDebug() << "[Playback] start HLS" << cameraId << startSec << "->" << endSec << url;
 
-    // Fully stop previous worker/thread BEFORE creating a new one
     stopWorkerSync(cameraId);
 
     FrameQueue* queue = qobject_cast<FrameQueue*>(getPlaybackQueue(cameraId));
@@ -161,21 +152,21 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     worker->setFrameQueue(queue);
     worker->setHighQuality(true);
 
-    QThread* thread = new QThread(); // no parent — we own lifetime
+    QThread* thread = new QThread();
 
+    // Do NOT emit cameraOnline/cameraOffline here — those are for live streams
+    // and can trigger UI paths that call switchToLive().
     connect(worker, &FFmpegWorker::openInputOk, this, [this, cameraId]() {
         qDebug() << "[Playback] open OK" << cameraId;
-        emit cameraOnline(cameraId);
         emit playbackStarted(cameraId);
     }, Qt::QueuedConnection);
 
     connect(worker, &FFmpegWorker::openInputFailed, this,
             [this, cameraId](const QString& reason) {
         qWarning() << "[Playback] open failed" << cameraId << reason;
-        emit cameraOffline(cameraId);
+        emit playbackStopped(cameraId);
     }, Qt::QueuedConnection);
 
-    // Only quit the thread when worker finishes — do NOT deleteLater here
     connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
     connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
 

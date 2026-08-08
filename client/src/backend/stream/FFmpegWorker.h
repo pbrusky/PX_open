@@ -4,6 +4,7 @@
 #include <QString>
 #include <QImage>
 #include <QSet>
+#include <atomic>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -39,7 +40,7 @@ public:
     QString codec() const { return m_codec; }
 
     AVPixelFormat hwPixFmt() const { return m_hwPixFmt; }
-    bool isAbortRequested() const { return m_abort; }
+    bool isAbortRequested() const { return m_abort.load(); }
 
 public slots:
     void startDecoding();
@@ -69,12 +70,10 @@ private:
                    bool tryHw);
     void clearHw();
 
-    static QSet<QString>& hwBlacklist();
-    static void markHwFailed(const QString& url);
-    static bool isHwBlacklisted(const QString& url);
+    static int decodeInterruptCb(void* opaque);
 
     QString m_url;
-    bool m_abort = false;
+    std::atomic_bool m_abort{false};
     bool m_testMode = false;
     bool m_highQuality = false;
 

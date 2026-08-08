@@ -47,6 +47,10 @@ FrigateAPI::FrigateAPI(QObject* parent)
 
     connect(m_playback, &FrigatePlayback::playbackPositionChanged,
             this, &FrigateAPI::playbackPositionChanged);
+    connect(m_playback, &FrigatePlayback::playbackStarted,
+            this, &FrigateAPI::playbackStarted);
+    connect(m_playback, &FrigatePlayback::playbackStopped,
+            this, &FrigateAPI::playbackStopped);
 
     connect(m_streamManager, &FrigateStreamManager::cameraOnline,
             this, &FrigateAPI::cameraOnline);
@@ -82,6 +86,7 @@ void FrigateAPI::setModuleServer(QString server)
     m_moduleServer = server;
     m_cameraManager->setModuleServer(server);
     m_timeline->setModuleServer(server);
+    m_playback->setModuleServer(server);
     m_onvif->setModuleServer(server);
     emit moduleServerChanged();
 }
@@ -92,6 +97,7 @@ void FrigateAPI::setServerIp(QString ip)
         return;
     m_serverIp = ip;
     m_streamManager->setServerIp(ip);
+    m_playback->setServerIp(ip);
     emit serverIpChanged();
 }
 
@@ -152,6 +158,7 @@ QObject* FrigateAPI::getFullscreenQueue(const QString& cameraName)
 
 QObject* FrigateAPI::getPlaybackQueue(const QString& cameraName)
 {
+    // MUST come from FrigatePlayback (same object that startPlayback writes frames to)
     return m_playback->getPlaybackQueue(cameraName);
 }
 
