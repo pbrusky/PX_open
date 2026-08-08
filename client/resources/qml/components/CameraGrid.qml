@@ -217,6 +217,16 @@ Item {
             typeof frigateRef.stopFullscreenStream === "function") {
             frigateRef.stopFullscreenStream(name)
         }
+
+        // Keep the main application window in true fullscreen after
+        // the camera overlay is closed (Windows can drop out of FS
+        // when reparenting the loader).
+        if (mainWindow) {
+            if (typeof mainWindow.enterTrueFullscreen === "function")
+                mainWindow.enterTrueFullscreen()
+            else if (typeof mainWindow.showFullScreen === "function")
+                mainWindow.showFullScreen()
+        }
     }
 
     function openEditCamera(id) {

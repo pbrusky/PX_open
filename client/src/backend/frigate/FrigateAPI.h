@@ -86,6 +86,9 @@ signals:
     void cameraStatsChanged(QString cameraName, QString resolution,
                             double fps, int bitrateKbps, QString codec);
 
+    void fullscreenFrameReady(QString cameraName);
+    void fullscreenUsingSub(QString cameraName);
+
     void onvifDevicesDiscovered(QVariantList devices);
     void onvifProgress(QVariantList devices);
     void rtspResolved(QString rtsp);
@@ -97,9 +100,6 @@ signals:
     void playbackPositionChanged(const QString& cameraId, qint64 positionMs);
     void playbackStarted(const QString& cameraId);
     void playbackStopped(const QString& cameraId);
-
-    void fullscreenFrameReady(QString cameraName);
-    void fullscreenUsingSub(QString cameraName);
 
     void moduleInformationReceived(QString name,
                                    QString version,

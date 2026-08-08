@@ -5,6 +5,9 @@
 #include <QString>
 #include <QHash>
 #include <QMutex>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QTemporaryFile>
 
 class FrameQueue;
 class FFmpegWorker;
@@ -39,7 +42,9 @@ signals:
     void cameraOffline(QString id);
 
 private:
-    void stopWorkerSync(const QString& cameraId);
+    void stopWorkerAsync(const QString& cameraId);
+    void cancelDownload(const QString& cameraId);
+    void startLocalFile(const QString& cameraId, const QString& path, qint64 posMs, int gen);
 
     QString m_server;
     QString m_moduleServer;
@@ -48,9 +53,15 @@ private:
     QMutex m_mutex;
     QHash<QString, qint64> m_playbackPositionByCamera;
     QHash<QString, qint64> m_lastSeekMs;
+    QHash<QString, int> m_seekGen;
+
     QHash<QString, FrameQueue*> m_playbackQueues;
     QHash<QString, FFmpegWorker*> m_playbackWorkers;
     QHash<QString, QThread*> m_playbackThreads;
+
+    QNetworkAccessManager* m_nam = nullptr;
+    QHash<QString, QNetworkReply*> m_replies;
+    QHash<QString, QTemporaryFile*> m_tempFiles;
 };
 
 #endif

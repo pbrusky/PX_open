@@ -85,7 +85,8 @@ Item {
             applyRecordings(segments)
         }
         function onPlaybackStarted(id) {
-            // optional
+            if (id === root.cameraId || id === root.cameraName)
+                root.isPlayback = true
         }
     }
 
@@ -196,7 +197,11 @@ Item {
         border.width: 1
         z: 31
         Text { anchors.centerIn: parent; text: "Live"; color: "white"; font.pixelSize: 13 }
-        MouseArea { anchors.fill: parent; onClicked: root.returnToLive() }
+        MouseArea {
+            anchors.fill: parent
+            enabled: root.isPlayback
+            onClicked: root.returnToLive()
+        }
     }
 
     Rectangle {
@@ -279,6 +284,10 @@ Item {
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         console.log("Seek playback", id, "at", tsMs)
 
+        // Enter PLAYBACK mode first so nothing forces live during download
+        root.isPlayback = true
+        forceMainTimer.stop()
+
         if (typeof frigateRef.getPlaybackQueue === "function") {
             root.playbackQueue = frigateRef.getPlaybackQueue(id)
             playbackVideo.queue = root.playbackQueue
@@ -286,7 +295,6 @@ Item {
         if (typeof frigateRef.startPlayback === "function")
             frigateRef.startPlayback(id, Math.floor(tsMs))
 
-        root.isPlayback = true
         if (timelineLoader.item) {
             timelineLoader.item.isPlayback = true
             timelineLoader.item.playbackPositionMs = tsMs
