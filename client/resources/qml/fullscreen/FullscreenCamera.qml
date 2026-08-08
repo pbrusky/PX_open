@@ -70,6 +70,18 @@ Item {
             if (name === root.cameraName || name === root.cameraId)
                 forceMainTimer.restart()
         }
+
+        function onRecordingsLoaded(id, segments) {
+            if (id !== root.cameraId && id !== root.cameraName)
+                return
+            applyRecordings(segments)
+        }
+
+        function onEventsLoaded(id, list) {
+            if (id !== root.cameraId && id !== root.cameraName)
+                return
+            applyEvents(list)
+        }
     }
 
     Timer {
@@ -101,6 +113,43 @@ Item {
         onTriggered: root.closeEnabled = true
     }
 
+    Timer {
+        id: timelineHideTimer
+        interval: 2800
+        onTriggered: {
+            if (timelineLoader.item && !bottomEdge.containsMouse)
+                timelineLoader.item.collapsed = true
+        }
+    }
+
+    // Pull recordings if the signal was missed (race on open)
+    Timer {
+        id: recordingsPollTimer
+        interval: 400
+        repeat: true
+        running: false
+        property int tries: 0
+        onTriggered: {
+            tries++
+            if (!frigateRef || !timelineLoader.item) {
+                if (tries >= 15)
+                    stop()
+                return
+            }
+            var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+            if (typeof frigateRef.getRecordingsForCamera === "function") {
+                var segs = frigateRef.getRecordingsForCamera(id)
+                if (segs && segs.length > 0) {
+                    applyRecordings(segs)
+                    stop()
+                    return
+                }
+            }
+            if (tries >= 15)
+                stop()
+        }
+    }
+
     FocusScope {
         anchors.fill: parent
         focus: true
@@ -114,7 +163,10 @@ Item {
     }
 
     MouseArea {
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: bottomEdge.top
         z: 15
         acceptedButtons: Qt.LeftButton
         onDoubleClicked: if (root.closeEnabled) root.requestClose()
@@ -142,8 +194,6 @@ Item {
                 font.pixelSize: 13
             }
             Text {
-                // MAIN = fullscreen HQ stream is showing
-                // (main profile when go2rtc has camera_main, else base HQ)
                 text: root.mainReady ? "MAIN" : "SUB"
                 color: root.mainReady ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
@@ -172,6 +222,90 @@ Item {
         }
     }
 
+    Loader {
+        id: timelineLoader
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        z: 40
+        height: item ? Math.max(item.height, 0) : 0
+        source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
+        active: true
+        onLoaded: applyTimelineCamera()
+    }
+
+    MouseArea {
+        id: bottomEdge
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 56
+        z: 60
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+
+        onEntered: {
+            showTimelineBar()
+            timelineHideTimer.stop()
+        }
+        onExited: timelineHideTimer.restart()
+        onPositionChanged: {
+            showTimelineBar()
+            timelineHideTimer.restart()
+        }
+    }
+
+    function showTimelineBar() {
+        if (!timelineLoader.item)
+            return
+        timelineLoader.item.allowAutoReveal = true
+        timelineLoader.item.collapsed = false
+    }
+
+    function applyTimelineCamera() {
+        if (!timelineLoader.item)
+            return
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        timelineLoader.item.cameraId = id
+        timelineLoader.item.cameraName = root.cameraName
+        timelineLoader.item.frigateRef = root.frigateRef
+        timelineLoader.item.allowAutoReveal = true
+        timelineLoader.item.collapsed = false
+        timelineHideTimer.restart()
+    }
+
+    function applyRecordings(segments) {
+        if (!timelineLoader.item)
+            return
+        timelineLoader.item.recordings = segments
+        if (segments && segments.length > 0) {
+            timelineLoader.item.startTs = segments[0].start
+            timelineLoader.item.endTs = segments[segments.length - 1].end
+            console.log("Timeline UI: applied", segments.length, "blocks for", root.cameraName)
+        }
+    }
+
+    function applyEvents(list) {
+        if (!timelineLoader.item)
+            return
+        timelineLoader.item.events = list
+    }
+
+    function loadTimelineData() {
+        if (!frigateRef)
+            return
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        if (id === "")
+            return
+        if (typeof frigateRef.loadRecordings === "function")
+            frigateRef.loadRecordings(id)
+        if (typeof frigateRef.loadEvents === "function")
+            frigateRef.loadEvents(id)
+
+        recordingsPollTimer.tries = 0
+        recordingsPollTimer.start()
+    }
+
     function open() {
         closeEnabled = false
         mainReady = false
@@ -185,11 +319,16 @@ Item {
             forceMainTimer.restart()
         else
             forceMainTimer.stop()
+
+        applyTimelineCamera()
+        loadTimelineData()
     }
 
     function close() {
         closeArmTimer.stop()
         forceMainTimer.stop()
+        timelineHideTimer.stop()
+        recordingsPollTimer.stop()
         closeEnabled = false
         visible = false
         mainReady = false
@@ -197,5 +336,16 @@ Item {
         mainQueue = null
         subVideo.queue = null
         mainVideo.queue = null
+
+        if (timelineLoader.item) {
+            timelineLoader.item.allowAutoReveal = false
+            timelineLoader.item.collapsed = true
+            timelineLoader.item.cameraId = ""
+            timelineLoader.item.cameraName = ""
+            timelineLoader.item.recordings = []
+            timelineLoader.item.events = []
+            timelineLoader.item.startTs = 0
+            timelineLoader.item.endTs = 0
+        }
     }
 }

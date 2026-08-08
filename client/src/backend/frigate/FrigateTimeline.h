@@ -14,30 +14,16 @@ class FrigateTimeline : public QObject
 public:
     explicit FrigateTimeline(QObject* parent = nullptr);
 
-    //
-    // Server configuration
-    //
     void setServer(const QString& server);
     void setModuleServer(const QString& server);
 
-    //
-    // Timeline API
-    //
     void loadRecordings(const QString& cameraId);
     void loadEvents(const QString& cameraId);
-
-    // Optional: playback window (for scrubbing)
     void loadPlaybackWindow(const QString& cameraId, qint64 timestampMs);
 
-    //
-    // Accessors
-    //
     QVariantList getRecordings(const QString& cameraId) const;
     QVariantList getEvents(const QString& cameraId) const;
 
-    //
-    // Cleanup
-    //
     void clearCamera(const QString& cameraId);
 
 signals:
@@ -47,7 +33,6 @@ signals:
 private:
     QString m_server;
     QString m_moduleServer;
-
     QNetworkAccessManager* m_net;
 
     QHash<QString, QVariantList> m_recordingsByCamera;

@@ -1,18 +1,17 @@
 ﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
-
-// Correct QRC import path
 import "qrc:/app/resources/qml/components/timeline"
 
 Rectangle {
     id: timeline
-    width: parent.width
+    width: parent ? parent.width : 800
 
     property bool collapsed: true
     property bool allowAutoReveal: false
 
     function showTimeline() {
-        if (!allowAutoReveal) return
+        if (!allowAutoReveal)
+            return
         collapsed = false
     }
 
@@ -20,24 +19,21 @@ Rectangle {
         collapsed = true
     }
 
-    height: collapsed ? 0 : 90
+    height: collapsed ? 4 : 100
     visible: true
-
-    color: collapsed ? "transparent" : "#0E0E0E"
+    color: collapsed ? "#00000000" : "#0E0E0E"
     border.color: collapsed ? "transparent" : "#333333"
     border.width: collapsed ? 0 : 1
     radius: collapsed ? 0 : 6
-
     z: 10
     clip: true
 
     property alias timelineHeight: timeline.height
-
     property var scrubber
     property var mouseHandler
 
     Behavior on height {
-        NumberAnimation { duration: 180; easing.type: Easing.InOutQuad }
+        NumberAnimation { duration: 160; easing.type: Easing.InOutQuad }
     }
 
     property string cameraId: ""
@@ -47,85 +43,89 @@ Rectangle {
     property var events: []
     property int playbackPositionMs: 0
     property real position: 0
-
     property real startTs: 0
     property real endTs: 0
 
     property int currentTimeMs: Date.now()
     Timer {
-        id: nowTimer
         interval: 1000
         running: true
         repeat: true
         onTriggered: currentTimeMs = Date.now()
     }
 
+    // Also listen here (backup if parent misses signal)
     Connections {
-        target: frigateRef ? frigateRef : null
+        target: frigateRef
         ignoreUnknownSignals: true
 
         function onRecordingsLoaded(id, segments) {
-            if (id !== cameraId) return
+            if (id !== cameraId && id !== cameraName)
+                return
             recordings = segments
-            if (segments.length > 0) {
+            if (segments && segments.length > 0) {
                 startTs = segments[0].start
                 endTs = segments[segments.length - 1].end
             }
         }
 
         function onEventsLoaded(id, list) {
-            if (id !== cameraId) return
+            if (id !== cameraId && id !== cameraName)
+                return
             events = list
         }
 
         function onPlaybackPositionChanged(id, posMs) {
-            if (id !== cameraId) return
+            if (id !== cameraId && id !== cameraName)
+                return
             playbackPositionMs = posMs
-            timeline.position = timeline.timestampToRatio(posMs)
-            if (scrubber)
-                scrubber.x = timeline.timestampToX(posMs) - scrubber.width/2
+            position = timestampToRatio(posMs)
         }
     }
 
     function effectiveStartTs() {
-        if (endTs > startTs) return startTs
+        if (endTs > startTs)
+            return startTs
         return Date.now() / 1000 - 3600
     }
 
     function effectiveEndTs() {
-        if (endTs > startTs) return endTs
+        if (endTs > startTs)
+            return endTs
         return Date.now() / 1000
     }
 
     function timestampToRatio(tsMs) {
-        if (effectiveEndTs() <= effectiveStartTs()) return 0
-        return (tsMs - effectiveStartTs()*1000) /
-               ((effectiveEndTs()-effectiveStartTs())*1000)
+        var s = effectiveStartTs()
+        var e = effectiveEndTs()
+        if (e <= s)
+            return 0
+        return (tsMs - s * 1000) / ((e - s) * 1000)
     }
 
     function ratioToTimestamp(ratio) {
-        return effectiveStartTs()*1000 +
-               ratio*(effectiveEndTs()-effectiveStartTs())*1000
+        return effectiveStartTs() * 1000 +
+               ratio * (effectiveEndTs() - effectiveStartTs()) * 1000
     }
 
     onPositionChanged: playbackPositionMs = ratioToTimestamp(position)
 
     property real zoom: 1.0
     property real pan: 0.0
-    property real minZoom: 0.2
-    property real maxZoom: 8.0
     property int segmentCount: 10
 
     function timestampToX(tsMs) {
-        if (endTs <= startTs) return 0
-        let totalMs = (endTs - startTs)*1000
-        let ratio = (tsMs - startTs*1000) / totalMs
+        var s = effectiveStartTs()
+        var e = effectiveEndTs()
+        if (e <= s || width <= 0)
+            return 0
+        var ratio = (tsMs - s * 1000) / ((e - s) * 1000)
         return ratio * width * zoom + pan
     }
 
     function xToTimestamp(x) {
-        let scaled = (x - pan) / (width * zoom)
-        return (effectiveStartTs() + scaled*(effectiveEndTs()-effectiveStartTs())) * 1000
+        var scaled = (x - pan) / Math.max(1, width * zoom)
+        return (effectiveStartTs() + scaled * (effectiveEndTs() - effectiveStartTs())) * 1000
     }
 
     TimelineRuler {
@@ -139,37 +139,52 @@ Rectangle {
         visible: !collapsed
     }
 
+    // Track background (dark rail)
+    Rectangle {
+        id: trackBg
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: ruler.bottom
+        anchors.topMargin: 4
+        height: 28
+        color: "#1A1A1A"
+        radius: 3
+        visible: !collapsed
+    }
+
     TimelineSegments {
-        id: segments
+        id: segmentsLayer
+        anchors.fill: trackBg
         recordings: timeline.recordings
-        startTs: timeline.startTs
-        endTs: timeline.endTs
+        startTs: timeline.effectiveStartTs()
+        endTs: timeline.effectiveEndTs()
         zoom: timeline.zoom
         pan: timeline.pan
         timelineWidth: timeline.width
         timestampToX: timeline.timestampToX
-        anchors.top: ruler.bottom
         visible: !collapsed
     }
 
     TimelineEvents {
         id: eventsLayer
+        anchors.fill: trackBg
         events: timeline.events
-        startTs: timeline.startTs
-        endTs: timeline.endTs
+        startTs: timeline.effectiveStartTs()
+        endTs: timeline.effectiveEndTs()
         zoom: timeline.zoom
         pan: timeline.pan
         timelineWidth: timeline.width
         timestampToX: timeline.timestampToX
-        anchors.top: ruler.bottom
         visible: !collapsed
     }
 
     TimelineScrubber {
         id: scrubber
+        anchors.top: trackBg.top
+        anchors.bottom: trackBg.bottom
         playbackPositionMs: timeline.playbackPositionMs
-        startTs: timeline.startTs
-        endTs: timeline.endTs
+        startTs: timeline.effectiveStartTs()
+        endTs: timeline.effectiveEndTs()
         zoom: timeline.zoom
         pan: timeline.pan
         timelineWidth: timeline.width
@@ -179,25 +194,18 @@ Rectangle {
 
     TimelineHoverPreview {
         id: hoverPreview
-        visible: !collapsed
+        visible: false
     }
 
     TimelineMouseHandler {
         id: mouseHandler
+        anchors.fill: trackBg
         scrubber: scrubber
         hoverPreview: hoverPreview
         pan: timeline.pan
         xToTimestamp: timeline.xToTimestamp
         visible: !collapsed
-    }
-
-    Rectangle {
-        width: 2
-        height: parent.height
-        color: "#FF4444"
-        anchors.right: parent.right
-        opacity: (cameraId === "" || effectiveEndTs() <= effectiveStartTs() || collapsed) ? 0 : 0.35
-        z: 20
+        enabled: !collapsed
     }
 
     Text {
@@ -207,43 +215,38 @@ Rectangle {
         text: Qt.formatDateTime(new Date(currentTimeMs), "hh:mm:ss")
         color: "#FF4444"
         font.pixelSize: 10
-        opacity: (cameraId === "" || collapsed) ? 0 : 0.8
+        opacity: collapsed ? 0 : 0.85
         z: 21
+    }
+
+    Text {
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.margins: 6
+        text: {
+            if (collapsed)
+                return ""
+            if (recordings.length > 0)
+                return recordings.length + " recording block(s)"
+            return "No recordings in range"
+        }
+        color: "#888888"
+        font.pixelSize: 10
+        visible: !collapsed
     }
 
     Rectangle {
         id: emptyState
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: ruler.bottom
-        anchors.bottom: scrubber.top
+        anchors.fill: trackBg
         color: "transparent"
-        visible: !collapsed && (cameraId === "" || (recordings.length === 0 && events.length === 0))
+        visible: !collapsed && cameraId !== "" && recordings.length === 0 && events.length === 0
 
-        Column {
+        Text {
             anchors.centerIn: parent
-            spacing: 4
-
-            Text {
-                text: cameraId === "" ? "No camera selected" : "No recordings or events available"
-                color: "#AAAAAA"
-                font.pixelSize: 12
-                font.bold: cameraId === ""
-            }
-            Text {
-                text: cameraId === "" ? "Select a camera to show timeline" : "Use Live playback or select another camera"
-                color: "#777777"
-                font.pixelSize: 10
-            }
+            text: "No recordings or events available"
+            color: "#AAAAAA"
+            font.pixelSize: 12
         }
-    }
-
-    TimelineAutoHide {
-        id: autoHide
-        timeline: timeline
-
-        onMouseNearBottom: timeline.showTimeline()
-        onMouseAway: timeline.hideTimeline()
     }
 
     Component.onCompleted: {

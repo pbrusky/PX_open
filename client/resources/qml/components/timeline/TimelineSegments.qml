@@ -2,42 +2,41 @@ import QtQuick 2.15
 
 Item {
     id: segments
+    anchors.fill: parent
 
-    // REQUIRED PROPERTIES
-    property var recordings
-    property real startTs
-    property real endTs
-    property real zoom
-    property real pan
-    property real timelineWidth
-    property var timestampToX   // <-- FIXED
+    property var recordings: []
+    property real startTs: 0
+    property real endTs: 0
+    property real zoom: 1.0
+    property real pan: 0.0
+    property real timelineWidth: width
+    property var timestampToX
 
     Repeater {
         model: recordings
 
         Rectangle {
-            height: 62
-            y: 24
-            radius: 4
-            border.color: "#3A8DFFAA"
+            height: Math.max(12, parent.height - 4)
+            y: 2
+            radius: 3
+            border.color: "#5BA3FF"
             border.width: 1
             clip: true
 
-            Rectangle {
-                anchors.fill: parent
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#3A8DFF88" }
-                    GradientStop { position: 1.0; color: "#2E6BFF44" }
-                }
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#3A8DFFAA" }
+                GradientStop { position: 1.0; color: "#2E6BFF66" }
             }
 
             width: {
-                let x1 = timestampToX(modelData.start * 1000)
-                let x2 = timestampToX(modelData.end * 1000)
-                return Math.max(8, x2 - x1)
+                if (!timestampToX)
+                    return 8
+                var x1 = timestampToX(modelData.start * 1000)
+                var x2 = timestampToX(modelData.end * 1000)
+                return Math.max(6, x2 - x1)
             }
 
-            x: timestampToX(modelData.start * 1000)
+            x: timestampToX ? timestampToX(modelData.start * 1000) : 0
         }
     }
 }
