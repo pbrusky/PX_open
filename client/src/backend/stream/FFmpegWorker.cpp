@@ -146,17 +146,33 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
+    const bool isHttp = m_url.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive)
+                     || m_url.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive);
+
     AVFormatContext* fmtCtx = nullptr;
     AVDictionary* opts = nullptr;
 
-    av_dict_set(&opts, "rtsp_transport", "tcp", 0);
-    av_dict_set(&opts, "stimeout", "1000000", 0);
-    av_dict_set(&opts, "rw_timeout", "1000000", 0);
-    av_dict_set(&opts, "probesize", "100000", 0);
-    av_dict_set(&opts, "analyzeduration", "300000", 0);
-    av_dict_set(&opts, "fflags", "nobuffer", 0);
-    av_dict_set(&opts, "flags", "low_delay", 0);
-    av_dict_set(&opts, "max_delay", "0", 0);
+    if (isHttp) {
+        // Frigate clip.mp4 is generated on demand — needs long timeouts
+        av_dict_set(&opts, "rw_timeout", "60000000", 0);      // 60s
+        av_dict_set(&opts, "timeout", "60000000", 0);
+        av_dict_set(&opts, "reconnect", "1", 0);
+        av_dict_set(&opts, "reconnect_streamed", "1", 0);
+        av_dict_set(&opts, "reconnect_delay_max", "5", 0);
+        av_dict_set(&opts, "probesize", "5000000", 0);         // 5 MB
+        av_dict_set(&opts, "analyzeduration", "5000000", 0);  // 5s
+        av_dict_set(&opts, "seekable", "0", 0);
+    } else {
+        // Live RTSP
+        av_dict_set(&opts, "rtsp_transport", "tcp", 0);
+        av_dict_set(&opts, "stimeout", "5000000", 0);
+        av_dict_set(&opts, "rw_timeout", "5000000", 0);
+        av_dict_set(&opts, "probesize", "100000", 0);
+        av_dict_set(&opts, "analyzeduration", "300000", 0);
+        av_dict_set(&opts, "fflags", "nobuffer", 0);
+        av_dict_set(&opts, "flags", "low_delay", 0);
+        av_dict_set(&opts, "max_delay", "0", 0);
+    }
 
     const QByteArray urlBytes = m_url.toUtf8();
     int ret = avformat_open_input(&fmtCtx, urlBytes.constData(), nullptr, &opts);
@@ -228,7 +244,10 @@ void FFmpegWorker::decodeLoop()
     while (!m_abort) {
         ret = av_read_frame(fmtCtx, packet);
         if (ret < 0) {
-            if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN)) {
+            // End of clip — stop cleanly (do not spin)
+            if (ret == AVERROR_EOF)
+                break;
+            if (ret == AVERROR(EAGAIN)) {
                 QThread::msleep(5);
                 continue;
             }

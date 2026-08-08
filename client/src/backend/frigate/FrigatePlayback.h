@@ -45,12 +45,12 @@ private:
     QString m_moduleServer;
     QString m_serverIp;
 
-    QHash<QString, qint64>        m_playbackPositionByCamera;
-    QHash<QString, FrameQueue*>   m_playbackQueues;
+    QMutex m_mutex;
+    QHash<QString, qint64> m_playbackPositionByCamera;
+    QHash<QString, qint64> m_lastSeekMs;
+    QHash<QString, FrameQueue*> m_playbackQueues;
     QHash<QString, FFmpegWorker*> m_playbackWorkers;
-    QHash<QString, QThread*>      m_playbackThreads;
-    QHash<QString, qint64>        m_lastSeekMs;
-    QMutex                        m_mutex;
+    QHash<QString, QThread*> m_playbackThreads;
 };
 
 #endif
