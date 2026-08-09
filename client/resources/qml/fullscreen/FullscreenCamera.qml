@@ -18,8 +18,12 @@ Item {
     property bool closeEnabled: false
     property bool mainReady: false
     property bool isPlayback: false
+    // true only after FFmpeg opened the downloaded clip
+    property bool playbackReady: false
     property real _lastSeekTs: -1
     property double _lastSeekWall: 0
+    // block accidental returnToLive right after a seek
+    property double _blockLiveUntil: 0
 
     signal requestClose()
 
@@ -85,8 +89,12 @@ Item {
             applyRecordings(segments)
         }
         function onPlaybackStarted(id) {
-            if (id === root.cameraId || id === root.cameraName)
+            if (id === root.cameraId || id === root.cameraName) {
                 root.isPlayback = true
+                root.playbackReady = true
+                root._blockLiveUntil = 0
+                console.log("Playback started UI", id)
+            }
         }
     }
 
@@ -150,6 +158,7 @@ Item {
         }
     }
 
+    // Only double-click exit — do not steal single clicks from timeline
     MouseArea {
         anchors.left: parent.left
         anchors.right: parent.right
@@ -157,7 +166,11 @@ Item {
         anchors.bottom: bottomEdge.top
         z: 15
         acceptedButtons: Qt.LeftButton
+        propagateComposedEvents: true
         onDoubleClicked: if (root.closeEnabled) root.requestClose()
+        onClicked: function(mouse) { mouse.accepted = false }
+        onPressed: function(mouse) { mouse.accepted = false }
+        onReleased: function(mouse) { mouse.accepted = false }
     }
 
     Rectangle {
@@ -172,7 +185,7 @@ Item {
             spacing: 16
             Text { text: root.cameraName; color: "white"; font.pixelSize: 15; font.bold: true }
             Text {
-                text: root.isPlayback ? "PLAYBACK" : "LIVE"
+                text: root.isPlayback ? (root.playbackReady ? "PLAYBACK" : "LOADING…") : "LIVE"
                 color: root.isPlayback ? "#FFC107" : "#00C853"
                 font.pixelSize: 13
                 font.bold: true
@@ -192,14 +205,15 @@ Item {
         anchors.rightMargin: 90
         anchors.topMargin: 10
         radius: 4
-        color: root.isPlayback ? "#1B5E20" : "#00000055"
-        border.color: root.isPlayback ? "#00C853" : "#444"
+        color: root.playbackReady ? "#1B5E20" : "#00000055"
+        border.color: root.playbackReady ? "#00C853" : "#444"
         border.width: 1
         z: 31
         Text { anchors.centerIn: parent; text: "Live"; color: "white"; font.pixelSize: 13 }
         MouseArea {
             anchors.fill: parent
-            enabled: root.isPlayback
+            // Only allow return-to-live after clip is actually playing
+            enabled: root.playbackReady
             onClicked: root.returnToLive()
         }
     }
@@ -227,8 +241,10 @@ Item {
         active: true
         onLoaded: {
             applyTimelineCamera()
-            if (item)
+            if (item) {
+                try { item.seekRequested.disconnect(root.onTimelineSeek) } catch (e) {}
                 item.seekRequested.connect(root.onTimelineSeek)
+            }
         }
     }
 
@@ -284,8 +300,10 @@ Item {
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         console.log("Seek playback", id, "at", tsMs)
 
-        // Enter PLAYBACK mode first so nothing forces live during download
         root.isPlayback = true
+        root.playbackReady = false
+        // Block accidental switchToLive for a few seconds while clip downloads
+        root._blockLiveUntil = wall + 8000
         forceMainTimer.stop()
 
         if (typeof frigateRef.getPlaybackQueue === "function") {
@@ -302,16 +320,28 @@ Item {
     }
 
     function returnToLive() {
-        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
-        if (frigateRef && typeof frigateRef.switchToLive === "function")
-            frigateRef.switchToLive(id)
+        // Ignore accidental calls right after seek / during download
+        if (Date.now() < root._blockLiveUntil && !root.playbackReady) {
+            console.log("returnToLive ignored (download in progress)")
+            return
+        }
+
+        console.log("returnToLive", root.cameraName)
+
         root.isPlayback = false
+        root.playbackReady = false
+        root._blockLiveUntil = 0
         playbackVideo.queue = null
         root.playbackQueue = null
         if (timelineLoader.item) {
             timelineLoader.item.isPlayback = false
             timelineLoader.item.playbackPositionMs = 0
         }
+
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        if (frigateRef && typeof frigateRef.switchToLive === "function")
+            frigateRef.switchToLive(id)
+
         if (mainQueue)
             forceMainTimer.restart()
     }
@@ -332,6 +362,8 @@ Item {
         closeEnabled = false
         mainReady = false
         isPlayback = false
+        playbackReady = false
+        _blockLiveUntil = 0
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
@@ -346,6 +378,9 @@ Item {
     }
 
     function close() {
+        // Force stop even if download still running
+        root._blockLiveUntil = 0
+        root.playbackReady = true
         returnToLive()
         closeArmTimer.stop()
         forceMainTimer.stop()

@@ -19,9 +19,10 @@ FrigatePlayback::FrigatePlayback(QObject* parent)
 FrigatePlayback::~FrigatePlayback()
 {
     const QStringList keys = m_playbackWorkers.keys();
-    for (const QString& id : keys)
+    for (const QString& id : keys) {
+        cancelDownload(id);
         stopWorkerAsync(id);
-
+    }
     const QStringList dlKeys = m_replies.keys();
     for (const QString& id : dlKeys)
         cancelDownload(id);
@@ -96,43 +97,46 @@ void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
 
     if (worker)
         QObject::disconnect(worker, nullptr, this, nullptr);
-    if (thread)
-        QObject::disconnect(thread, nullptr, this, nullptr);
-
-    if (worker) {
-        if (thread)
-            QObject::disconnect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
-        worker->stopDecoding();
-    }
-
-    if (thread) {
-        if (thread->isRunning()) {
-            thread->quit();
-            if (!thread->wait(3000)) {
-                QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
-                if (worker)
-                    QObject::connect(thread, &QThread::finished, worker, &QObject::deleteLater);
-                worker = nullptr;
-                thread = nullptr;
-                return;
-            }
-        }
-        thread->deleteLater();
-        thread = nullptr;
-    }
 
     if (worker)
+        worker->stopDecoding();
+
+    if (thread) {
+        if (worker) {
+            QObject::connect(thread, &QThread::finished,
+                             worker, &QObject::deleteLater,
+                             Qt::UniqueConnection);
+            QObject::connect(worker, &FFmpegWorker::finished,
+                             thread, &QThread::quit,
+                             Qt::UniqueConnection);
+        }
+        QObject::connect(thread, &QThread::finished,
+                         thread, &QObject::deleteLater,
+                         Qt::UniqueConnection);
+
+        if (thread->isRunning()) {
+            QMetaObject::invokeMethod(thread, "quit", Qt::QueuedConnection);
+        } else {
+            if (worker)
+                worker->deleteLater();
+            thread->deleteLater();
+        }
+    } else if (worker) {
         worker->deleteLater();
+    }
 }
 
+// Forced stop (Exit / close) — always cancels download + worker
 void FrigatePlayback::stopPlayback(const QString& cameraId)
 {
+    m_seekGen[cameraId] = m_seekGen.value(cameraId, 0) + 1;
     cancelDownload(cameraId);
     stopWorkerAsync(cameraId);
     m_playbackPositionByCamera[cameraId] = 0;
     m_lastSeekMs.remove(cameraId);
     emit playbackStopped(cameraId);
     emit playbackPositionChanged(cameraId, 0);
+    qDebug() << "[Playback] stopPlayback" << cameraId;
 }
 
 void FrigatePlayback::seek(const QString& cameraId, qint64 timestampMs)
@@ -181,8 +185,7 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     FrameQueue* queue = qobject_cast<FrameQueue*>(getPlaybackQueue(cameraId));
     if (!queue)
         return;
-    if (queue->metaObject()->indexOfMethod("resetReceived()") >= 0)
-        QMetaObject::invokeMethod(queue, "resetReceived");
+    QMetaObject::invokeMethod(queue, "resetReceived");
 
     QNetworkRequest req{QUrl(url)};
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
@@ -209,9 +212,8 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
             m_replies.remove(cameraId);
 
         if (reply->error() != QNetworkReply::NoError) {
-            if (reply->error() != QNetworkReply::OperationCanceledError) {
+            if (reply->error() != QNetworkReply::OperationCanceledError)
                 qWarning() << "[Playback] download failed" << cameraId << reply->errorString();
-            }
             reply->deleteLater();
             return;
         }
@@ -306,10 +308,16 @@ qint64 FrigatePlayback::currentPosition(const QString& cameraId) const
     return m_playbackPositionByCamera.value(cameraId, 0);
 }
 
+// Soft return-to-live — NEVER cancels an in-flight download
 void FrigatePlayback::switchToLive(const QString& cameraId)
 {
     if (cameraId.trimmed().isEmpty())
         return;
+
+    if (m_replies.contains(cameraId)) {
+        qDebug() << "[Playback] switchToLive ignored (download active)" << cameraId;
+        return;
+    }
 
     m_seekGen[cameraId] = m_seekGen.value(cameraId, 0) + 1;
     cancelDownload(cameraId);
