@@ -146,14 +146,21 @@ Rectangle {
         color: isPlayback ? "#FFC107" : "#FFFFFF"
         anchors.top: trackBg.top
         anchors.topMargin: -3
-        x: timestampToX(playbackPositionMs) - width / 2
-        visible: !collapsed && playbackPositionMs > 0
+        x: {
+            var ts = isPlayback && playbackPositionMs > 0
+                     ? playbackPositionMs
+                     : currentTimeMs
+            return timestampToX(ts) - width / 2
+        }
+        visible: !collapsed
         z: 30
     }
 
+    // Full bar is clickable; high z so nothing covers it
     TimelineMouseHandler {
         id: mouseHandler
-        anchors.fill: trackBg
+        anchors.fill: parent
+        z: 50
         scrubber: playhead
         hoverPreview: hoverPreview
         pan: 0
@@ -170,7 +177,7 @@ Rectangle {
     TimelineHoverPreview {
         id: hoverPreview
         visible: false
-        z: 40
+        z: 60
     }
 
     Text {
@@ -181,6 +188,7 @@ Rectangle {
         color: "#FF4444"
         font.pixelSize: 10
         opacity: collapsed ? 0 : 0.85
+        z: 55
     }
 
     Text {
@@ -199,5 +207,6 @@ Rectangle {
         color: isPlayback ? "#FFC107" : "#888888"
         font.pixelSize: 10
         visible: !collapsed
+        z: 55
     }
 }

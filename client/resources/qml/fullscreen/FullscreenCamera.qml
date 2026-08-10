@@ -70,6 +70,14 @@ Item {
         z: 2
         opacity: isPlayback ? 1.0 : 0.0
         queue: playbackQueue
+        onFramePresented: {
+            if (root.isPlayback)
+                root.playbackReady = true
+        }
+        onHasFrameChanged: {
+            if (hasFrame && root.isPlayback)
+                root.playbackReady = true
+        }
     }
 
     // Center loading banner — stays until PLAYBACK
@@ -125,8 +133,7 @@ Item {
         }
         function onPlaybackStopped(id) {
             if (id === root.cameraId || id === root.cameraName) {
-                if (root.isPlayback && !root.playbackReady)
-                    return
+                // no-op: returnToLive already clears flags
             }
         }
     }
@@ -141,6 +148,11 @@ Item {
             if (mainVideo.hasFrame) { root.mainReady = true; stop(); return }
             if (root.mainQueue && typeof root.mainQueue.hasReceivedFrames === "function"
                     && root.mainQueue.hasReceivedFrames()) {
+                root.mainReady = true
+                stop()
+            }
+            if (root.mainQueue && typeof root.mainQueue.hasFrames === "function"
+                    && root.mainQueue.hasFrames()) {
                 root.mainReady = true
                 stop()
             }
@@ -286,13 +298,14 @@ Item {
         }
     }
 
+    // Hover strip ONLY — must stay BELOW timeline (z:40) so clicks reach the timeline
     MouseArea {
         id: bottomEdge
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 56
-        z: 60
+        height: (timelineLoader.item && !timelineLoader.item.collapsed) ? 8 : 56
+        z: 35
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
         onEntered: { showTimelineBar(); timelineHideTimer.stop() }
@@ -301,7 +314,6 @@ Item {
     }
 
     function tryExit() {
-        // Allow Exit always, but warn if still loading
         if (root.isPlayback && !root.playbackReady)
             console.log("Exit during LOADING — canceling download")
         root.requestClose()
@@ -361,6 +373,8 @@ Item {
         }
         if (typeof frigateRef.startPlayback === "function")
             frigateRef.startPlayback(id, Math.floor(tsMs))
+        else if (typeof frigateRef.seek === "function")
+            frigateRef.seek(id, Math.floor(tsMs))
 
         if (timelineLoader.item) {
             timelineLoader.item.isPlayback = true
@@ -387,6 +401,8 @@ Item {
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         if (frigateRef && typeof frigateRef.switchToLive === "function")
             frigateRef.switchToLive(id)
+        else if (frigateRef && typeof frigateRef.stopPlayback === "function")
+            frigateRef.stopPlayback(id)
 
         // Restart live HQ
         if (frigateRef && typeof frigateRef.getFullscreenQueue === "function") {

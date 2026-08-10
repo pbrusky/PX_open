@@ -24,6 +24,7 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         preventStealing: true
+        // Do not use drag.target on scrubber — that can swallow the click
 
         onPositionChanged: function(mouse) {
             mouseHandler.moved()
@@ -36,7 +37,8 @@ Item {
                 hoverPreview.visible = true
                 hoverPreview.x = mouse.x - hoverPreview.width / 2
                 hoverPreview.y = -hoverPreview.height - 4
-                hoverPreview.tsString = Qt.formatDateTime(new Date(ts), "hh:mm:ss ap")
+                if (hoverPreview.hasOwnProperty("tsString"))
+                    hoverPreview.tsString = Qt.formatDateTime(new Date(ts), "hh:mm:ss ap")
             }
 
             if (mouse.buttons & Qt.RightButton) {
@@ -65,6 +67,15 @@ Item {
 
             if (hoverPreview)
                 hoverPreview.visible = false
+        }
+
+        onClicked: function(mouse) {
+            // Backup path if release did not fire seek
+            if (mouse.button === Qt.LeftButton && !mouseHandler.didSeek) {
+                mouseHandler.didSeek = true
+                if (xToTimestamp)
+                    mouseHandler.seekRequested(xToTimestamp(mouse.x))
+            }
         }
 
         onExited: {

@@ -5,8 +5,6 @@
 #include <QString>
 #include <QHash>
 #include <QMutex>
-#include <QProcess>
-#include <QTimer>
 
 class FrameQueue;
 class FFmpegWorker;
@@ -42,8 +40,6 @@ signals:
 
 private:
     void stopWorkerAsync(const QString& cameraId);
-    void cancelDownload(const QString& cameraId);
-    void startLocalFile(const QString& cameraId, const QString& path, qint64 posMs, int gen);
 
     QString m_server;
     QString m_moduleServer;
@@ -57,10 +53,6 @@ private:
     QHash<QString, FrameQueue*> m_playbackQueues;
     QHash<QString, FFmpegWorker*> m_playbackWorkers;
     QHash<QString, QThread*> m_playbackThreads;
-
-    QHash<QString, QProcess*> m_curlProcs;
-    QHash<QString, QString> m_curlPaths;
-    QHash<QString, QTimer*> m_progressTimers;
 };
 
 #endif
