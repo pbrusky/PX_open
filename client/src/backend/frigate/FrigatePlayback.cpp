@@ -126,7 +126,6 @@ void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
     }
 }
 
-// Forced stop (Exit / close) — always cancels download + worker
 void FrigatePlayback::stopPlayback(const QString& cameraId)
 {
     m_seekGen[cameraId] = m_seekGen.value(cameraId, 0) + 1;
@@ -165,19 +164,20 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     if (timestampMs > 100000000000LL)
         startSec = timestampMs / 1000;
 
+    // Short clip — same window that loaded in ~12s in the browser
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    qint64 endSec = startSec + 12;
+    qint64 endSec = startSec + 6;
     if (endSec > nowSec)
         endSec = nowSec;
     if (endSec <= startSec)
-        endSec = startSec + 5;
+        endSec = startSec + 4;
 
     const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
                             .arg(m_server, cameraId)
                             .arg(startSec)
                             .arg(endSec);
 
-    qDebug() << "[Playback] download" << cameraId << startSec << "->" << endSec << url;
+    qDebug() << "[Playback] open HTTP clip" << cameraId << startSec << "->" << endSec << url;
 
     cancelDownload(cameraId);
     stopWorkerAsync(cameraId);
@@ -187,65 +187,12 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         return;
     QMetaObject::invokeMethod(queue, "resetReceived");
 
-    QNetworkRequest req{QUrl(url)};
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                     QNetworkRequest::NoLessSafeRedirectPolicy);
-    req.setTransferTimeout(60000);
-
-    QNetworkReply* reply = m_nam->get(req);
-    m_replies.insert(cameraId, reply);
-
     const qint64 posMs = startSec * 1000;
     m_playbackPositionByCamera[cameraId] = posMs;
     emit playbackPositionChanged(cameraId, posMs);
 
-    connect(reply, &QNetworkReply::finished, this,
-            [this, cameraId, reply, posMs, gen]() {
-        if (m_seekGen.value(cameraId, 0) != gen) {
-            reply->deleteLater();
-            if (m_replies.value(cameraId) == reply)
-                m_replies.remove(cameraId);
-            return;
-        }
-
-        if (m_replies.value(cameraId) == reply)
-            m_replies.remove(cameraId);
-
-        if (reply->error() != QNetworkReply::NoError) {
-            if (reply->error() != QNetworkReply::OperationCanceledError)
-                qWarning() << "[Playback] download failed" << cameraId << reply->errorString();
-            reply->deleteLater();
-            return;
-        }
-
-        QTemporaryFile* tmp = new QTemporaryFile(
-            QDir::temp().filePath(QStringLiteral("px_clip_%1_XXXXXX.mp4").arg(cameraId)),
-            this);
-        tmp->setAutoRemove(true);
-        if (!tmp->open()) {
-            qWarning() << "[Playback] temp file failed" << cameraId;
-            tmp->deleteLater();
-            reply->deleteLater();
-            return;
-        }
-
-        const QByteArray data = reply->readAll();
-        reply->deleteLater();
-
-        if (data.size() < 1024) {
-            qWarning() << "[Playback] clip too small" << cameraId << data.size();
-            tmp->deleteLater();
-            return;
-        }
-
-        tmp->write(data);
-        tmp->flush();
-        tmp->close();
-
-        m_tempFiles.insert(cameraId, tmp);
-        qDebug() << "[Playback] downloaded" << data.size() << "bytes ->" << tmp->fileName();
-        startLocalFile(cameraId, tmp->fileName(), posMs, gen);
-    });
+    // Open with FFmpeg directly (same as browser / ffplay) — no QNetworkAccessManager
+    startLocalFile(cameraId, url, posMs, gen);
 }
 
 void FrigatePlayback::startLocalFile(const QString& cameraId,
@@ -308,17 +255,12 @@ qint64 FrigatePlayback::currentPosition(const QString& cameraId) const
     return m_playbackPositionByCamera.value(cameraId, 0);
 }
 
-// Soft return-to-live — NEVER cancels an in-flight download
 void FrigatePlayback::switchToLive(const QString& cameraId)
 {
     if (cameraId.trimmed().isEmpty())
         return;
 
-    if (m_replies.contains(cameraId)) {
-        qDebug() << "[Playback] switchToLive ignored (download active)" << cameraId;
-        return;
-    }
-
+    // If a worker is still opening the HTTP clip, allow stop
     m_seekGen[cameraId] = m_seekGen.value(cameraId, 0) + 1;
     cancelDownload(cameraId);
     stopWorkerAsync(cameraId);

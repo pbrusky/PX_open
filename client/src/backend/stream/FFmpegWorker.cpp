@@ -143,7 +143,6 @@ void FFmpegWorker::startDecoding()
 
 void FFmpegWorker::stopDecoding()
 {
-    // Checked by interrupt callback during blocked FFmpeg calls
     m_abort.store(true);
 }
 
@@ -165,18 +164,17 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
-    // Allows stopDecoding() to break out of open_input / read_frame
     fmtCtx->interrupt_callback.callback = &FFmpegWorker::decodeInterruptCb;
     fmtCtx->interrupt_callback.opaque = this;
 
     AVDictionary* opts = nullptr;
     if (isHttp) {
-        // Clip.mp4 generation — moderate timeout, interruptible
-        av_dict_set(&opts, "rw_timeout", "20000000", 0);     // 20s
-        av_dict_set(&opts, "timeout", "20000000", 0);
+        // Frigate mux can take ~12s+ on 4K — allow up to 60s
+        av_dict_set(&opts, "rw_timeout", "60000000", 0);   // 60s
+        av_dict_set(&opts, "timeout", "60000000", 0);
         av_dict_set(&opts, "reconnect", "0", 0);
-        av_dict_set(&opts, "probesize", "2000000", 0);
-        av_dict_set(&opts, "analyzeduration", "2000000", 0);
+        av_dict_set(&opts, "probesize", "5000000", 0);
+        av_dict_set(&opts, "analyzeduration", "5000000", 0);
     } else {
         av_dict_set(&opts, "rtsp_transport", "tcp", 0);
         av_dict_set(&opts, "stimeout", "5000000", 0);
@@ -263,7 +261,6 @@ void FFmpegWorker::decodeLoop()
     while (!m_abort.load()) {
         ret = av_read_frame(fmtCtx, packet);
         if (ret < 0) {
-            // End of file/clip — stop (do not spin)
             if (ret == AVERROR_EOF)
                 break;
             if (ret == AVERROR(EAGAIN)) {

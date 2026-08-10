@@ -18,12 +18,10 @@ Item {
     property bool closeEnabled: false
     property bool mainReady: false
     property bool isPlayback: false
-    // true only after FFmpeg opened the downloaded clip
+    // true only after downloaded clip is open
     property bool playbackReady: false
     property real _lastSeekTs: -1
     property double _lastSeekWall: 0
-    // block accidental returnToLive right after a seek
-    property double _blockLiveUntil: 0
 
     signal requestClose()
 
@@ -92,7 +90,6 @@ Item {
             if (id === root.cameraId || id === root.cameraName) {
                 root.isPlayback = true
                 root.playbackReady = true
-                root._blockLiveUntil = 0
                 console.log("Playback started UI", id)
             }
         }
@@ -158,7 +155,6 @@ Item {
         }
     }
 
-    // Only double-click exit — do not steal single clicks from timeline
     MouseArea {
         anchors.left: parent.left
         anchors.right: parent.right
@@ -167,10 +163,13 @@ Item {
         z: 15
         acceptedButtons: Qt.LeftButton
         propagateComposedEvents: true
-        onDoubleClicked: if (root.closeEnabled) root.requestClose()
-        onClicked: function(mouse) { mouse.accepted = false }
         onPressed: function(mouse) { mouse.accepted = false }
         onReleased: function(mouse) { mouse.accepted = false }
+        onClicked: function(mouse) { mouse.accepted = false }
+        onDoubleClicked: {
+            if (root.closeEnabled)
+                root.requestClose()
+        }
     }
 
     Rectangle {
@@ -185,7 +184,11 @@ Item {
             spacing: 16
             Text { text: root.cameraName; color: "white"; font.pixelSize: 15; font.bold: true }
             Text {
-                text: root.isPlayback ? (root.playbackReady ? "PLAYBACK" : "LOADING…") : "LIVE"
+                text: {
+                    if (!root.isPlayback) return "LIVE"
+                    if (!root.playbackReady) return "LOADING…"
+                    return "PLAYBACK"
+                }
                 color: root.isPlayback ? "#FFC107" : "#00C853"
                 font.pixelSize: 13
                 font.bold: true
@@ -212,7 +215,7 @@ Item {
         Text { anchors.centerIn: parent; text: "Live"; color: "white"; font.pixelSize: 13 }
         MouseArea {
             anchors.fill: parent
-            // Only allow return-to-live after clip is actually playing
+            // ONLY after clip is open — prevents cancel during download
             enabled: root.playbackReady
             onClicked: root.returnToLive()
         }
@@ -227,7 +230,10 @@ Item {
         color: "#000000AA"
         z: 31
         Text { anchors.centerIn: parent; text: "Exit"; color: "white"; font.pixelSize: 13 }
-        MouseArea { anchors.fill: parent; onClicked: root.requestClose() }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.requestClose()
+        }
     }
 
     Loader {
@@ -302,8 +308,6 @@ Item {
 
         root.isPlayback = true
         root.playbackReady = false
-        // Block accidental switchToLive for a few seconds while clip downloads
-        root._blockLiveUntil = wall + 8000
         forceMainTimer.stop()
 
         if (typeof frigateRef.getPlaybackQueue === "function") {
@@ -320,17 +324,15 @@ Item {
     }
 
     function returnToLive() {
-        // Ignore accidental calls right after seek / during download
-        if (Date.now() < root._blockLiveUntil && !root.playbackReady) {
-            console.log("returnToLive ignored (download in progress)")
+        // Hard block until clip is actually playing
+        if (!root.playbackReady) {
+            console.log("returnToLive ignored (not ready)")
             return
         }
-
         console.log("returnToLive", root.cameraName)
 
         root.isPlayback = false
         root.playbackReady = false
-        root._blockLiveUntil = 0
         playbackVideo.queue = null
         root.playbackQueue = null
         if (timelineLoader.item) {
@@ -363,7 +365,6 @@ Item {
         mainReady = false
         isPlayback = false
         playbackReady = false
-        _blockLiveUntil = 0
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
@@ -378,10 +379,17 @@ Item {
     }
 
     function close() {
-        // Force stop even if download still running
-        root._blockLiveUntil = 0
-        root.playbackReady = true
-        returnToLive()
+        // Forced stop on exit (not soft returnToLive)
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        if (frigateRef) {
+            if (typeof frigateRef.stopPlayback === "function")
+                frigateRef.stopPlayback(id)
+            else if (typeof frigateRef.switchToLive === "function")
+                frigateRef.switchToLive(id)
+        }
+
+        isPlayback = false
+        playbackReady = false
         closeArmTimer.stop()
         forceMainTimer.stop()
         timelineHideTimer.stop()

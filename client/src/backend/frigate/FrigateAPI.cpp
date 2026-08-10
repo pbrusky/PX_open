@@ -158,7 +158,6 @@ QObject* FrigateAPI::getFullscreenQueue(const QString& cameraName)
 
 QObject* FrigateAPI::getPlaybackQueue(const QString& cameraName)
 {
-    // MUST come from FrigatePlayback (same object that startPlayback writes frames to)
     return m_playback->getPlaybackQueue(cameraName);
 }
 
@@ -230,6 +229,11 @@ qint64 FrigateAPI::currentPosition(const QString& cameraId)
 void FrigateAPI::switchToLive(const QString& cameraId)
 {
     m_playback->switchToLive(cameraId);
+}
+
+void FrigateAPI::stopPlayback(const QString& cameraId)
+{
+    m_playback->stopPlayback(cameraId);
 }
 
 void FrigateAPI::loadModuleInformation()
