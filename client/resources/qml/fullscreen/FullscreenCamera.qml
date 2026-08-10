@@ -18,7 +18,6 @@ Item {
     property bool closeEnabled: false
     property bool mainReady: false
     property bool isPlayback: false
-    // true only after downloaded clip is open
     property bool playbackReady: false
     property real _lastSeekTs: -1
     property double _lastSeekWall: 0
@@ -111,7 +110,7 @@ Item {
         }
     }
 
-    Timer { id: closeArmTimer; interval: 400; onTriggered: root.closeEnabled = true }
+    Timer { id: closeArmTimer; interval: 350; onTriggered: root.closeEnabled = true }
 
     Timer {
         id: timelineHideTimer
@@ -148,27 +147,33 @@ Item {
         focus: true
         z: 20
         Keys.onReleased: function(event) {
-            if (event.key === Qt.Key_Escape && root.closeEnabled) {
+            if (event.key === Qt.Key_Escape) {
+                // Esc always allows exit (force)
+                console.log("Fullscreen Esc exit")
                 root.requestClose()
                 event.accepted = true
             }
         }
     }
 
+    // Double-click: blocked only while LOADING
     MouseArea {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
+        anchors.topMargin: 40
         anchors.bottom: bottomEdge.top
-        z: 15
+        z: 25
         acceptedButtons: Qt.LeftButton
-        propagateComposedEvents: true
-        onPressed: function(mouse) { mouse.accepted = false }
-        onReleased: function(mouse) { mouse.accepted = false }
-        onClicked: function(mouse) { mouse.accepted = false }
         onDoubleClicked: {
-            if (root.closeEnabled)
-                root.requestClose()
+            if (root.isPlayback && !root.playbackReady) {
+                console.log("double-click ignored (LOADING — use Exit button to cancel)")
+                return
+            }
+            if (!root.closeEnabled)
+                return
+            console.log("Fullscreen double-click exit")
+            root.requestClose()
         }
     }
 
@@ -215,12 +220,12 @@ Item {
         Text { anchors.centerIn: parent; text: "Live"; color: "white"; font.pixelSize: 13 }
         MouseArea {
             anchors.fill: parent
-            // ONLY after clip is open — prevents cancel during download
             enabled: root.playbackReady
             onClicked: root.returnToLive()
         }
     }
 
+    // Exit ALWAYS works — even during LOADING (cancels curl)
     Rectangle {
         width: 70; height: 28
         anchors.top: parent.top
@@ -232,7 +237,10 @@ Item {
         Text { anchors.centerIn: parent; text: "Exit"; color: "white"; font.pixelSize: 13 }
         MouseArea {
             anchors.fill: parent
-            onClicked: root.requestClose()
+            onClicked: {
+                console.log("Fullscreen Exit button")
+                root.requestClose()
+            }
         }
     }
 
@@ -310,6 +318,15 @@ Item {
         root.playbackReady = false
         forceMainTimer.stop()
 
+        // Free bandwidth: stop HQ live stream while curl downloads the clip
+        if (typeof frigateRef.stopFullscreenStream === "function") {
+            console.log("Pausing live HQ for download", id)
+            frigateRef.stopFullscreenStream(id)
+            root.mainQueue = null
+            mainVideo.queue = null
+            root.mainReady = false
+        }
+
         if (typeof frigateRef.getPlaybackQueue === "function") {
             root.playbackQueue = frigateRef.getPlaybackQueue(id)
             playbackVideo.queue = root.playbackQueue
@@ -324,7 +341,6 @@ Item {
     }
 
     function returnToLive() {
-        // Hard block until clip is actually playing
         if (!root.playbackReady) {
             console.log("returnToLive ignored (not ready)")
             return
@@ -344,8 +360,12 @@ Item {
         if (frigateRef && typeof frigateRef.switchToLive === "function")
             frigateRef.switchToLive(id)
 
-        if (mainQueue)
+        // Restart HQ live stream
+        if (frigateRef && typeof frigateRef.getFullscreenQueue === "function") {
+            root.mainQueue = frigateRef.getFullscreenQueue(id)
+            mainVideo.queue = root.mainQueue
             forceMainTimer.restart()
+        }
     }
 
     function loadTimelineData() {
@@ -379,14 +399,9 @@ Item {
     }
 
     function close() {
-        // Forced stop on exit (not soft returnToLive)
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
-        if (frigateRef) {
-            if (typeof frigateRef.stopPlayback === "function")
-                frigateRef.stopPlayback(id)
-            else if (typeof frigateRef.switchToLive === "function")
-                frigateRef.switchToLive(id)
-        }
+        if (frigateRef && typeof frigateRef.stopPlayback === "function")
+            frigateRef.stopPlayback(id)
 
         isPlayback = false
         playbackReady = false
