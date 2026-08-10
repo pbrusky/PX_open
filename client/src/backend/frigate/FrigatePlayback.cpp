@@ -129,7 +129,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     const qint64 wall = QDateTime::currentMSecsSinceEpoch();
     if (m_lastSeekMs.contains(cameraId) &&
         (wall - m_lastSeekMs.value(cameraId) < 400)) {
-        qDebug() << "[Playback] seek debounced" << cameraId;
         return;
     }
     m_lastSeekMs[cameraId] = wall;
@@ -137,14 +136,12 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     const int gen = m_seekGen.value(cameraId, 0) + 1;
     m_seekGen[cameraId] = gen;
 
-    // Normalize to seconds
     qint64 startSec = timestampMs;
-    if (timestampMs > 100000000000LL) // ms epoch
+    if (timestampMs > 100000000000LL)
         startSec = timestampMs / 1000;
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    // 8s window — Frigate needs a bit of room to mux
-    qint64 endSec = startSec + 8;
+    qint64 endSec = startSec + 5;
     if (endSec > nowSec)
         endSec = nowSec;
     if (endSec <= startSec)
@@ -193,7 +190,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
             return;
         qWarning() << "[Playback] open failed" << cameraId << reason;
         emit cameraOffline(cameraId);
-        // Still emit stopped so UI can recover
         emit playbackStopped(cameraId);
     }, Qt::QueuedConnection);
 
