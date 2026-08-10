@@ -72,10 +72,41 @@ Item {
         queue: playbackQueue
     }
 
+    // Center loading banner — stays until PLAYBACK
+    Rectangle {
+        anchors.centerIn: parent
+        width: Math.min(parent.width * 0.6, 420)
+        height: 72
+        radius: 10
+        color: "#CC000000"
+        border.color: "#FFC107"
+        border.width: 1
+        z: 50
+        visible: root.isPlayback && !root.playbackReady
+        Column {
+            anchors.centerIn: parent
+            spacing: 6
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "LOADING CLIP…"
+                color: "#FFC107"
+                font.pixelSize: 18
+                font.bold: true
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Wait 10–20s — do not press Exit"
+                color: "#CCCCCC"
+                font.pixelSize: 13
+            }
+        }
+    }
+
     Connections {
         id: apiConn
         target: frigateRef
         ignoreUnknownSignals: true
+
         function onFullscreenFrameReady(name) {
             if (!root.isPlayback && (name === root.cameraName || name === root.cameraId))
                 forceMainTimer.restart()
@@ -90,6 +121,12 @@ Item {
                 root.isPlayback = true
                 root.playbackReady = true
                 console.log("Playback started UI", id)
+            }
+        }
+        function onPlaybackStopped(id) {
+            if (id === root.cameraId || id === root.cameraName) {
+                if (root.isPlayback && !root.playbackReady)
+                    return
             }
         }
     }
@@ -110,7 +147,7 @@ Item {
         }
     }
 
-    Timer { id: closeArmTimer; interval: 350; onTriggered: root.closeEnabled = true }
+    Timer { id: closeArmTimer; interval: 400; onTriggered: root.closeEnabled = true }
 
     Timer {
         id: timelineHideTimer
@@ -147,34 +184,25 @@ Item {
         focus: true
         z: 20
         Keys.onReleased: function(event) {
-            if (event.key === Qt.Key_Escape) {
-                // Esc always allows exit (force)
-                console.log("Fullscreen Esc exit")
-                root.requestClose()
+            if (event.key === Qt.Key_Escape && root.closeEnabled) {
+                root.tryExit()
                 event.accepted = true
             }
         }
     }
 
-    // Double-click: blocked only while LOADING
     MouseArea {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.topMargin: 40
         anchors.bottom: bottomEdge.top
-        z: 25
+        z: 15
         acceptedButtons: Qt.LeftButton
-        onDoubleClicked: {
-            if (root.isPlayback && !root.playbackReady) {
-                console.log("double-click ignored (LOADING — use Exit button to cancel)")
-                return
-            }
-            if (!root.closeEnabled)
-                return
-            console.log("Fullscreen double-click exit")
-            root.requestClose()
-        }
+        propagateComposedEvents: true
+        onPressed: function(mouse) { mouse.accepted = false }
+        onReleased: function(mouse) { mouse.accepted = false }
+        onClicked: function(mouse) { mouse.accepted = false }
+        onDoubleClicked: root.tryExit()
     }
 
     Rectangle {
@@ -225,7 +253,6 @@ Item {
         }
     }
 
-    // Exit ALWAYS works — even during LOADING (cancels curl)
     Rectangle {
         width: 70; height: 28
         anchors.top: parent.top
@@ -237,10 +264,7 @@ Item {
         Text { anchors.centerIn: parent; text: "Exit"; color: "white"; font.pixelSize: 13 }
         MouseArea {
             anchors.fill: parent
-            onClicked: {
-                console.log("Fullscreen Exit button")
-                root.requestClose()
-            }
+            onClicked: root.tryExit()
         }
     }
 
@@ -274,6 +298,13 @@ Item {
         onEntered: { showTimelineBar(); timelineHideTimer.stop() }
         onExited: timelineHideTimer.restart()
         onPositionChanged: { showTimelineBar(); timelineHideTimer.restart() }
+    }
+
+    function tryExit() {
+        // Allow Exit always, but warn if still loading
+        if (root.isPlayback && !root.playbackReady)
+            console.log("Exit during LOADING — canceling download")
+        root.requestClose()
     }
 
     function showTimelineBar() {
@@ -318,13 +349,10 @@ Item {
         root.playbackReady = false
         forceMainTimer.stop()
 
-        // Free bandwidth: stop HQ live stream while curl downloads the clip
+        // Free bandwidth: stop live HQ fullscreen stream
         if (typeof frigateRef.stopFullscreenStream === "function") {
             console.log("Pausing live HQ for download", id)
             frigateRef.stopFullscreenStream(id)
-            root.mainQueue = null
-            mainVideo.queue = null
-            root.mainReady = false
         }
 
         if (typeof frigateRef.getPlaybackQueue === "function") {
@@ -360,10 +388,11 @@ Item {
         if (frigateRef && typeof frigateRef.switchToLive === "function")
             frigateRef.switchToLive(id)
 
-        // Restart HQ live stream
+        // Restart live HQ
         if (frigateRef && typeof frigateRef.getFullscreenQueue === "function") {
             root.mainQueue = frigateRef.getFullscreenQueue(id)
             mainVideo.queue = root.mainQueue
+            root.mainReady = false
             forceMainTimer.restart()
         }
     }
@@ -400,8 +429,12 @@ Item {
 
     function close() {
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
-        if (frigateRef && typeof frigateRef.stopPlayback === "function")
-            frigateRef.stopPlayback(id)
+        if (frigateRef) {
+            if (typeof frigateRef.stopPlayback === "function")
+                frigateRef.stopPlayback(id)
+            else if (typeof frigateRef.switchToLive === "function")
+                frigateRef.switchToLive(id)
+        }
 
         isPlayback = false
         playbackReady = false
@@ -421,8 +454,7 @@ Item {
         if (timelineLoader.item) {
             timelineLoader.item.allowAutoReveal = false
             timelineLoader.item.collapsed = true
-            timelineLoader.item.cameraId = ""
-            timelineLoader.item.recordings = []
+            timelineLoader.item.isPlayback = false
         }
     }
 }

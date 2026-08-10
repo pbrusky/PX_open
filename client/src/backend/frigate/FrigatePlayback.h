@@ -5,9 +5,8 @@
 #include <QString>
 #include <QHash>
 #include <QMutex>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QTemporaryFile>
+#include <QProcess>
+#include <QTimer>
 
 class FrameQueue;
 class FFmpegWorker;
@@ -59,9 +58,9 @@ private:
     QHash<QString, FFmpegWorker*> m_playbackWorkers;
     QHash<QString, QThread*> m_playbackThreads;
 
-    QNetworkAccessManager* m_nam = nullptr;
-    QHash<QString, QNetworkReply*> m_replies;
-    QHash<QString, QTemporaryFile*> m_tempFiles;
+    QHash<QString, QProcess*> m_curlProcs;
+    QHash<QString, QString> m_curlPaths;
+    QHash<QString, QTimer*> m_progressTimers;
 };
 
 #endif

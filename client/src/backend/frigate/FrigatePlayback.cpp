@@ -6,14 +6,14 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QMutexLocker>
-#include <QNetworkRequest>
-#include <QUrl>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
+#include <QUuid>
 
 FrigatePlayback::FrigatePlayback(QObject* parent)
     : QObject(parent)
-    , m_nam(new QNetworkAccessManager(this))
 {
 }
 
@@ -24,8 +24,8 @@ FrigatePlayback::~FrigatePlayback()
         cancelDownload(id);
         stopWorkerAsync(id);
     }
-    const QStringList dlKeys = m_replies.keys();
-    for (const QString& id : dlKeys)
+    const QStringList curlKeys = m_curlProcs.keys();
+    for (const QString& id : curlKeys)
         cancelDownload(id);
 }
 
@@ -65,20 +65,30 @@ QObject* FrigatePlayback::getPlaybackQueue(const QString& cameraId)
 
 void FrigatePlayback::cancelDownload(const QString& cameraId)
 {
-    if (m_replies.contains(cameraId)) {
-        QNetworkReply* r = m_replies.take(cameraId);
-        if (r) {
-            QObject::disconnect(r, nullptr, this, nullptr);
-            r->abort();
-            r->deleteLater();
-        }
-    }
-    if (m_tempFiles.contains(cameraId)) {
-        QTemporaryFile* t = m_tempFiles.take(cameraId);
+    if (m_progressTimers.contains(cameraId)) {
+        QTimer* t = m_progressTimers.take(cameraId);
         if (t) {
-            t->close();
+            t->stop();
             t->deleteLater();
         }
+    }
+
+    if (m_curlProcs.contains(cameraId)) {
+        QProcess* p = m_curlProcs.take(cameraId);
+        if (p) {
+            QObject::disconnect(p, nullptr, this, nullptr);
+            if (p->state() != QProcess::NotRunning) {
+                p->kill();
+                p->waitForFinished(2000);
+            }
+            p->deleteLater();
+        }
+    }
+
+    if (m_curlPaths.contains(cameraId)) {
+        const QString path = m_curlPaths.take(cameraId);
+        if (!path.isEmpty() && QFile::exists(path))
+            QFile::remove(path);
     }
 }
 
@@ -165,20 +175,26 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     if (timestampMs > 100000000000LL)
         startSec = timestampMs / 1000;
 
+    // Short 4s window — faster Frigate mux
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    qint64 endSec = startSec + 6;
+    qint64 endSec = startSec + 4;
     if (endSec > nowSec)
         endSec = nowSec;
     if (endSec <= startSec)
-        endSec = startSec + 4;
+        endSec = startSec + 3;
 
     const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
                             .arg(m_server, cameraId)
                             .arg(startSec)
                             .arg(endSec);
 
-    qDebug() << "[Playback] download" << cameraId << startSec << "->" << endSec << url;
-    qDebug() << "[Playback] WAIT — do not press Exit for ~15 seconds";
+    const QString tmpDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    const QString path = QDir(tmpDir).filePath(
+        QStringLiteral("px_clip_%1_%2.mp4")
+            .arg(cameraId, QUuid::createUuid().toString(QUuid::Id128).left(8)));
+
+    qDebug() << "[Playback] curl download" << cameraId << startSec << "->" << endSec << url;
+    qDebug() << "[Playback] WAIT until you see 'downloaded' and 'open OK'";
 
     cancelDownload(cameraId);
     stopWorkerAsync(cameraId);
@@ -188,102 +204,97 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         return;
     QMetaObject::invokeMethod(queue, "resetReceived");
 
-    QTemporaryFile* tmp = new QTemporaryFile(
-        QDir::temp().filePath(QStringLiteral("px_clip_%1_XXXXXX.mp4").arg(cameraId)),
-        this);
-    tmp->setAutoRemove(true);
-    if (!tmp->open()) {
-        qWarning() << "[Playback] temp file failed" << cameraId;
-        tmp->deleteLater();
-        return;
-    }
-    m_tempFiles.insert(cameraId, tmp);
-
-    QNetworkRequest req{QUrl(url)};
-    req.setRawHeader("User-Agent", "Mozilla/5.0 PX-Open");
-    req.setRawHeader("Accept", "*/*");
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                     QNetworkRequest::NoLessSafeRedirectPolicy);
-    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
-    req.setTransferTimeout(90000);
-
-    QNetworkReply* reply = m_nam->get(req);
-    m_replies.insert(cameraId, reply);
-
     const qint64 posMs = startSec * 1000;
     m_playbackPositionByCamera[cameraId] = posMs;
     emit playbackPositionChanged(cameraId, posMs);
 
-    connect(reply, &QNetworkReply::downloadProgress, this,
-            [this, cameraId, gen](qint64 rec, qint64 total) {
-        if (m_seekGen.value(cameraId, 0) != gen)
-            return;
-        if (rec > 0 && (rec % (2 * 1024 * 1024) < 65536))
-            qDebug() << "[Playback] progress" << cameraId << rec << "/" << total;
+    QProcess* proc = new QProcess(this);
+    proc->setProgram(QStringLiteral("curl"));
+    proc->setArguments({
+        QStringLiteral("-fsSL"),
+        QStringLiteral("--max-time"), QStringLiteral("120"),
+        QStringLiteral("--connect-timeout"), QStringLiteral("15"),
+        QStringLiteral("-o"), path,
+        url
     });
 
-    connect(reply, &QNetworkReply::readyRead, this,
-            [this, cameraId, reply, tmp, gen]() {
+    m_curlProcs.insert(cameraId, proc);
+    m_curlPaths.insert(cameraId, path);
+
+    // File-size progress every 2 seconds
+    QTimer* prog = new QTimer(this);
+    prog->setInterval(2000);
+    connect(prog, &QTimer::timeout, this, [this, cameraId, path, gen]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
-        if (m_replies.value(cameraId) != reply || !tmp)
-            return;
-        const QByteArray chunk = reply->readAll();
-        if (!chunk.isEmpty())
-            tmp->write(chunk);
+        QFileInfo fi(path);
+        if (fi.exists())
+            qDebug() << "[Playback] progress" << cameraId << (fi.size() / 1024) << "KB";
+        else
+            qDebug() << "[Playback] progress" << cameraId << "0 KB (waiting for first bytes)";
     });
+    m_progressTimers.insert(cameraId, prog);
+    prog->start();
 
-    connect(reply, &QNetworkReply::finished, this,
-            [this, cameraId, reply, tmp, posMs, gen]() {
+    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, cameraId, proc, path, posMs, gen](int code, QProcess::ExitStatus st) {
+        if (m_progressTimers.contains(cameraId)) {
+            QTimer* t = m_progressTimers.take(cameraId);
+            if (t) { t->stop(); t->deleteLater(); }
+        }
+
+        if (m_curlProcs.value(cameraId) == proc)
+            m_curlProcs.remove(cameraId);
+
         if (m_seekGen.value(cameraId, 0) != gen) {
-            reply->deleteLater();
-            if (m_replies.value(cameraId) == reply)
-                m_replies.remove(cameraId);
+            if (QFile::exists(path))
+                QFile::remove(path);
+            m_curlPaths.remove(cameraId);
+            proc->deleteLater();
             return;
         }
 
-        if (m_replies.value(cameraId) == reply)
-            m_replies.remove(cameraId);
-
-        if (tmp && reply->bytesAvailable() > 0)
-            tmp->write(reply->readAll());
-
-        if (reply->error() != QNetworkReply::NoError) {
-            if (reply->error() != QNetworkReply::OperationCanceledError)
-                qWarning() << "[Playback] download failed" << cameraId
-                           << reply->errorString();
-            reply->deleteLater();
-            if (m_tempFiles.value(cameraId) == tmp) {
-                m_tempFiles.remove(cameraId);
-                tmp->close();
-                tmp->deleteLater();
-            }
+        if (st != QProcess::NormalExit || code != 0) {
+            qWarning() << "[Playback] curl failed" << cameraId
+                       << "code" << code
+                       << proc->errorString()
+                       << QString::fromLocal8Bit(proc->readAllStandardError());
+            if (QFile::exists(path))
+                QFile::remove(path);
+            m_curlPaths.remove(cameraId);
+            proc->deleteLater();
             return;
         }
 
-        reply->deleteLater();
-
-        if (!tmp) {
-            qWarning() << "[Playback] no temp file" << cameraId;
-            return;
-        }
-
-        tmp->flush();
-        tmp->close();
-
-        const qint64 sz = tmp->size();
+        QFileInfo fi(path);
+        const qint64 sz = fi.size();
         if (sz < 1024) {
             qWarning() << "[Playback] clip too small" << cameraId << sz;
-            if (m_tempFiles.value(cameraId) == tmp) {
-                m_tempFiles.remove(cameraId);
-                tmp->deleteLater();
-            }
+            if (QFile::exists(path))
+                QFile::remove(path);
+            m_curlPaths.remove(cameraId);
+            proc->deleteLater();
             return;
         }
 
-        qDebug() << "[Playback] downloaded" << sz << "bytes ->" << tmp->fileName();
-        startLocalFile(cameraId, tmp->fileName(), posMs, gen);
+        qDebug() << "[Playback] downloaded" << sz << "bytes ->" << path;
+        // Keep path until worker finishes — remove on next cancel/stop
+        startLocalFile(cameraId, path, posMs, gen);
+        proc->deleteLater();
     });
+
+    connect(proc, &QProcess::errorOccurred, this,
+            [this, cameraId, proc, path, gen](QProcess::ProcessError) {
+        if (m_seekGen.value(cameraId, 0) != gen)
+            return;
+        qWarning() << "[Playback] curl process error" << cameraId << proc->errorString();
+    });
+
+    proc->start();
+    if (!proc->waitForStarted(3000)) {
+        qWarning() << "[Playback] curl failed to start — is curl.exe on PATH?";
+        cancelDownload(cameraId);
+    }
 }
 
 void FrigatePlayback::startLocalFile(const QString& cameraId,
@@ -351,7 +362,7 @@ void FrigatePlayback::switchToLive(const QString& cameraId)
     if (cameraId.trimmed().isEmpty())
         return;
 
-    if (m_replies.contains(cameraId)) {
+    if (m_curlProcs.contains(cameraId)) {
         qDebug() << "[Playback] switchToLive ignored (download active)" << cameraId;
         return;
     }
