@@ -80,7 +80,6 @@ Item {
         }
     }
 
-    // Center loading banner — stays until PLAYBACK
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width * 0.6, 420)
@@ -132,9 +131,7 @@ Item {
             }
         }
         function onPlaybackStopped(id) {
-            if (id === root.cameraId || id === root.cameraName) {
-                // no-op: returnToLive already clears flags
-            }
+            // no-op; returnToLive clears flags
         }
     }
 
@@ -203,18 +200,23 @@ Item {
         }
     }
 
+    // Video area — double-click exits (same path as Exit button)
     MouseArea {
+        id: videoClickArea
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.bottom: bottomEdge.top
-        z: 15
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: timelineLoader.height > 0 ? timelineLoader.height : 0
+        z: 25
         acceptedButtons: Qt.LeftButton
-        propagateComposedEvents: true
-        onPressed: function(mouse) { mouse.accepted = false }
-        onReleased: function(mouse) { mouse.accepted = false }
-        onClicked: function(mouse) { mouse.accepted = false }
-        onDoubleClicked: root.tryExit()
+        propagateComposedEvents: false
+
+        onDoubleClicked: function(mouse) {
+            mouse.accepted = true
+            console.log("Double-click exit fullscreen")
+            root.tryExit()
+        }
     }
 
     Rectangle {
@@ -253,15 +255,18 @@ Item {
         anchors.rightMargin: 90
         anchors.topMargin: 10
         radius: 4
-        color: root.playbackReady ? "#1B5E20" : "#00000055"
-        border.color: root.playbackReady ? "#00C853" : "#444"
+        color: root.isPlayback ? "#1B5E20" : "#00000055"
+        border.color: root.isPlayback ? "#00C853" : "#444"
         border.width: 1
         z: 31
         Text { anchors.centerIn: parent; text: "Live"; color: "white"; font.pixelSize: 13 }
         MouseArea {
             anchors.fill: parent
-            enabled: root.playbackReady
-            onClicked: root.returnToLive()
+            enabled: root.isPlayback
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                root.returnToLive()
+            }
         }
     }
 
@@ -276,7 +281,10 @@ Item {
         Text { anchors.centerIn: parent; text: "Exit"; color: "white"; font.pixelSize: 13 }
         MouseArea {
             anchors.fill: parent
-            onClicked: root.tryExit()
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                root.tryExit()
+            }
         }
     }
 
@@ -298,7 +306,7 @@ Item {
         }
     }
 
-    // Hover strip ONLY — must stay BELOW timeline (z:40) so clicks reach the timeline
+    // Hover strip only — below timeline so clicks reach the timeline
     MouseArea {
         id: bottomEdge
         anchors.left: parent.left
@@ -315,7 +323,7 @@ Item {
 
     function tryExit() {
         if (root.isPlayback && !root.playbackReady)
-            console.log("Exit during LOADING — canceling download")
+            console.log("Exit during LOADING — canceling playback")
         root.requestClose()
     }
 
@@ -347,9 +355,12 @@ Item {
     }
 
     function onTimelineSeek(tsMs) {
-        if (!frigateRef) return
+        if (!frigateRef) {
+            console.log("Seek ignored — no frigateRef")
+            return
+        }
         var wall = Date.now()
-        if (Math.abs(tsMs - root._lastSeekTs) < 300 && (wall - root._lastSeekWall) < 500)
+        if (Math.abs(tsMs - root._lastSeekTs) < 200 && (wall - root._lastSeekWall) < 300)
             return
         root._lastSeekTs = tsMs
         root._lastSeekWall = wall
@@ -361,9 +372,8 @@ Item {
         root.playbackReady = false
         forceMainTimer.stop()
 
-        // Free bandwidth: stop live HQ fullscreen stream
         if (typeof frigateRef.stopFullscreenStream === "function") {
-            console.log("Pausing live HQ for download", id)
+            console.log("Pausing live HQ for playback", id)
             frigateRef.stopFullscreenStream(id)
         }
 
@@ -371,10 +381,13 @@ Item {
             root.playbackQueue = frigateRef.getPlaybackQueue(id)
             playbackVideo.queue = root.playbackQueue
         }
+
         if (typeof frigateRef.startPlayback === "function")
             frigateRef.startPlayback(id, Math.floor(tsMs))
         else if (typeof frigateRef.seek === "function")
             frigateRef.seek(id, Math.floor(tsMs))
+        else
+            console.log("ERROR: no startPlayback/seek on frigateRef")
 
         if (timelineLoader.item) {
             timelineLoader.item.isPlayback = true
@@ -383,11 +396,9 @@ Item {
     }
 
     function returnToLive() {
-        if (!root.playbackReady) {
-            console.log("returnToLive ignored (not ready)")
-            return
-        }
-        console.log("returnToLive", root.cameraName)
+        console.log("returnToLive", root.cameraName, "ready=", root.playbackReady)
+
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
 
         root.isPlayback = false
         root.playbackReady = false
@@ -398,19 +409,21 @@ Item {
             timelineLoader.item.playbackPositionMs = 0
         }
 
-        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
-        if (frigateRef && typeof frigateRef.switchToLive === "function")
-            frigateRef.switchToLive(id)
-        else if (frigateRef && typeof frigateRef.stopPlayback === "function")
-            frigateRef.stopPlayback(id)
+        if (frigateRef) {
+            if (typeof frigateRef.switchToLive === "function")
+                frigateRef.switchToLive(id)
+            else if (typeof frigateRef.stopPlayback === "function")
+                frigateRef.stopPlayback(id)
+        }
 
-        // Restart live HQ
         if (frigateRef && typeof frigateRef.getFullscreenQueue === "function") {
             root.mainQueue = frigateRef.getFullscreenQueue(id)
             mainVideo.queue = root.mainQueue
             root.mainReady = false
             forceMainTimer.restart()
         }
+        if (root.subQueue)
+            subVideo.queue = root.subQueue
     }
 
     function loadTimelineData() {

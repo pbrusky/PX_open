@@ -164,15 +164,9 @@ Item {
 
     Timer {
         id: unlockTimer
-        interval: 1500
+        interval: 400
         onTriggered: {
             gridContainer.fullscreenLocked = false
-            if (fullscreenLoader.item) {
-                try {
-                    fullscreenLoader.item.requestClose.disconnect(gridContainer.exitFullscreen)
-                } catch (e) {}
-                fullscreenLoader.item.requestClose.connect(gridContainer.exitFullscreen)
-            }
         }
     }
 
@@ -184,6 +178,7 @@ Item {
         var name = (cameraName !== undefined && cameraName !== null) ? ("" + cameraName) : ""
 
         try { item.requestClose.disconnect(gridContainer.exitFullscreen) } catch (e) {}
+        item.requestClose.connect(gridContainer.exitFullscreen)
 
         item.cameraId = name
         item.cameraName = name
@@ -218,9 +213,6 @@ Item {
             frigateRef.stopFullscreenStream(name)
         }
 
-        // Keep the main application window in true fullscreen after
-        // the camera overlay is closed (Windows can drop out of FS
-        // when reparenting the loader).
         if (mainWindow) {
             if (typeof mainWindow.enterTrueFullscreen === "function")
                 mainWindow.enterTrueFullscreen()
