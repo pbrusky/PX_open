@@ -65,6 +65,7 @@ public:
     Q_INVOKABLE void startPlayback(const QString& cameraId, qint64 timestampMs);
     Q_INVOKABLE qint64 currentPosition(const QString& cameraId);
     Q_INVOKABLE void switchToLive(const QString& cameraId);
+    Q_INVOKABLE void stopPlayback(const QString& cameraId);
 
     Q_INVOKABLE void loadModuleInformation();
     Q_INVOKABLE void testRtsp(const QString& url);
@@ -98,6 +99,8 @@ signals:
     void eventsLoaded(const QString& cameraId, const QVariantList& events);
 
     void playbackPositionChanged(const QString& cameraId, qint64 positionMs);
+    void playbackStarted(const QString& cameraId);
+    void playbackStopped(const QString& cameraId);
 
     void moduleInformationReceived(QString name,
                                    QString version,

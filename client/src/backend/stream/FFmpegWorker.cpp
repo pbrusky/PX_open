@@ -25,7 +25,7 @@ FFmpegWorker::FFmpegWorker(QObject* parent)
 
 FFmpegWorker::~FFmpegWorker()
 {
-    m_abort = true;
+    m_abort.store(true);
     clearHw();
 }
 
@@ -63,6 +63,14 @@ bool FFmpegWorker::initHwDevice(AVCodecContext* ctx)
     Q_UNUSED(ctx);
     clearHw();
     return false;
+}
+
+int FFmpegWorker::decodeInterruptCb(void* opaque)
+{
+    FFmpegWorker* self = static_cast<FFmpegWorker*>(opaque);
+    if (!self)
+        return 0;
+    return self->m_abort.load() ? 1 : 0;
 }
 
 bool FFmpegWorker::openCodec(AVCodecContext** codecCtx,
@@ -129,13 +137,13 @@ void FFmpegWorker::updateStats(AVFormatContext* fmtCtx,
 
 void FFmpegWorker::startDecoding()
 {
-    m_abort = false;
+    m_abort.store(false);
     decodeLoop();
 }
 
 void FFmpegWorker::stopDecoding()
 {
-    m_abort = true;
+    m_abort.store(true);
 }
 
 void FFmpegWorker::decodeLoop()
@@ -146,35 +154,60 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
-    AVFormatContext* fmtCtx = nullptr;
-    AVDictionary* opts = nullptr;
+    const bool isHttp = m_url.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive)
+                     || m_url.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive);
 
-    av_dict_set(&opts, "rtsp_transport", "tcp", 0);
-    av_dict_set(&opts, "stimeout", "1000000", 0);
-    av_dict_set(&opts, "rw_timeout", "1000000", 0);
-    av_dict_set(&opts, "probesize", "100000", 0);
-    av_dict_set(&opts, "analyzeduration", "300000", 0);
-    av_dict_set(&opts, "fflags", "nobuffer", 0);
-    av_dict_set(&opts, "flags", "low_delay", 0);
-    av_dict_set(&opts, "max_delay", "0", 0);
+    AVFormatContext* fmtCtx = avformat_alloc_context();
+    if (!fmtCtx) {
+        emit openInputFailed(QStringLiteral("alloc context failed"));
+        emit finished();
+        return;
+    }
+
+    fmtCtx->interrupt_callback.callback = &FFmpegWorker::decodeInterruptCb;
+    fmtCtx->interrupt_callback.opaque = this;
+
+    AVDictionary* opts = nullptr;
+    if (isHttp) {
+        // Frigate mux can take ~12s+ on 4K — allow up to 60s
+        av_dict_set(&opts, "rw_timeout", "60000000", 0);   // 60s
+        av_dict_set(&opts, "timeout", "60000000", 0);
+        av_dict_set(&opts, "reconnect", "0", 0);
+        av_dict_set(&opts, "probesize", "5000000", 0);
+        av_dict_set(&opts, "analyzeduration", "5000000", 0);
+    } else {
+        av_dict_set(&opts, "rtsp_transport", "tcp", 0);
+        av_dict_set(&opts, "stimeout", "5000000", 0);
+        av_dict_set(&opts, "rw_timeout", "5000000", 0);
+        av_dict_set(&opts, "probesize", "100000", 0);
+        av_dict_set(&opts, "analyzeduration", "300000", 0);
+        av_dict_set(&opts, "fflags", "nobuffer", 0);
+        av_dict_set(&opts, "flags", "low_delay", 0);
+        av_dict_set(&opts, "max_delay", "0", 0);
+    }
 
     const QByteArray urlBytes = m_url.toUtf8();
     int ret = avformat_open_input(&fmtCtx, urlBytes.constData(), nullptr, &opts);
     av_dict_free(&opts);
 
-    if (ret < 0) {
-        char errbuf[256];
-        av_strerror(ret, errbuf, sizeof(errbuf));
-        emit openInputFailed(QString::fromUtf8(errbuf));
+    if (ret < 0 || m_abort.load()) {
+        if (fmtCtx)
+            avformat_close_input(&fmtCtx);
+        if (!m_abort.load()) {
+            char errbuf[256];
+            av_strerror(ret, errbuf, sizeof(errbuf));
+            emit openInputFailed(QString::fromUtf8(errbuf));
+        }
         emit finished();
         return;
     }
 
     emit openInputOk();
 
-    if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
+    if (avformat_find_stream_info(fmtCtx, nullptr) < 0 || m_abort.load()) {
         avformat_close_input(&fmtCtx);
-        emit openInputFailed(QStringLiteral("find_stream_info failed"));
+        if (!m_abort.load())
+            emit openInputFailed(QStringLiteral("find_stream_info failed"));
         emit finished();
         return;
     }
@@ -205,7 +238,7 @@ void FFmpegWorker::decodeLoop()
     }
 
     AVCodecContext* codecCtx = nullptr;
-    if (!openCodec(&codecCtx, codec, params, /*tryHw=*/false) || !codecCtx) {
+    if (!openCodec(&codecCtx, codec, params, false) || !codecCtx) {
         avformat_close_input(&fmtCtx);
         emit openInputFailed(QStringLiteral("Failed to open codec"));
         emit finished();
@@ -225,10 +258,12 @@ void FFmpegWorker::decodeLoop()
     const int kMaxOutW = m_highQuality ? 3840 : 1280;
     const int kMaxOutH = m_highQuality ? 2160 : 720;
 
-    while (!m_abort) {
+    while (!m_abort.load()) {
         ret = av_read_frame(fmtCtx, packet);
         if (ret < 0) {
-            if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN)) {
+            if (ret == AVERROR_EOF)
+                break;
+            if (ret == AVERROR(EAGAIN)) {
                 QThread::msleep(5);
                 continue;
             }
@@ -245,7 +280,7 @@ void FFmpegWorker::decodeLoop()
         if (ret < 0)
             continue;
 
-        while (ret >= 0 && !m_abort) {
+        while (ret >= 0 && !m_abort.load()) {
             ret = avcodec_receive_frame(codecCtx, frame);
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;

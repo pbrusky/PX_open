@@ -3,22 +3,21 @@ import QtQuick 2.15
 Item {
     id: segments
 
-    // REQUIRED PROPERTIES
     property var recordings
     property real startTs
     property real endTs
     property real zoom
     property real pan
     property real timelineWidth
-    property var timestampToX   // <-- FIXED
+    property var timestampToX
 
     Repeater {
         model: recordings
 
         Rectangle {
-            height: 62
-            y: 24
-            radius: 4
+            height: parent ? parent.height : 28
+            y: 0
+            radius: 3
             border.color: "#3A8DFFAA"
             border.width: 1
             clip: true
@@ -32,12 +31,14 @@ Item {
             }
 
             width: {
-                let x1 = timestampToX(modelData.start * 1000)
-                let x2 = timestampToX(modelData.end * 1000)
+                if (!timestampToX)
+                    return 8
+                var x1 = timestampToX(modelData.start * 1000)
+                var x2 = timestampToX(modelData.end * 1000)
                 return Math.max(8, x2 - x1)
             }
 
-            x: timestampToX(modelData.start * 1000)
+            x: timestampToX ? timestampToX(modelData.start * 1000) : 0
         }
     }
 }

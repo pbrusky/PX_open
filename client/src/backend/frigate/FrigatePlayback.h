@@ -3,8 +3,8 @@
 
 #include <QObject>
 #include <QString>
-#include <QVariantList>
 #include <QHash>
+#include <QMutex>
 
 class FrameQueue;
 class FFmpegWorker;
@@ -16,17 +16,12 @@ class FrigatePlayback : public QObject
 
 public:
     explicit FrigatePlayback(QObject* parent = nullptr);
+    ~FrigatePlayback() override;
 
-    //
-    // Server configuration
-    //
     void setServer(const QString& server);
     void setModuleServer(const QString& server);
     void setServerIp(const QString& ip);
 
-    //
-    // Playback API
-    //
     QObject* getPlaybackQueue(const QString& cameraId);
 
     void seek(const QString& cameraId, qint64 timestampMs);
@@ -34,27 +29,29 @@ public:
     qint64 currentPosition(const QString& cameraId) const;
 
     void switchToLive(const QString& cameraId);
+    void stopPlayback(const QString& cameraId);
 
 signals:
     void playbackPositionChanged(const QString& cameraId, qint64 positionMs);
+    void playbackStarted(const QString& cameraId);
+    void playbackStopped(const QString& cameraId);
     void cameraOnline(QString id);
     void cameraOffline(QString id);
 
 private:
+    void stopWorkerAsync(const QString& cameraId);
+
     QString m_server;
     QString m_moduleServer;
     QString m_serverIp;
 
-    // Playback position tracking
+    QMutex m_mutex;
     QHash<QString, qint64> m_playbackPositionByCamera;
+    QHash<QString, qint64> m_lastSeekMs;
+    QHash<QString, int> m_seekGen;
 
-    // Playback queues
     QHash<QString, FrameQueue*> m_playbackQueues;
-
-    // Playback workers
     QHash<QString, FFmpegWorker*> m_playbackWorkers;
-
-    // Playback threads
     QHash<QString, QThread*> m_playbackThreads;
 };
 
