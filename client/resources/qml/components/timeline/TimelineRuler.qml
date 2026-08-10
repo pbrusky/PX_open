@@ -4,47 +4,71 @@ Item {
     id: ruler
     property real startTs
     property real endTs
-    property int segmentCount: 10
+    property int segmentCount: 12
 
     anchors.left: parent.left
     anchors.right: parent.right
-    height: 20
+    height: 22
+
+    function labelFor(index) {
+        if (endTs <= startTs)
+            return ""
+        var frac = index / segmentCount
+        var tsMs = (startTs + frac * (endTs - startTs)) * 1000
+        var spanSec = endTs - startTs
+        // Short range → show seconds; multi-hour → date + time
+        if (spanSec <= 3600)
+            return Qt.formatDateTime(new Date(tsMs), "hh:mm:ss")
+        if (spanSec <= 24 * 3600)
+            return Qt.formatDateTime(new Date(tsMs), "hh:mm")
+        return Qt.formatDateTime(new Date(tsMs), "MM/dd hh:mm")
+    }
 
     Repeater {
         model: segmentCount + 1
 
-        Rectangle {
-            width: parent.width / (segmentCount + 1)
-            height: parent.height
-            color: "transparent"
+        Item {
+            width: ruler.width / segmentCount
+            height: ruler.height
+            x: index * (ruler.width / segmentCount) - width / 2
 
-            Canvas {
-                anchors.fill: parent
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.clearRect(0,0,width,height)
-                    ctx.strokeStyle = "#4A4A4A"
-                    ctx.lineWidth = 1
-                    ctx.beginPath()
-                    ctx.moveTo(width/2, height)
-                    ctx.lineTo(width/2, height-8)
-                    ctx.stroke()
-                }
+            Rectangle {
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                width: 1
+                height: index % 2 === 0 ? 10 : 6
+                color: "#666666"
             }
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
                 font.pixelSize: 10
-                color: "#DDDDDD"
-                text: {
-                    if (endTs <= startTs) return ""
-                    let frac = index / segmentCount
-                    let ts = startTs * 1000 +
-                             frac * (endTs - startTs) * 1000
-                    return Qt.formatDateTime(new Date(ts), "hh:mm")
-                }
+                color: "#CCCCCC"
+                text: ruler.labelFor(index)
+                // Hide edge labels that would clip
+                visible: index > 0 && index < segmentCount
             }
         }
+    }
+
+    // Always show start / end clearly
+    Text {
+        anchors.left: parent.left
+        anchors.leftMargin: 4
+        anchors.top: parent.top
+        font.pixelSize: 10
+        font.bold: true
+        color: "#FFFFFF"
+        text: ruler.labelFor(0)
+    }
+    Text {
+        anchors.right: parent.right
+        anchors.rightMargin: 4
+        anchors.top: parent.top
+        font.pixelSize: 10
+        font.bold: true
+        color: "#FFFFFF"
+        text: ruler.labelFor(segmentCount)
     }
 }

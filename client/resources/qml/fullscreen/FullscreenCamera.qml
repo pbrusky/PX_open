@@ -131,7 +131,6 @@ Item {
             }
         }
         function onPlaybackStopped(id) {
-            // no-op; returnToLive clears flags
         }
     }
 
@@ -162,8 +161,12 @@ Item {
         id: timelineHideTimer
         interval: 2800
         onTriggered: {
-            if (timelineLoader.item && !bottomEdge.containsMouse)
-                timelineLoader.item.collapsed = true
+            if (!timelineLoader.item)
+                return
+            // Stay open while pointer is on timeline or bottom hover strip
+            if (timelineHoverArea.containsMouse || bottomEdge.containsMouse)
+                return
+            timelineLoader.item.collapsed = true
         }
     }
 
@@ -200,7 +203,6 @@ Item {
         }
     }
 
-    // Video area — double-click exits (same path as Exit button)
     MouseArea {
         id: videoClickArea
         anchors.left: parent.left
@@ -263,6 +265,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             enabled: root.isPlayback
+            preventStealing: true
             onClicked: function(mouse) {
                 mouse.accepted = true
                 root.returnToLive()
@@ -306,7 +309,23 @@ Item {
         }
     }
 
-    // Hover strip only — below timeline so clicks reach the timeline
+    // Keeps timeline open while mouse is over it (does not steal clicks)
+    MouseArea {
+        id: timelineHoverArea
+        anchors.fill: timelineLoader
+        z: 39
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+        enabled: timelineLoader.item && !timelineLoader.item.collapsed
+
+        onEntered: timelineHideTimer.stop()
+        onExited: {
+            if (!bottomEdge.containsMouse)
+                timelineHideTimer.restart()
+        }
+        onPositionChanged: timelineHideTimer.stop()
+    }
+
     MouseArea {
         id: bottomEdge
         anchors.left: parent.left
@@ -316,9 +335,18 @@ Item {
         z: 35
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
-        onEntered: { showTimelineBar(); timelineHideTimer.stop() }
-        onExited: timelineHideTimer.restart()
-        onPositionChanged: { showTimelineBar(); timelineHideTimer.restart() }
+        onEntered: {
+            showTimelineBar()
+            timelineHideTimer.stop()
+        }
+        onExited: {
+            if (!timelineHoverArea.containsMouse)
+                timelineHideTimer.restart()
+        }
+        onPositionChanged: {
+            showTimelineBar()
+            timelineHideTimer.stop()
+        }
     }
 
     function tryExit() {
@@ -331,6 +359,7 @@ Item {
         if (!timelineLoader.item) return
         timelineLoader.item.allowAutoReveal = true
         timelineLoader.item.collapsed = false
+        timelineHideTimer.stop()
     }
 
     function applyTimelineCamera() {
@@ -342,7 +371,7 @@ Item {
         timelineLoader.item.allowAutoReveal = true
         timelineLoader.item.collapsed = false
         timelineLoader.item.isPlayback = root.isPlayback
-        timelineHideTimer.restart()
+        timelineHideTimer.stop()
     }
 
     function applyRecordings(segments) {
@@ -371,6 +400,13 @@ Item {
         root.isPlayback = true
         root.playbackReady = false
         forceMainTimer.stop()
+
+        timelineHideTimer.stop()
+        showTimelineBar()
+
+        // Detach HQ before stopping it — avoids dangling FrameQueue on mainVideo
+        mainVideo.queue = null
+        root.mainQueue = null
 
         if (typeof frigateRef.stopFullscreenStream === "function") {
             console.log("Pausing live HQ for playback", id)
@@ -402,12 +438,23 @@ Item {
 
         root.isPlayback = false
         root.playbackReady = false
+        forceMainTimer.stop()
+
+        // Detach all video items from queues before stopping workers
         playbackVideo.queue = null
         root.playbackQueue = null
+        mainVideo.queue = null
+        root.mainQueue = null
+
         if (timelineLoader.item) {
             timelineLoader.item.isPlayback = false
             timelineLoader.item.playbackPositionMs = 0
         }
+
+        // Show sub stream immediately so UI is not black
+        if (root.subQueue)
+            subVideo.queue = root.subQueue
+        root.mainReady = false
 
         if (frigateRef) {
             if (typeof frigateRef.switchToLive === "function")
@@ -416,14 +463,18 @@ Item {
                 frigateRef.stopPlayback(id)
         }
 
-        if (frigateRef && typeof frigateRef.getFullscreenQueue === "function") {
+        // Restart HQ after workers/queues settle (prevents crash)
+        Qt.callLater(function() {
+            if (!root.visible || root.isPlayback)
+                return
+            if (!frigateRef || typeof frigateRef.getFullscreenQueue !== "function")
+                return
             root.mainQueue = frigateRef.getFullscreenQueue(id)
             mainVideo.queue = root.mainQueue
             root.mainReady = false
             forceMainTimer.restart()
-        }
-        if (root.subQueue)
-            subVideo.queue = root.subQueue
+            console.log("returnToLive HQ restarted", id)
+        })
     }
 
     function loadTimelineData() {

@@ -7,11 +7,13 @@ Item {
     signal pressed()
     signal released()
     signal seekRequested(real tsMs)
+    signal hoverTimeChanged(real tsMs)
 
     property real pan
     property var scrubber
     property var hoverPreview
     property var xToTimestamp
+    property real trackHeight: 28
 
     property real startPan: 0
     property real startX: 0
@@ -19,12 +21,20 @@ Item {
 
     anchors.fill: parent
 
+    function formatHover(tsMs) {
+        if (!hoverPreview)
+            return
+        hoverPreview.tsString = Qt.formatDateTime(new Date(tsMs), "hh:mm:ss")
+        hoverPreview.dateString = Qt.formatDateTime(new Date(tsMs), "ddd MMM dd")
+        if (hoverPreview.hasOwnProperty("lineHeight"))
+            hoverPreview.lineHeight = trackHeight + 8
+    }
+
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         preventStealing: true
-        // Do not use drag.target on scrubber — that can swallow the click
 
         onPositionChanged: function(mouse) {
             mouseHandler.moved()
@@ -33,12 +43,19 @@ Item {
                 return
 
             var ts = xToTimestamp(mouse.x)
+            mouseHandler.hoverTimeChanged(ts)
+
             if (hoverPreview) {
                 hoverPreview.visible = true
-                hoverPreview.x = mouse.x - hoverPreview.width / 2
-                hoverPreview.y = -hoverPreview.height - 4
-                if (hoverPreview.hasOwnProperty("tsString"))
-                    hoverPreview.tsString = Qt.formatDateTime(new Date(ts), "hh:mm:ss ap")
+                // Keep bubble on screen
+                var bx = mouse.x - hoverPreview.width / 2
+                if (bx < 4)
+                    bx = 4
+                if (bx + hoverPreview.width > mouseHandler.width - 4)
+                    bx = mouseHandler.width - hoverPreview.width - 4
+                hoverPreview.x = bx
+                hoverPreview.y = -hoverPreview.height + 2
+                mouseHandler.formatHover(ts)
             }
 
             if (mouse.buttons & Qt.RightButton) {
@@ -64,13 +81,10 @@ Item {
                 if (xToTimestamp)
                     mouseHandler.seekRequested(xToTimestamp(mouse.x))
             }
-
-            if (hoverPreview)
-                hoverPreview.visible = false
+            // Keep time visible briefly after click; hide on exit
         }
 
         onClicked: function(mouse) {
-            // Backup path if release did not fire seek
             if (mouse.button === Qt.LeftButton && !mouseHandler.didSeek) {
                 mouseHandler.didSeek = true
                 if (xToTimestamp)
@@ -81,6 +95,7 @@ Item {
         onExited: {
             if (hoverPreview)
                 hoverPreview.visible = false
+            mouseHandler.hoverTimeChanged(-1)
         }
     }
 }
