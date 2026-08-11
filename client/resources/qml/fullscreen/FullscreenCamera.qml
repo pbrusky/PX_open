@@ -152,23 +152,18 @@ Item {
             if (id !== root.cameraId && id !== root.cameraName)
                 return
 
-            // Clip ended or failed while showing playback -> go live cleanly
+            // Clip finished while showing playback -> return to live
             if (root.isPlayback && root.playbackReady) {
                 console.log("Playback ended - auto returnToLive", id)
                 root.returnToLive()
                 return
             }
 
-            // Failed during LOADING
+            // Old worker stopped while a NEW seek is still loading — do NOT
+            // cancel live/playback state (that was killing MAIN / seeks)
             if (root.isPlayback && !root.playbackReady) {
-                console.log("Playback stopped during LOADING", id)
-                root.isPlayback = false
-                root.playbackReady = false
-                root.loadSecs = 0
-                forcePlaybackTimer.stop()
-                playbackVideo.queue = null
-                root.playbackQueue = null
-                playbackQueueConn.target = null
+                console.log("Playback stopped during LOADING (ignored)", id)
+                return
             }
         }
     }
@@ -444,7 +439,6 @@ Item {
         forcePlaybackTimer.stop()
         console.log("First playback frame OK")
 
-        // Free live HQ only AFTER clip is on screen (stops dual 4K crash)
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         if (typeof liveLayers.pauseMainForPlayback === "function")
             liveLayers.pauseMainForPlayback()
@@ -517,6 +511,8 @@ Item {
 
         if (typeof frigateRef.getPlaybackQueue === "function") {
             root.playbackQueue = frigateRef.getPlaybackQueue(id)
+            if (root.playbackQueue && typeof root.playbackQueue.resetReceived === "function")
+                root.playbackQueue.resetReceived()
             playbackVideo.queue = root.playbackQueue
             playbackQueueConn.target = root.playbackQueue
         }
@@ -599,6 +595,14 @@ Item {
         forceActiveFocus()
         closeArmTimer.restart()
         apiConn.target = frigateRef
+
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+
+        // Always (re)bind HQ fullscreen queue so SUB -> MAIN can happen
+        if (frigateRef && typeof frigateRef.getFullscreenQueue === "function") {
+            root.mainQueue = frigateRef.getFullscreenQueue(id)
+            console.log("open mainQueue=", root.mainQueue, "subQueue=", root.subQueue)
+        }
 
         liveLayers.cameraId = root.cameraId
         liveLayers.cameraName = root.cameraName
