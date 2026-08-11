@@ -8,8 +8,10 @@ Rectangle {
 
     property bool collapsed: true
     property bool allowAutoReveal: false
+    property bool pointerInside: false
 
     signal seekRequested(real timestampMs)
+    signal hoverActiveChanged(bool active)
 
     function showTimeline() {
         if (!allowAutoReveal)
@@ -19,9 +21,10 @@ Rectangle {
 
     function hideTimeline() {
         collapsed = true
+        hoverTsMs = -1
+        pointerInside = false
     }
 
-    // Extra height so hover time sits above the track, not under it
     height: collapsed ? 4 : 150
     visible: true
     color: collapsed ? "#00000000" : "#0E0E0E"
@@ -48,6 +51,18 @@ Rectangle {
         running: true
         repeat: true
         onTriggered: currentTimeMs = Date.now()
+    }
+
+    // Hover over the whole timeline keeps it open; does not block clicks
+    HoverHandler {
+        id: rootHover
+        enabled: !collapsed
+        onHoveredChanged: {
+            pointerInside = hovered
+            hoverActiveChanged(hovered)
+            if (!hovered)
+                hoverTsMs = -1
+        }
     }
 
     Connections {
@@ -111,7 +126,6 @@ Rectangle {
         return Qt.formatDateTime(new Date(tsMs), "ddd MMM dd  hh:mm:ss")
     }
 
-    // Large always-visible cursor / playback time (not clipped)
     Rectangle {
         id: statusBar
         anchors.left: parent.left
@@ -148,7 +162,7 @@ Rectangle {
                 var s = effectiveStartTs()
                 var e = effectiveEndTs()
                 return Qt.formatDateTime(new Date(s * 1000), "hh:mm:ss")
-                       + "  →  "
+                       + "  -  "
                        + Qt.formatDateTime(new Date(e * 1000), "hh:mm:ss")
             }
             color: "#888888"
@@ -229,7 +243,6 @@ Rectangle {
         hoverPreview: null
         pan: 0
         xToTimestamp: function(x) {
-            // x is relative to trackBg
             return timeline.xToTimestamp(x)
         }
         trackHeight: trackBg.height
@@ -251,7 +264,6 @@ Rectangle {
         }
     }
 
-    // Vertical cursor line over the track
     Rectangle {
         id: cursorLine
         width: 2
@@ -263,7 +275,6 @@ Rectangle {
         z: 40
     }
 
-    // Floating time label ABOVE the track (parent = timeline, not clipped by track)
     Rectangle {
         id: cursorBubble
         visible: !collapsed && hoverTsMs > 0
@@ -282,7 +293,6 @@ Rectangle {
                 cx = timeline.width - width - 4
             return cx
         }
-        // Sit in the gap between ruler and track (readable)
         y: trackBg.y - height - 4
 
         Text {
@@ -305,7 +315,7 @@ Rectangle {
             if (collapsed)
                 return ""
             if (recordings.length > 0)
-                return recordings.length + " recording block(s) — hover for time, click to play"
+                return recordings.length + " recording block(s) - hover for time, click to play"
             return "No recordings in range"
         }
         color: "#777777"
