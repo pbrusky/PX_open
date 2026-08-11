@@ -144,6 +144,7 @@ void FFmpegWorker::startDecoding()
 void FFmpegWorker::stopDecoding()
 {
     m_abort.store(true);
+    m_queue = nullptr;
 }
 
 void FFmpegWorker::decodeLoop()
@@ -169,8 +170,7 @@ void FFmpegWorker::decodeLoop()
 
     AVDictionary* opts = nullptr;
     if (isHttp) {
-        // Frigate mux can take ~12s+ on 4K — allow up to 60s
-        av_dict_set(&opts, "rw_timeout", "60000000", 0);   // 60s
+        av_dict_set(&opts, "rw_timeout", "60000000", 0);
         av_dict_set(&opts, "timeout", "60000000", 0);
         av_dict_set(&opts, "reconnect", "0", 0);
         av_dict_set(&opts, "probesize", "5000000", 0);

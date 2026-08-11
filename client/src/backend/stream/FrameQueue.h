@@ -26,6 +26,7 @@ public:
     Q_INVOKABLE int frameCount() const;
     Q_INVOKABLE bool hasReceivedFrames() const;
     Q_INVOKABLE void resetReceived();
+    Q_INVOKABLE void clear();
 
 signals:
     void frameReady();

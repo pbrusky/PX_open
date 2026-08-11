@@ -40,11 +40,6 @@ signals:
 
 private:
     void stopWorkerAsync(const QString& cameraId);
-    void launchWorker(const QString& cameraId,
-                      int gen,
-                      const QString& url,
-                      FrameQueue* queue,
-                      qint64 endSec);
 
     QString m_server;
     QString m_moduleServer;

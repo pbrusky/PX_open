@@ -26,6 +26,8 @@ Item {
     property int loadSecs: 0
     property bool timelinePointerInside: false
     property bool _returningLive: false
+    property int _seekGen: 0
+    property int _activeSeekGen: -1
 
     signal requestClose()
 
@@ -43,7 +45,9 @@ Item {
     onPlaybackQueueChanged: {
         playbackQueueConn.target = playbackQueue
         playbackVideo.queue = playbackQueue
-        if (isPlayback && playbackQueue && !playbackReady)
+        if (isPlayback && playbackQueue && !playbackReady
+                && root._activeSeekGen >= 0
+                && root._activeSeekGen === root._seekGen)
             forcePlaybackTimer.restart()
     }
 
@@ -144,7 +148,9 @@ Item {
             if (id !== root.cameraId && id !== root.cameraName)
                 return
             root.isPlayback = true
-            console.log("Playback open OK - waiting for frames", id)
+            root._activeSeekGen = root._seekGen
+            console.log("Playback open OK - waiting for frames", id, "gen", root._seekGen)
+            forcePlaybackTimer.ticks = 0
             forcePlaybackTimer.restart()
         }
 
@@ -152,15 +158,12 @@ Item {
             if (id !== root.cameraId && id !== root.cameraName)
                 return
 
-            // Clip finished while showing playback -> return to live
             if (root.isPlayback && root.playbackReady) {
                 console.log("Playback ended - auto returnToLive", id)
                 root.returnToLive()
                 return
             }
 
-            // Old worker stopped while a NEW seek is still loading — do NOT
-            // cancel live/playback state (that was killing MAIN / seeks)
             if (root.isPlayback && !root.playbackReady) {
                 console.log("Playback stopped during LOADING (ignored)", id)
                 return
@@ -180,6 +183,9 @@ Item {
                 stop()
                 return
             }
+            if (root._activeSeekGen < 0 || root._seekGen !== root._activeSeekGen)
+                return
+
             if (playbackVideo.hasFrame) {
                 root.markPlaybackReady()
                 stop()
@@ -205,6 +211,7 @@ Item {
                 root.isPlayback = false
                 root.playbackReady = false
                 root.loadSecs = 0
+                root._activeSeekGen = -1
                 playbackVideo.queue = null
                 root.playbackQueue = null
                 if (frigateRef && typeof frigateRef.switchToLive === "function") {
@@ -434,10 +441,13 @@ Item {
     function markPlaybackReady() {
         if (root.playbackReady)
             return
+        if (root._activeSeekGen < 0 || root._seekGen !== root._activeSeekGen)
+            return
+
         root.playbackReady = true
         root.loadSecs = 0
         forcePlaybackTimer.stop()
-        console.log("First playback frame OK")
+        console.log("First playback frame OK (gen", root._seekGen, ")")
 
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         if (typeof liveLayers.pauseMainForPlayback === "function")
@@ -501,28 +511,35 @@ Item {
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         console.log("Seek playback", id, "at", tsMs)
 
+        root._seekGen++
+        root._activeSeekGen = -1
+
         root.isPlayback = true
         root.playbackReady = false
         root.loadSecs = 0
         root._returningLive = false
         forcePlaybackTimer.ticks = 0
+        forcePlaybackTimer.stop()
 
         showTimelineBar()
 
-        if (typeof frigateRef.getPlaybackQueue === "function") {
-            root.playbackQueue = frigateRef.getPlaybackQueue(id)
-            if (root.playbackQueue && typeof root.playbackQueue.resetReceived === "function")
-                root.playbackQueue.resetReceived()
-            playbackVideo.queue = root.playbackQueue
-            playbackQueueConn.target = root.playbackQueue
-        }
+        // Detach from old queue (drops cached texture in CameraVideoItem)
+        playbackVideo.queue = null
+        playbackQueueConn.target = null
+        root.playbackQueue = null
 
-        forcePlaybackTimer.restart()
-
+        // C++: stop old worker, create NEW FrameQueue
         if (typeof frigateRef.startPlayback === "function")
             frigateRef.startPlayback(id, Math.floor(tsMs))
         else if (typeof frigateRef.seek === "function")
             frigateRef.seek(id, Math.floor(tsMs))
+
+        // Bind the NEW queue after startPlayback replaced it
+        if (typeof frigateRef.getPlaybackQueue === "function") {
+            root.playbackQueue = frigateRef.getPlaybackQueue(id)
+            playbackVideo.queue = root.playbackQueue
+            playbackQueueConn.target = root.playbackQueue
+        }
 
         if (timelineLoader.item) {
             timelineLoader.item.isPlayback = true
@@ -546,6 +563,7 @@ Item {
         root.isPlayback = false
         root.playbackReady = false
         root.loadSecs = 0
+        root._activeSeekGen = -1
         forcePlaybackTimer.stop()
 
         playbackVideo.queue = null
@@ -591,18 +609,12 @@ Item {
         loadSecs = 0
         timelinePointerInside = false
         _returningLive = false
+        _seekGen = 0
+        _activeSeekGen = -1
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
         apiConn.target = frigateRef
-
-        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
-
-        // Always (re)bind HQ fullscreen queue so SUB -> MAIN can happen
-        if (frigateRef && typeof frigateRef.getFullscreenQueue === "function") {
-            root.mainQueue = frigateRef.getFullscreenQueue(id)
-            console.log("open mainQueue=", root.mainQueue, "subQueue=", root.subQueue)
-        }
 
         liveLayers.cameraId = root.cameraId
         liveLayers.cameraName = root.cameraName
@@ -644,6 +656,8 @@ Item {
         loadSecs = 0
         timelinePointerInside = false
         _returningLive = false
+        _seekGen = 0
+        _activeSeekGen = -1
         closeArmTimer.stop()
         timelineHideTimer.stop()
         recordingsPollTimer.stop()
