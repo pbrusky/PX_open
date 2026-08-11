@@ -4,11 +4,14 @@
         <!-- Main UI -->
         <file>resources/qml/MainWindow.qml</file>
         <file>resources/qml/MainWindowConnections.qml</file>
+        <file>resources/qml/EventList.qml</file>
+
+        <!-- Main UI -->
         <file>resources/qml/fullscreen/FullscreenManager.qml</file>
         <file>resources/qml/fullscreen/FullscreenCamera.qml</file>
         <file>resources/qml/fullscreen/FullscreenTimeline.qml</file>
         <file>resources/qml/fullscreen/FullscreenToolbar.qml</file>
-        <file>resources/qml/EventList.qml</file>
+        <file>resources/qml/fullscreen/LiveFullscreenLayers.qml</file>
 
         <!-- Settings / Pages -->
         <file>resources/qml/aboutSettings.qml</file>
