@@ -27,59 +27,50 @@ Item {
     signal requestClose()
 
     onSubQueueChanged: {
-        if (!playbackReady)
+        if (!root.isPlayback)
             subVideo.queue = subQueue
     }
 
     onMainQueueChanged: {
         mainQueueConn.target = mainQueue
-        if (!isPlayback && !playbackReady)
-            mainReady = false
-        if (!isPlayback)
+        if (!root.isPlayback) {
+            root.mainReady = false
             mainVideo.queue = mainQueue
-        if (visible && mainQueue && !isPlayback && !playbackReady) {
-            forceMainTimer.restart()
-            if (typeof mainQueue.hasReceivedFrames === "function" && mainQueue.hasReceivedFrames())
-                mainReady = true
+            if (visible && mainQueue) {
+                forceMainTimer.restart()
+                if (typeof mainQueue.hasReceivedFrames === "function" && mainQueue.hasReceivedFrames())
+                    promoteMain("queue already had frames")
+            }
         }
-    }
-
-    onPlaybackQueueChanged: {
-        playbackQueueConn.target = playbackQueue
-        playbackVideo.queue = playbackQueue
-        if (isPlayback && playbackQueue && !playbackReady)
-            forcePlaybackTimer.restart()
     }
 
     onFrigateRefChanged: apiConn.target = frigateRef
 
     Rectangle { anchors.fill: parent; color: "black" }
 
+    // SUB layer - visible until MAIN has frames
     CameraVideoItem {
         id: subVideo
         anchors.fill: parent
         z: 0
-        opacity: (!root.playbackReady && !root.mainReady) ? 1.0 : 0.0
+        opacity: (!root.isPlayback && !root.mainReady) ? 1.0 : 0.0
         queue: subQueue
     }
 
+    // MAIN / HQ layer
     CameraVideoItem {
         id: mainVideo
         anchors.fill: parent
         z: 1
-        opacity: root.playbackReady ? 0.0 : (root.mainReady ? 1.0 : 0.02)
+        opacity: root.isPlayback ? 0.0 : (root.mainReady ? 1.0 : 0.05)
         queue: mainQueue
         onFramePresented: {
-            if (!root.isPlayback && !root.playbackReady) {
-                root.mainReady = true
-                forceMainTimer.stop()
-            }
+            if (!root.isPlayback)
+                promoteMain("mainVideo.framePresented")
         }
         onHasFrameChanged: {
-            if (hasFrame && !root.isPlayback && !root.playbackReady) {
-                root.mainReady = true
-                forceMainTimer.stop()
-            }
+            if (hasFrame && !root.isPlayback)
+                promoteMain("mainVideo.hasFrame")
         }
     }
 
@@ -89,14 +80,6 @@ Item {
         z: 2
         opacity: root.playbackReady ? 1.0 : 0.0
         queue: playbackQueue
-        onFramePresented: {
-            if (root.isPlayback && !root.playbackReady)
-                root.markPlaybackReady()
-        }
-        onHasFrameChanged: {
-            if (hasFrame && root.isPlayback && !root.playbackReady)
-                root.markPlaybackReady()
-        }
     }
 
     Connections {
@@ -104,57 +87,9 @@ Item {
         target: mainQueue
         ignoreUnknownSignals: true
         function onFrameReady() {
-            if (!root.isPlayback && !root.playbackReady) {
-                root.mainReady = true
-                forceMainTimer.stop()
-            }
+            if (!root.isPlayback)
+                promoteMain("mainQueue.frameReady")
         }
-    }
-
-    Connections {
-        id: playbackQueueConn
-        target: playbackQueue
-        ignoreUnknownSignals: true
-        function onFrameReady() {
-            if (root.isPlayback && !root.playbackReady)
-                root.markPlaybackReady()
-        }
-    }
-
-    Rectangle {
-        anchors.centerIn: parent
-        width: Math.min(parent.width * 0.7, 440)
-        height: 80
-        radius: 10
-        color: "#CC000000"
-        border.color: "#FFC107"
-        border.width: 1
-        z: 50
-        visible: root.isPlayback && !root.playbackReady
-        Column {
-            anchors.centerIn: parent
-            spacing: 8
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "LOADING CLIP... " + root.loadSecs + "s"
-                color: "#FFC107"
-                font.pixelSize: 20
-                font.bold: true
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "Using SUB while clip loads"
-                color: "#FF8888"
-                font.pixelSize: 13
-            }
-        }
-    }
-
-    Timer {
-        interval: 1000
-        running: root.isPlayback && !root.playbackReady
-        repeat: true
-        onTriggered: root.loadSecs++
     }
 
     Connections {
@@ -163,12 +98,10 @@ Item {
         ignoreUnknownSignals: true
 
         function onFullscreenFrameReady(name) {
-            if (root.isPlayback || root.playbackReady)
+            if (root.isPlayback)
                 return
-            if (name === root.cameraName || name === root.cameraId) {
-                root.mainReady = true
-                forceMainTimer.stop()
-            }
+            if (name === root.cameraName || name === root.cameraId)
+                promoteMain("fullscreenFrameReady")
         }
 
         function onRecordingsLoaded(id, segments) {
@@ -181,66 +114,39 @@ Item {
             if (id !== root.cameraId && id !== root.cameraName)
                 return
             root.isPlayback = true
-            console.log("Playback open OK - waiting for frames", id)
-            forcePlaybackTimer.restart()
         }
     }
 
+    // Poll until MAIN frames appear
     Timer {
         id: forceMainTimer
         interval: 50
         repeat: true
         running: false
+        property int ticks: 0
         onTriggered: {
-            if (root.isPlayback || root.playbackReady || root.mainReady) {
+            if (root.isPlayback || root.mainReady) {
                 stop()
                 return
             }
+            ticks++
             if (mainVideo.hasFrame) {
-                root.mainReady = true
-                stop()
+                promoteMain("forceMainTimer.hasFrame")
                 return
             }
             if (root.mainQueue && typeof root.mainQueue.hasReceivedFrames === "function"
                     && root.mainQueue.hasReceivedFrames()) {
-                root.mainReady = true
-                stop()
+                promoteMain("forceMainTimer.hasReceivedFrames")
                 return
             }
             if (root.mainQueue && typeof root.mainQueue.hasFrames === "function"
                     && root.mainQueue.hasFrames()) {
-                root.mainReady = true
-                stop()
-            }
-        }
-    }
-
-    Timer {
-        id: forcePlaybackTimer
-        interval: 100
-        repeat: true
-        running: false
-        onTriggered: {
-            if (!root.isPlayback || root.playbackReady) {
-                stop()
+                promoteMain("forceMainTimer.hasFrames")
                 return
             }
-            if (playbackVideo.hasFrame) {
-                root.markPlaybackReady()
+            // Give up polling after ~15s; stay on SUB
+            if (ticks > 300)
                 stop()
-                return
-            }
-            if (root.playbackQueue && typeof root.playbackQueue.hasReceivedFrames === "function"
-                    && root.playbackQueue.hasReceivedFrames()) {
-                root.markPlaybackReady()
-                stop()
-                return
-            }
-            if (root.playbackQueue && typeof root.playbackQueue.hasFrames === "function"
-                    && root.playbackQueue.hasFrames()) {
-                root.markPlaybackReady()
-                stop()
-            }
         }
     }
 
@@ -328,19 +234,16 @@ Item {
                 font.bold: true
             }
             Text {
-                text: {
-                    if (!root.isPlayback) return "LIVE"
-                    if (!root.playbackReady) return "LOADING..."
-                    return "PLAYBACK"
-                }
+                text: root.isPlayback ? (root.playbackReady ? "PLAYBACK" : "LOADING...") : "LIVE"
                 color: root.isPlayback ? "#FFC107" : "#00C853"
                 font.pixelSize: 13
                 font.bold: true
             }
             Text {
-                text: root.playbackReady ? "" : (root.mainReady ? "MAIN" : "SUB")
+                text: root.isPlayback ? "" : (root.mainReady ? "MAIN" : "SUB")
                 color: root.mainReady ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
+                font.bold: true
             }
         }
     }
@@ -357,6 +260,7 @@ Item {
         border.color: root.playbackReady ? "#00C853" : "#444"
         border.width: 1
         z: 31
+        visible: root.isPlayback
         Text {
             anchors.centerIn: parent
             text: "Live"
@@ -443,6 +347,14 @@ Item {
         }
     }
 
+    function promoteMain(reason) {
+        if (root.mainReady || root.isPlayback)
+            return
+        root.mainReady = true
+        forceMainTimer.stop()
+        console.log("Fullscreen SUB -> MAIN", root.cameraName, reason)
+    }
+
     function onTimelineHoverActive(active) {
         root.timelinePointerInside = active
         if (active) {
@@ -453,18 +365,7 @@ Item {
         }
     }
 
-    function markPlaybackReady() {
-        if (root.playbackReady)
-            return
-        root.playbackReady = true
-        root.loadSecs = 0
-        forcePlaybackTimer.stop()
-        console.log("First playback frame OK")
-    }
-
     function tryExit() {
-        if (root.isPlayback && !root.playbackReady)
-            console.log("Exit during LOADING - canceling")
         root.requestClose()
     }
 
@@ -499,28 +400,8 @@ Item {
         }
     }
 
-    // Free HQ before clip decode so only one heavy stream runs
-    function pauseLiveHqForPlayback(id) {
-        forceMainTimer.stop()
-        mainQueueConn.target = null
-        mainVideo.queue = null
-        root.mainQueue = null
-        root.mainReady = false
-
-        // Keep SUB visible during LOADING
-        if (root.subQueue)
-            subVideo.queue = root.subQueue
-
-        if (frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
-            Qt.callLater(function() {
-                if (frigateRef && typeof frigateRef.stopFullscreenStream === "function")
-                    frigateRef.stopFullscreenStream(id)
-            })
-        }
-        console.log("Paused live HQ for clip", id)
-    }
-
     function onTimelineSeek(tsMs) {
+        // Playback left as-is; not the focus of this change
         if (!frigateRef)
             return
         var wall = Date.now()
@@ -530,69 +411,39 @@ Item {
         root._lastSeekWall = wall
 
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
-        console.log("Seek playback", id, "at", tsMs)
-
         root.isPlayback = true
         root.playbackReady = false
         root.loadSecs = 0
 
-        showTimelineBar()
-        pauseLiveHqForPlayback(id)
-
         if (typeof frigateRef.getPlaybackQueue === "function") {
             root.playbackQueue = frigateRef.getPlaybackQueue(id)
             playbackVideo.queue = root.playbackQueue
-            playbackQueueConn.target = root.playbackQueue
         }
-
-        forcePlaybackTimer.restart()
-
         if (typeof frigateRef.startPlayback === "function")
             frigateRef.startPlayback(id, Math.floor(tsMs))
         else if (typeof frigateRef.seek === "function")
             frigateRef.seek(id, Math.floor(tsMs))
-
-        if (timelineLoader.item) {
-            timelineLoader.item.isPlayback = true
-            timelineLoader.item.playbackPositionMs = tsMs
-        }
     }
 
     function returnToLive() {
-        if (!root.playbackReady) {
-            console.log("returnToLive ignored (still loading)")
-            return
-        }
-        console.log("returnToLive", root.cameraName)
-
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
-
         root.isPlayback = false
         root.playbackReady = false
-        root.loadSecs = 0
-        forcePlaybackTimer.stop()
-
         playbackVideo.queue = null
         root.playbackQueue = null
-        playbackQueueConn.target = null
-
-        if (timelineLoader.item) {
-            timelineLoader.item.isPlayback = false
-            timelineLoader.item.playbackPositionMs = 0
-        }
 
         if (frigateRef && typeof frigateRef.switchToLive === "function")
             frigateRef.switchToLive(id)
 
-        // Restart HQ live
         if (root.subQueue)
             subVideo.queue = root.subQueue
 
+        root.mainReady = false
         if (frigateRef && typeof frigateRef.getFullscreenQueue === "function") {
             root.mainQueue = frigateRef.getFullscreenQueue(id)
             mainVideo.queue = root.mainQueue
             mainQueueConn.target = root.mainQueue
-            root.mainReady = false
+            forceMainTimer.ticks = 0
             forceMainTimer.restart()
         }
     }
@@ -612,26 +463,34 @@ Item {
     }
 
     function open() {
+        console.log("Fullscreen open", root.cameraName)
+
         closeEnabled = false
-        mainReady = false
         isPlayback = false
         playbackReady = false
+        mainReady = false
         loadSecs = 0
         timelinePointerInside = false
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
+
         apiConn.target = frigateRef
         mainQueueConn.target = mainQueue
-        playbackQueueConn.target = null
+
+        playbackVideo.queue = null
         subVideo.queue = subQueue
         mainVideo.queue = mainQueue
-        playbackVideo.queue = null
+
+        forceMainTimer.ticks = 0
         if (mainQueue) {
             forceMainTimer.restart()
             if (typeof mainQueue.hasReceivedFrames === "function" && mainQueue.hasReceivedFrames())
-                mainReady = true
+                promoteMain("open() existing frames")
+        } else {
+            console.log("Fullscreen open: mainQueue is null")
         }
+
         applyTimelineCamera()
         loadTimelineData()
     }
@@ -639,11 +498,8 @@ Item {
     function close() {
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
 
-        forcePlaybackTimer.stop()
         forceMainTimer.stop()
-
         mainQueueConn.target = null
-        playbackQueueConn.target = null
         mainVideo.queue = null
         subVideo.queue = null
         playbackVideo.queue = null
@@ -651,23 +507,17 @@ Item {
         root.subQueue = null
         root.playbackQueue = null
 
-        if (frigateRef) {
-            if (typeof frigateRef.switchToLive === "function")
-                frigateRef.switchToLive(id)
-            else if (typeof frigateRef.stopPlayback === "function")
-                frigateRef.stopPlayback(id)
-        }
+        if (frigateRef && typeof frigateRef.switchToLive === "function")
+            frigateRef.switchToLive(id)
 
         isPlayback = false
         playbackReady = false
-        loadSecs = 0
-        timelinePointerInside = false
+        mainReady = false
         closeArmTimer.stop()
         timelineHideTimer.stop()
         recordingsPollTimer.stop()
         closeEnabled = false
         visible = false
-        mainReady = false
 
         if (timelineLoader.item) {
             timelineLoader.item.allowAutoReveal = false
