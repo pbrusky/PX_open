@@ -8,6 +8,7 @@
 #include <QMutexLocker>
 #include <QMetaObject>
 #include <QTimer>
+#include <QPointer>
 
 FrigatePlayback::FrigatePlayback(QObject* parent)
     : QObject(parent)
@@ -69,37 +70,43 @@ void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
     if (!worker && !thread)
         return;
 
-    if (worker) {
-        // Drop signals back into FrigatePlayback (this object)
+    // Never hold a raw QThread* in a delayed timer after deleteLater.
+    // Only: stopDecoding -> finished -> quit -> deleteLater.
+
+    if (worker && thread) {
         QObject::disconnect(worker, nullptr, this, nullptr);
 
-        // Ask worker to abort on its own thread - do NOT force thread->quit()
-        QMetaObject::invokeMethod(worker, "stopDecoding", Qt::QueuedConnection);
+        QObject::connect(worker, &FFmpegWorker::finished,
+                         thread, &QThread::quit,
+                         Qt::UniqueConnection);
+        QObject::connect(thread, &QThread::finished,
+                         worker, &QObject::deleteLater,
+                         Qt::UniqueConnection);
+        QObject::connect(thread, &QThread::finished,
+                         thread, &QObject::deleteLater,
+                         Qt::UniqueConnection);
 
-        if (thread) {
-            QObject::connect(worker, &FFmpegWorker::finished,
-                             thread, &QThread::quit,
-                             Qt::UniqueConnection);
-            QObject::connect(thread, &QThread::finished,
-                             worker, &QObject::deleteLater,
-                             Qt::UniqueConnection);
-        } else {
-            QObject::connect(worker, &FFmpegWorker::finished,
-                             worker, &QObject::deleteLater,
-                             Qt::UniqueConnection);
-        }
+        QMetaObject::invokeMethod(worker, "stopDecoding", Qt::QueuedConnection);
+        return;
+    }
+
+    if (worker) {
+        QObject::disconnect(worker, nullptr, this, nullptr);
+        QMetaObject::invokeMethod(worker, "stopDecoding", Qt::QueuedConnection);
+        QObject::connect(worker, &FFmpegWorker::finished,
+                         worker, &QObject::deleteLater,
+                         Qt::UniqueConnection);
+        return;
     }
 
     if (thread) {
         QObject::connect(thread, &QThread::finished,
                          thread, &QObject::deleteLater,
                          Qt::UniqueConnection);
-
-        // Safety: if still running after 8s, quit (avoid hang on exit)
-        QTimer::singleShot(8000, thread, [thread]() {
-            if (thread && thread->isRunning())
-                thread->quit();
-        });
+        if (thread->isRunning())
+            QMetaObject::invokeMethod(thread, "quit", Qt::QueuedConnection);
+        else
+            thread->deleteLater();
     }
 }
 
@@ -114,7 +121,6 @@ void FrigatePlayback::stopPlayback(const QString& cameraId)
     m_lastSeekMs.remove(cameraId);
     emit playbackStopped(cameraId);
     emit playbackPositionChanged(cameraId, 0);
-    qDebug() << "[Playback] stopPlayback" << cameraId;
 }
 
 void FrigatePlayback::seek(const QString& cameraId, qint64 timestampMs)
@@ -132,7 +138,7 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 
     const qint64 wall = QDateTime::currentMSecsSinceEpoch();
     if (m_lastSeekMs.contains(cameraId) &&
-        (wall - m_lastSeekMs.value(cameraId) < 500)) {
+        (wall - m_lastSeekMs.value(cameraId) < 350)) {
         return;
     }
     m_lastSeekMs[cameraId] = wall;
@@ -145,11 +151,11 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         startSec = timestampMs / 1000;
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    qint64 endSec = startSec + 5;
+    qint64 endSec = startSec + 4;
     if (endSec > nowSec)
         endSec = nowSec;
     if (endSec <= startSec)
-        endSec = startSec + 3;
+        endSec = startSec + 2;
 
     const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
                             .arg(m_server, cameraId)
@@ -159,7 +165,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     qDebug() << "[Playback] start HTTP" << cameraId
              << startSec << "->" << endSec << url;
 
-    // Stop previous playback worker for this camera (async, safe)
     stopWorkerAsync(cameraId);
 
     FrameQueue* queue = qobject_cast<FrameQueue*>(getPlaybackQueue(cameraId));
@@ -167,14 +172,13 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         qWarning() << "[Playback] no queue" << cameraId;
         return;
     }
-    QMetaObject::invokeMethod(queue, "resetReceived", Qt::QueuedConnection);
+    queue->resetReceived();
 
     const qint64 posMs = startSec * 1000;
     m_playbackPositionByCamera[cameraId] = posMs;
     emit playbackPositionChanged(cameraId, posMs);
 
-    // Slight delay so old worker can drop the queue before new one attaches
-    QTimer::singleShot(80, this, [this, cameraId, url, posMs, gen, queue]() {
+    QTimer::singleShot(150, this, [this, cameraId, gen, url, queue]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
 
@@ -210,6 +214,12 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 
         {
             QMutexLocker lock(&m_mutex);
+            // Drop if a newer seek already replaced us
+            if (m_seekGen.value(cameraId, 0) != gen) {
+                worker->deleteLater();
+                thread->deleteLater();
+                return;
+            }
             m_playbackWorkers.insert(cameraId, worker);
             m_playbackThreads.insert(cameraId, thread);
         }
