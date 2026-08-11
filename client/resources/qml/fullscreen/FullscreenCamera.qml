@@ -17,7 +17,6 @@ Item {
     property bool isOnline: false
     property bool closeEnabled: false
 
-    // Keep in sync with live layers (do not assign root.mainReady = ...)
     property alias mainReady: liveLayers.mainReady
 
     property bool isPlayback: false
@@ -26,6 +25,7 @@ Item {
     property double _lastSeekWall: 0
     property int loadSecs: 0
     property bool timelinePointerInside: false
+    property bool _returningLive: false
 
     signal requestClose()
 
@@ -53,7 +53,6 @@ Item {
         z: -1
     }
 
-    // LIVE SUB + MAIN — edit LiveFullscreenLayers.qml only for this path
     LiveFullscreenLayers {
         id: liveLayers
         anchors.fill: parent
@@ -116,7 +115,7 @@ Item {
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "Using SUB while clip loads"
+                text: "Live stays on until first clip frame"
                 color: "#FF8888"
                 font.pixelSize: 13
             }
@@ -148,6 +147,30 @@ Item {
             console.log("Playback open OK - waiting for frames", id)
             forcePlaybackTimer.restart()
         }
+
+        function onPlaybackStopped(id) {
+            if (id !== root.cameraId && id !== root.cameraName)
+                return
+
+            // Clip ended or failed while showing playback -> go live cleanly
+            if (root.isPlayback && root.playbackReady) {
+                console.log("Playback ended - auto returnToLive", id)
+                root.returnToLive()
+                return
+            }
+
+            // Failed during LOADING
+            if (root.isPlayback && !root.playbackReady) {
+                console.log("Playback stopped during LOADING", id)
+                root.isPlayback = false
+                root.playbackReady = false
+                root.loadSecs = 0
+                forcePlaybackTimer.stop()
+                playbackVideo.queue = null
+                root.playbackQueue = null
+                playbackQueueConn.target = null
+            }
+        }
     }
 
     Timer {
@@ -155,7 +178,9 @@ Item {
         interval: 100
         repeat: true
         running: false
+        property int ticks: 0
         onTriggered: {
+            ticks++
             if (!root.isPlayback || root.playbackReady) {
                 stop()
                 return
@@ -177,6 +202,20 @@ Item {
                     && root.playbackQueue.hasFrames()) {
                 root.markPlaybackReady()
                 stop()
+                return
+            }
+            if (ticks > 200) {
+                console.log("Playback frame timeout - cancel")
+                stop()
+                root.isPlayback = false
+                root.playbackReady = false
+                root.loadSecs = 0
+                playbackVideo.queue = null
+                root.playbackQueue = null
+                if (frigateRef && typeof frigateRef.switchToLive === "function") {
+                    var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+                    frigateRef.switchToLive(id)
+                }
             }
         }
     }
@@ -300,6 +339,7 @@ Item {
         border.color: root.playbackReady ? "#00C853" : "#444"
         border.width: 1
         z: 31
+        visible: root.isPlayback
         Text {
             anchors.centerIn: parent
             text: "Live"
@@ -403,6 +443,19 @@ Item {
         root.loadSecs = 0
         forcePlaybackTimer.stop()
         console.log("First playback frame OK")
+
+        // Free live HQ only AFTER clip is on screen (stops dual 4K crash)
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        if (typeof liveLayers.pauseMainForPlayback === "function")
+            liveLayers.pauseMainForPlayback()
+        root.mainQueue = null
+        if (frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
+            Qt.callLater(function() {
+                if (frigateRef && typeof frigateRef.stopFullscreenStream === "function")
+                    frigateRef.stopFullscreenStream(id)
+            })
+        }
+        console.log("Paused live HQ after first clip frame", id)
     }
 
     function tryExit() {
@@ -442,18 +495,6 @@ Item {
         }
     }
 
-    function pauseLiveHqForPlayback(id) {
-        liveLayers.pauseMainForPlayback()
-        root.mainQueue = null
-        if (frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
-            Qt.callLater(function() {
-                if (frigateRef && typeof frigateRef.stopFullscreenStream === "function")
-                    frigateRef.stopFullscreenStream(id)
-            })
-        }
-        console.log("Paused live HQ for clip", id)
-    }
-
     function onTimelineSeek(tsMs) {
         if (!frigateRef)
             return
@@ -469,9 +510,10 @@ Item {
         root.isPlayback = true
         root.playbackReady = false
         root.loadSecs = 0
+        root._returningLive = false
+        forcePlaybackTimer.ticks = 0
 
         showTimelineBar()
-        pauseLiveHqForPlayback(id)
 
         if (typeof frigateRef.getPlaybackQueue === "function") {
             root.playbackQueue = frigateRef.getPlaybackQueue(id)
@@ -493,10 +535,14 @@ Item {
     }
 
     function returnToLive() {
-        if (!root.playbackReady) {
+        if (root._returningLive)
+            return
+        if (!root.playbackReady && root.isPlayback) {
             console.log("returnToLive ignored (still loading)")
             return
         }
+
+        root._returningLive = true
         console.log("returnToLive", root.cameraName)
 
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
@@ -518,8 +564,13 @@ Item {
         if (frigateRef && typeof frigateRef.switchToLive === "function")
             frigateRef.switchToLive(id)
 
-        liveLayers.resumeMain(id)
+        if (typeof liveLayers.resumeMain === "function")
+            liveLayers.resumeMain(id)
         root.mainQueue = liveLayers.mainQueue
+
+        Qt.callLater(function() {
+            root._returningLive = false
+        })
     }
 
     function loadTimelineData() {
@@ -543,6 +594,7 @@ Item {
         playbackReady = false
         loadSecs = 0
         timelinePointerInside = false
+        _returningLive = false
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
@@ -587,6 +639,7 @@ Item {
         playbackReady = false
         loadSecs = 0
         timelinePointerInside = false
+        _returningLive = false
         closeArmTimer.stop()
         timelineHideTimer.stop()
         recordingsPollTimer.stop()

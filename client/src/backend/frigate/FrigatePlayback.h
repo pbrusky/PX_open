@@ -40,6 +40,7 @@ signals:
 
 private:
     void stopWorkerAsync(const QString& cameraId);
+    void startPlaybackInternal(const QString& cameraId, qint64 timestampMs, bool isContinue);
 
     QString m_server;
     QString m_moduleServer;
@@ -49,6 +50,7 @@ private:
     QHash<QString, qint64> m_playbackPositionByCamera;
     QHash<QString, qint64> m_lastSeekMs;
     QHash<QString, int> m_seekGen;
+    QHash<QString, qint64> m_clipEndSec; // end of current segment (unix sec)
 
     QHash<QString, FrameQueue*> m_playbackQueues;
     QHash<QString, FFmpegWorker*> m_playbackWorkers;
