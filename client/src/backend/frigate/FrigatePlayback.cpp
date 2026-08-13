@@ -70,12 +70,14 @@ void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
         return;
 
     if (worker) {
+        // Detach queue so a dying worker cannot push into a reused queue
         worker->setFrameQueue(nullptr);
         QObject::disconnect(worker, nullptr, this, nullptr);
         QMetaObject::invokeMethod(worker, "stopDecoding", Qt::QueuedConnection);
     }
 
     if (worker && thread) {
+        // Ensure thread exits when worker finishes (may already be connected)
         QObject::connect(worker, &FFmpegWorker::finished,
                          thread, &QThread::quit,
                          Qt::UniqueConnection);
@@ -85,24 +87,22 @@ void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
         QObject::connect(thread, &QThread::finished,
                          thread, &QObject::deleteLater,
                          Qt::UniqueConnection);
+        // If already finished, quit is a no-op and finished may have fired —
+        // schedule a fallback cleanup
+        if (!thread->isRunning()) {
+            worker->deleteLater();
+            thread->deleteLater();
+        }
         return;
     }
 
-    if (worker) {
-        QObject::connect(worker, &FFmpegWorker::finished,
-                         worker, &QObject::deleteLater,
-                         Qt::UniqueConnection);
-        return;
-    }
+    if (worker)
+        worker->deleteLater();
 
     if (thread) {
-        QObject::connect(thread, &QThread::finished,
-                         thread, &QObject::deleteLater,
-                         Qt::UniqueConnection);
         if (thread->isRunning())
             QMetaObject::invokeMethod(thread, "quit", Qt::QueuedConnection);
-        else
-            thread->deleteLater();
+        thread->deleteLater();
     }
 }
 
@@ -134,7 +134,7 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 
     const qint64 wall = QDateTime::currentMSecsSinceEpoch();
     if (m_lastSeekMs.contains(cameraId) &&
-        (wall - m_lastSeekMs.value(cameraId) < 700)) {
+        (wall - m_lastSeekMs.value(cameraId) < 400)) {
         return;
     }
     m_lastSeekMs[cameraId] = wall;
@@ -152,7 +152,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     if (startSec < 1)
         startSec = 1;
 
-    // Short clips = less mux work, fewer 400s, faster fail
     qint64 endSec = startSec + 6;
     if (endSec > nowSec)
         endSec = nowSec;
@@ -167,36 +166,43 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     qDebug() << "[Playback] start HTTP" << cameraId
              << startSec << "->" << endSec << url;
 
+    // Stop previous worker and clear maps (prevents dangling pointer on 2nd seek)
     stopWorkerAsync(cameraId);
 
     FrameQueue* queue = nullptr;
     {
         QMutexLocker lock(&m_mutex);
-        if (!m_playbackQueues.contains(cameraId)) {
-            FrameQueue* q = new FrameQueue(this);
-            q->setMaxSize(2);
-            m_playbackQueues.insert(cameraId, q);
+        // Always use a fresh queue per seek generation so a dying worker
+        // cannot write into the queue used by the new worker.
+        if (m_playbackQueues.contains(cameraId)) {
+            FrameQueue* old = m_playbackQueues.take(cameraId);
+            if (old) {
+                old->setParent(nullptr);
+                QTimer::singleShot(500, old, &QObject::deleteLater);
+            }
         }
-        queue = m_playbackQueues.value(cameraId);
-        if (queue)
-            queue->resetReceived();
-    }
-
-    if (!queue) {
-        qWarning() << "[Playback] no queue" << cameraId;
-        return;
+        queue = new FrameQueue(this);
+        queue->setMaxSize(2);
+        m_playbackQueues.insert(cameraId, queue);
     }
 
     const qint64 posMs = startSec * 1000;
     m_playbackPositionByCamera[cameraId] = posMs;
     emit playbackPositionChanged(cameraId, posMs);
 
-    // Wait for previous worker to fully detach
-    QTimer::singleShot(300, this, [this, cameraId, gen, url, queue]() {
+    // Brief delay so previous stopDecoding can take effect
+    QTimer::singleShot(200, this, [this, cameraId, gen, url, queue]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
         if (!queue)
             return;
+
+        // Queue must still be the one we registered for this seek
+        {
+            QMutexLocker lock(&m_mutex);
+            if (m_playbackQueues.value(cameraId) != queue)
+                return;
+        }
 
         FFmpegWorker* worker = new FFmpegWorker(nullptr);
         worker->setUrl(url);
@@ -223,7 +229,16 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
             emit playbackStopped(cameraId);
         }, Qt::QueuedConnection);
 
-        // NO segment chaining — that caused re-seek freezes
+        // When worker finishes (clip end or stop), remove from maps FIRST
+        // so a later seek never touches a dangling pointer.
+        connect(worker, &FFmpegWorker::finished, this,
+                [this, cameraId, worker, thread]() {
+            QMutexLocker lock(&m_mutex);
+            if (m_playbackWorkers.value(cameraId) == worker)
+                m_playbackWorkers.remove(cameraId);
+            if (m_playbackThreads.value(cameraId) == thread)
+                m_playbackThreads.remove(cameraId);
+        }, Qt::DirectConnection);
 
         connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
         connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);

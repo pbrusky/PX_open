@@ -7,6 +7,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QDateTime>
+#include <QDebug>
 
 FrigateStreamManager::FrigateStreamManager(QObject* parent)
     : QObject(parent)
@@ -58,7 +59,7 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
         return m_queues[cameraName];
 
     FrameQueue* queue = new FrameQueue(this);
-    queue->setMaxSize(1);
+    queue->setMaxSize(2);
     m_queues.insert(cameraName, queue);
 
     const QString url = buildRtspUrl(m_serverIp, cameraName);
@@ -114,8 +115,25 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
-    worker->setHighQuality(true);
+    // highQuality=true caused huge QImage alloc failures → zero frames.
+    // false still shows the MAIN *profile* (e.g. Channels/101) vs SUB (102),
+    // scaled to ~1280 for stability.
+    worker->setHighQuality(false);
     m_fullscreenWorkers.insert(cameraName, worker);
+
+    qDebug() << "[StreamManager] Fullscreen HQ" << cameraName
+             << (isFallback ? "(base)" : "(main)") << url;
+
+    connect(worker, &FFmpegWorker::openInputOk, this, [this, cameraName, isFallback]() {
+        qDebug() << "[StreamManager] Fullscreen open OK" << cameraName
+                 << (isFallback ? "(base)" : "(main)");
+        emit cameraOnline(cameraName);
+    }, Qt::QueuedConnection);
+
+    connect(worker, &FFmpegWorker::streamStarted, this, [cameraName, isFallback]() {
+        qDebug() << "[StreamManager] Fullscreen streamStarted" << cameraName
+                 << (isFallback ? "(base)" : "(main)");
+    }, Qt::QueuedConnection);
 
     connect(worker, &FFmpegWorker::statsUpdated, this,
             [this, cameraName](const QString& resolution, double fps,
@@ -128,9 +146,11 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     }, Qt::QueuedConnection);
 
     if (!isFallback) {
-        // Trying camera_main. On fail → mark missing and start base once.
+        // Trying camera_main. On fail → start base once (do not loop).
         connect(worker, &FFmpegWorker::openInputFailed, this,
-                [this, cameraName](const QString&) {
+                [this, cameraName](const QString& reason) {
+            qWarning() << "[StreamManager] main missing for" << cameraName
+                       << ":" << reason << "→ using base stream";
             m_mainMissing.insert(cameraName);
 
             FFmpegWorker* w = m_fullscreenWorkers.take(cameraName);
@@ -151,7 +171,8 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
         }, Qt::QueuedConnection);
     } else {
         connect(worker, &FFmpegWorker::openInputFailed, this,
-                [this, cameraName](const QString&) {
+                [this, cameraName](const QString& reason) {
+            qWarning() << "[StreamManager] Fullscreen base FAILED" << cameraName << reason;
             FFmpegWorker* w = m_fullscreenWorkers.take(cameraName);
             QThread* t = m_fullscreenThreads.take(cameraName);
             stopWorkerThreadAsync(w, t);
@@ -176,11 +197,13 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     if (cameraName.trimmed().isEmpty() || m_serverIp.trimmed().isEmpty())
         return nullptr;
 
+    // Reuse dedicated fullscreen worker if already running
     if (m_fullscreenQueues.contains(cameraName) &&
         m_fullscreenWorkers.contains(cameraName)) {
         return m_fullscreenQueues[cameraName];
     }
 
+    // Drop stale queue without a worker
     if (m_fullscreenQueues.contains(cameraName)) {
         FrameQueue* stale = m_fullscreenQueues.take(cameraName);
         if (stale) {
@@ -192,20 +215,22 @@ QObject* FrigateStreamManager::getFullscreenQueue(const QString& cameraName)
     m_fullscreenFrameNotified.remove(cameraName);
 
     FrameQueue* queue = new FrameQueue(this);
-    queue->setMaxSize(3);
+    queue->setMaxSize(2);
     queue->resetReceived();
     m_fullscreenQueues.insert(cameraName, queue);
 
-    // Notify QML whenever HQ frames arrive (main or base fallback).
     connect(queue, &FrameQueue::frameReady, this,
             [this, cameraName]() {
         if (!m_fullscreenQueues.contains(cameraName))
             return;
+        if (!m_fullscreenFrameNotified.contains(cameraName)) {
+            m_fullscreenFrameNotified.insert(cameraName);
+            qDebug() << "[StreamManager] Fullscreen FIRST FRAME" << cameraName;
+        }
         emit fullscreenFrameReady(cameraName);
     }, Qt::QueuedConnection);
 
-    // Prefer real main profile first (test4 → test4_main).
-    // Cameras without _main get one 404 then base.
+    // Prefer real main profile (test4_main). Cameras without it get one 404 then base.
     if (!m_mainMissing.contains(cameraName)) {
         const QString mainUrl =
             buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"));
@@ -229,25 +254,6 @@ QObject* FrigateStreamManager::getPlaybackQueue(const QString& cameraName)
     FrameQueue* queue = new FrameQueue(this);
     queue->setMaxSize(1);
     m_playbackQueues.insert(cameraName, queue);
-
-    const QString url = QStringLiteral("%1/api/playback/%2").arg(m_server, cameraName);
-
-    FFmpegWorker* worker = new FFmpegWorker(nullptr);
-    worker->setUrl(url);
-    worker->setFrameQueue(queue);
-    worker->setHighQuality(true);
-    m_playbackWorkers.insert(cameraName, worker);
-
-    QThread* thread = new QThread(nullptr);
-    m_playbackThreads.insert(cameraName, thread);
-
-    worker->moveToThread(thread);
-    connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
-    connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
-    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
-
-    thread->start();
     return queue;
 }
 
@@ -285,6 +291,8 @@ void FrigateStreamManager::stopAllFullscreenStreams()
 
 void FrigateStreamManager::stopStream(const QString& cameraName)
 {
+    stopFullscreenInternal(cameraName);
+
     if (m_workers.contains(cameraName)) {
         FFmpegWorker* worker = m_workers.take(cameraName);
         QThread* thread = m_threads.take(cameraName);
@@ -381,11 +389,7 @@ void FrigateStreamManager::stopAllStreamsAndWait(int timeoutMs)
     for (FFmpegWorker* w : workers) {
         if (!w)
             continue;
-        QObject::disconnect(w, &FFmpegWorker::openInputFailed, nullptr, nullptr);
-        QObject::disconnect(w, &FFmpegWorker::openInputOk, nullptr, nullptr);
-        QObject::disconnect(w, &FFmpegWorker::statsUpdated, nullptr, nullptr);
-        QObject::disconnect(w, &FFmpegWorker::streamStarted, nullptr, nullptr);
-        QObject::disconnect(w, &FFmpegWorker::streamStopped, nullptr, nullptr);
+        QObject::disconnect(w, nullptr, nullptr, nullptr);
         w->stopDecoding();
     }
 
@@ -410,7 +414,6 @@ void FrigateStreamManager::stopAllStreamsAndWait(int timeoutMs)
 void FrigateStreamManager::restartStream(const QString& cameraName)
 {
     stopStream(cameraName);
-    stopFullscreenStream(cameraName);
     getQueue(cameraName);
 }
 

@@ -3,6 +3,7 @@
 
 #include <QDateTime>
 #include <QThread>
+#include <QDebug>
 
 extern "C" {
 #include <libavutil/error.h>
@@ -144,7 +145,6 @@ void FFmpegWorker::startDecoding()
 void FFmpegWorker::stopDecoding()
 {
     m_abort.store(true);
-    m_queue = nullptr;
 }
 
 void FFmpegWorker::decodeLoop()
@@ -154,6 +154,8 @@ void FFmpegWorker::decodeLoop()
         emit finished();
         return;
     }
+
+    qDebug() << "[FFmpegWorker] decodeLoop start" << m_url;
 
     const bool isHttp = m_url.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive)
                      || m_url.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive);
@@ -170,16 +172,16 @@ void FFmpegWorker::decodeLoop()
 
     AVDictionary* opts = nullptr;
     if (isHttp) {
-        // Short timeouts so 400 / bad ranges fail fast (no 60s freeze)
-        av_dict_set(&opts, "rw_timeout", "8000000", 0);   // 8s
-        av_dict_set(&opts, "timeout", "8000000", 0);
+        av_dict_set(&opts, "rw_timeout", "5000000", 0);
+        av_dict_set(&opts, "timeout", "5000000", 0);
         av_dict_set(&opts, "reconnect", "0", 0);
-        av_dict_set(&opts, "probesize", "1000000", 0);
-        av_dict_set(&opts, "analyzeduration", "1000000", 0);
+        av_dict_set(&opts, "probesize", "500000", 0);
+        av_dict_set(&opts, "analyzeduration", "500000", 0);
     } else {
         av_dict_set(&opts, "rtsp_transport", "tcp", 0);
-        av_dict_set(&opts, "stimeout", "5000000", 0);
-        av_dict_set(&opts, "rw_timeout", "5000000", 0);
+        av_dict_set(&opts, "stimeout", "3000000", 0);   // 3s
+        av_dict_set(&opts, "rw_timeout", "3000000", 0);
+        av_dict_set(&opts, "timeout", "3000000", 0);
         av_dict_set(&opts, "probesize", "100000", 0);
         av_dict_set(&opts, "analyzeduration", "300000", 0);
         av_dict_set(&opts, "fflags", "nobuffer", 0);
@@ -188,8 +190,10 @@ void FFmpegWorker::decodeLoop()
     }
 
     const QByteArray urlBytes = m_url.toUtf8();
+    qDebug() << "[FFmpegWorker] open_input..." << m_url;
     int ret = avformat_open_input(&fmtCtx, urlBytes.constData(), nullptr, &opts);
     av_dict_free(&opts);
+    qDebug() << "[FFmpegWorker] open_input done ret=" << ret << m_url;
 
     if (ret < 0 || m_abort.load()) {
         if (fmtCtx)
@@ -246,6 +250,8 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
+    qDebug() << "[FFmpegWorker] stream ready" << m_url
+             << codecCtx->width << "x" << codecCtx->height;
     emit streamStarted();
 
     AVFrame* frame = av_frame_alloc();
@@ -255,9 +261,10 @@ void FFmpegWorker::decodeLoop()
     int lastSrcW = 0, lastSrcH = 0, lastDstW = 0, lastDstH = 0;
     qint64 lastStatsMs = 0;
     bool statsSent = false;
+    int pushed = 0;
 
-    const int kMaxOutW = m_highQuality ? 3840 : 1280;
-    const int kMaxOutH = m_highQuality ? 2160 : 720;
+    const int kMaxOutW = m_highQuality ? 1920 : 1280;
+    const int kMaxOutH = m_highQuality ? 1080 : 720;
 
     while (!m_abort.load()) {
         ret = av_read_frame(fmtCtx, packet);
@@ -356,8 +363,13 @@ void FFmpegWorker::decodeLoop()
                       dest,
                       destStride);
 
-            if (m_queue && img.width() > 16 && img.height() > 16)
+            if (m_queue && img.width() > 16 && img.height() > 16) {
                 m_queue->pushImage(img);
+                if (pushed == 0)
+                    qDebug() << "[FFmpegWorker] first frame pushed" << m_url
+                             << dstW << "x" << dstH;
+                ++pushed;
+            }
 
             av_frame_unref(frame);
         }
@@ -375,6 +387,7 @@ void FFmpegWorker::decodeLoop()
 
     clearHw();
 
+    qDebug() << "[FFmpegWorker] decodeLoop end" << m_url << "pushed" << pushed;
     emit streamStopped();
     emit finished();
 }

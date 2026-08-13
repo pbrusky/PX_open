@@ -26,8 +26,6 @@ Item {
     property int loadSecs: 0
     property bool timelinePointerInside: false
     property bool _returningLive: false
-    property int _seekGen: 0
-    property int _activeSeekGen: -1
 
     signal requestClose()
 
@@ -45,9 +43,7 @@ Item {
     onPlaybackQueueChanged: {
         playbackQueueConn.target = playbackQueue
         playbackVideo.queue = playbackQueue
-        if (isPlayback && playbackQueue && !playbackReady
-                && root._activeSeekGen >= 0
-                && root._activeSeekGen === root._seekGen)
+        if (isPlayback && playbackQueue && !playbackReady)
             forcePlaybackTimer.restart()
     }
 
@@ -148,9 +144,7 @@ Item {
             if (id !== root.cameraId && id !== root.cameraName)
                 return
             root.isPlayback = true
-            root._activeSeekGen = root._seekGen
-            console.log("Playback open OK - waiting for frames", id, "gen", root._seekGen)
-            forcePlaybackTimer.ticks = 0
+            console.log("Playback open OK - waiting for frames", id)
             forcePlaybackTimer.restart()
         }
 
@@ -160,8 +154,6 @@ Item {
             if (root._returningLive)
                 return
 
-            // CRITICAL: do NOT auto returnToLive — that raced with worker teardown
-            // and froze/exited the app. Stay on last frame until user presses Live.
             if (root.isPlayback && root.playbackReady)
                 return
 
@@ -170,7 +162,6 @@ Item {
                 root.isPlayback = false
                 root.playbackReady = false
                 root.loadSecs = 0
-                root._activeSeekGen = -1
                 forcePlaybackTimer.stop()
                 playbackVideo.queue = null
                 root.playbackQueue = null
@@ -191,9 +182,6 @@ Item {
                 stop()
                 return
             }
-            if (root._activeSeekGen < 0 || root._seekGen !== root._activeSeekGen)
-                return
-
             if (playbackVideo.hasFrame) {
                 root.markPlaybackReady()
                 stop()
@@ -219,7 +207,6 @@ Item {
                 root.isPlayback = false
                 root.playbackReady = false
                 root.loadSecs = 0
-                root._activeSeekGen = -1
                 playbackVideo.queue = null
                 root.playbackQueue = null
                 if (frigateRef && typeof frigateRef.switchToLive === "function") {
@@ -449,13 +436,10 @@ Item {
     function markPlaybackReady() {
         if (root.playbackReady)
             return
-        if (root._activeSeekGen < 0 || root._seekGen !== root._activeSeekGen)
-            return
-
         root.playbackReady = true
         root.loadSecs = 0
         forcePlaybackTimer.stop()
-        console.log("First playback frame OK (gen", root._seekGen, ")")
+        console.log("First playback frame OK")
 
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         if (typeof liveLayers.pauseMainForPlayback === "function")
@@ -519,32 +503,26 @@ Item {
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         console.log("Seek playback", id, "at", tsMs)
 
-        root._seekGen++
-        root._activeSeekGen = -1
-
         root.isPlayback = true
         root.playbackReady = false
         root.loadSecs = 0
         root._returningLive = false
         forcePlaybackTimer.ticks = 0
-        forcePlaybackTimer.stop()
 
         showTimelineBar()
-
-        playbackVideo.queue = null
-        playbackQueueConn.target = null
-        root.playbackQueue = null
-
-        if (typeof frigateRef.startPlayback === "function")
-            frigateRef.startPlayback(id, Math.floor(tsMs))
-        else if (typeof frigateRef.seek === "function")
-            frigateRef.seek(id, Math.floor(tsMs))
 
         if (typeof frigateRef.getPlaybackQueue === "function") {
             root.playbackQueue = frigateRef.getPlaybackQueue(id)
             playbackVideo.queue = root.playbackQueue
             playbackQueueConn.target = root.playbackQueue
         }
+
+        forcePlaybackTimer.restart()
+
+        if (typeof frigateRef.startPlayback === "function")
+            frigateRef.startPlayback(id, Math.floor(tsMs))
+        else if (typeof frigateRef.seek === "function")
+            frigateRef.seek(id, Math.floor(tsMs))
 
         if (timelineLoader.item) {
             timelineLoader.item.isPlayback = true
@@ -568,7 +546,6 @@ Item {
         root.isPlayback = false
         root.playbackReady = false
         root.loadSecs = 0
-        root._activeSeekGen = -1
         forcePlaybackTimer.stop()
 
         playbackVideo.queue = null
@@ -614,24 +591,35 @@ Item {
         loadSecs = 0
         timelinePointerInside = false
         _returningLive = false
-        _seekGen = 0
-        _activeSeekGen = -1
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
         apiConn.target = frigateRef
 
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+
+        // Always (re)request HQ queue so we never hold a deleted FrameQueue
+        if (frigateRef && typeof frigateRef.getFullscreenQueue === "function" && id !== "")
+            root.mainQueue = frigateRef.getFullscreenQueue(id)
+
+        if (!root.subQueue && frigateRef && typeof frigateRef.getQueue === "function" && id !== "")
+            root.subQueue = frigateRef.getQueue(id)
+
+        console.log("Fullscreen queues sub=", root.subQueue !== null && root.subQueue !== undefined,
+                    "main=", root.mainQueue !== null && root.mainQueue !== undefined)
+
         liveLayers.cameraId = root.cameraId
         liveLayers.cameraName = root.cameraName
         liveLayers.frigateRef = root.frigateRef
-        liveLayers.subQueue = root.subQueue
-        liveLayers.mainQueue = root.mainQueue
         liveLayers.isPlayback = false
         liveLayers.playbackReady = false
+        liveLayers.subQueue = root.subQueue
+        liveLayers.mainQueue = root.mainQueue
         liveLayers.startLive()
 
         playbackQueueConn.target = null
         playbackVideo.queue = null
+        root.playbackQueue = null
 
         applyTimelineCamera()
         loadTimelineData()
@@ -661,8 +649,6 @@ Item {
         loadSecs = 0
         timelinePointerInside = false
         _returningLive = false
-        _seekGen = 0
-        _activeSeekGen = -1
         closeArmTimer.stop()
         timelineHideTimer.stop()
         recordingsPollTimer.stop()
