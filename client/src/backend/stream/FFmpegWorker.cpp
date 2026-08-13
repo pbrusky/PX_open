@@ -170,11 +170,12 @@ void FFmpegWorker::decodeLoop()
 
     AVDictionary* opts = nullptr;
     if (isHttp) {
-        av_dict_set(&opts, "rw_timeout", "60000000", 0);
-        av_dict_set(&opts, "timeout", "60000000", 0);
+        // Short timeouts so 400 / bad ranges fail fast (no 60s freeze)
+        av_dict_set(&opts, "rw_timeout", "8000000", 0);   // 8s
+        av_dict_set(&opts, "timeout", "8000000", 0);
         av_dict_set(&opts, "reconnect", "0", 0);
-        av_dict_set(&opts, "probesize", "5000000", 0);
-        av_dict_set(&opts, "analyzeduration", "5000000", 0);
+        av_dict_set(&opts, "probesize", "1000000", 0);
+        av_dict_set(&opts, "analyzeduration", "1000000", 0);
     } else {
         av_dict_set(&opts, "rtsp_transport", "tcp", 0);
         av_dict_set(&opts, "stimeout", "5000000", 0);
