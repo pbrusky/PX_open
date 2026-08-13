@@ -70,14 +70,12 @@ void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
         return;
 
     if (worker) {
-        // Detach queue so a dying worker cannot push into a reused queue
         worker->setFrameQueue(nullptr);
         QObject::disconnect(worker, nullptr, this, nullptr);
         QMetaObject::invokeMethod(worker, "stopDecoding", Qt::QueuedConnection);
     }
 
     if (worker && thread) {
-        // Ensure thread exits when worker finishes (may already be connected)
         QObject::connect(worker, &FFmpegWorker::finished,
                          thread, &QThread::quit,
                          Qt::UniqueConnection);
@@ -87,8 +85,6 @@ void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
         QObject::connect(thread, &QThread::finished,
                          thread, &QObject::deleteLater,
                          Qt::UniqueConnection);
-        // If already finished, quit is a no-op and finished may have fired —
-        // schedule a fallback cleanup
         if (!thread->isRunning()) {
             worker->deleteLater();
             thread->deleteLater();
@@ -152,11 +148,12 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     if (startSec < 1)
         startSec = 1;
 
-    qint64 endSec = startSec + 6;
+    // 30 second clips — was 6s which felt like "plays a few seconds then stops"
+    qint64 endSec = startSec + 30;
     if (endSec > nowSec)
         endSec = nowSec;
     if (endSec <= startSec)
-        endSec = startSec + 2;
+        endSec = startSec + 5;
 
     const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
                             .arg(m_server, cameraId)
@@ -166,14 +163,11 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     qDebug() << "[Playback] start HTTP" << cameraId
              << startSec << "->" << endSec << url;
 
-    // Stop previous worker and clear maps (prevents dangling pointer on 2nd seek)
     stopWorkerAsync(cameraId);
 
     FrameQueue* queue = nullptr;
     {
         QMutexLocker lock(&m_mutex);
-        // Always use a fresh queue per seek generation so a dying worker
-        // cannot write into the queue used by the new worker.
         if (m_playbackQueues.contains(cameraId)) {
             FrameQueue* old = m_playbackQueues.take(cameraId);
             if (old) {
@@ -190,14 +184,12 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     m_playbackPositionByCamera[cameraId] = posMs;
     emit playbackPositionChanged(cameraId, posMs);
 
-    // Brief delay so previous stopDecoding can take effect
-    QTimer::singleShot(200, this, [this, cameraId, gen, url, queue]() {
+    QTimer::singleShot(200, this, [this, cameraId, gen, url, queue, endSec]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
         if (!queue)
             return;
 
-        // Queue must still be the one we registered for this seek
         {
             QMutexLocker lock(&m_mutex);
             if (m_playbackQueues.value(cameraId) != queue)
@@ -229,8 +221,22 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
             emit playbackStopped(cameraId);
         }, Qt::QueuedConnection);
 
-        // When worker finishes (clip end or stop), remove from maps FIRST
-        // so a later seek never touches a dangling pointer.
+        // When this 30s clip ends, automatically request the next 30s
+        // (same seek gen = still in this playback session, user has not pressed Live)
+        connect(worker, &FFmpegWorker::streamStopped, this,
+                [this, cameraId, gen, endSec]() {
+            if (m_seekGen.value(cameraId, 0) != gen)
+                return;
+            qDebug() << "[Playback] clip ended — continue from" << endSec << cameraId;
+            // Clear debounce so continue is allowed
+            m_lastSeekMs.remove(cameraId);
+            QTimer::singleShot(150, this, [this, cameraId, gen, endSec]() {
+                if (m_seekGen.value(cameraId, 0) != gen)
+                    return;
+                startPlayback(cameraId, endSec * 1000);
+            });
+        }, Qt::QueuedConnection);
+
         connect(worker, &FFmpegWorker::finished, this,
                 [this, cameraId, worker, thread]() {
             QMutexLocker lock(&m_mutex);
