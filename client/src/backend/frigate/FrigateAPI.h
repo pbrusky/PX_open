@@ -56,6 +56,8 @@ public:
     Q_INVOKABLE int cameraBitrateKbps(const QString& cameraName) const;
     Q_INVOKABLE QString cameraCodec(const QString& cameraName) const;
 
+    Q_INVOKABLE bool isFullscreenTrueMain(const QString& cameraName) const;
+
     Q_INVOKABLE void loadRecordings(const QString& cameraId);
     Q_INVOKABLE void loadEvents(const QString& cameraId);
     Q_INVOKABLE QVariantList getRecordingsForCamera(const QString& cameraId);
@@ -89,6 +91,7 @@ signals:
 
     void fullscreenFrameReady(QString cameraName);
     void fullscreenUsingSub(QString cameraName);
+    void fullscreenMainStatus(QString cameraName, bool isTrueMain);
 
     void onvifDevicesDiscovered(QVariantList devices);
     void onvifProgress(QVariantList devices);

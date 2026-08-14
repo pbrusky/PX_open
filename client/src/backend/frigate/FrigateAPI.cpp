@@ -20,6 +20,22 @@ FrigateAPI::FrigateAPI(QObject* parent)
 
     connect(m_cameraManager, &FrigateCameraManager::camerasLoaded,
             this, &FrigateAPI::camerasLoaded);
+    connect(m_cameraManager, &FrigateCameraManager::camerasLoaded,
+            this, [this](const QVariantList& cameras) {
+        if (!m_streamManager)
+            return;
+        m_streamManager->clearCameraDirectMainUrls();
+        for (const QVariant& v : cameras) {
+            const QVariantMap m = v.toMap();
+            const QString id = m.value(QStringLiteral("id")).toString();
+            if (id.isEmpty())
+                continue;
+            QString mainUrl = m.value(QStringLiteral("mainUrl")).toString();
+            if (mainUrl.isEmpty())
+                mainUrl = m.value(QStringLiteral("rtsp")).toString();
+            m_streamManager->setCameraDirectMainUrl(id, mainUrl);
+        }
+    });
     connect(m_cameraManager, &FrigateCameraManager::cameraOnline,
             this, &FrigateAPI::cameraOnline);
     connect(m_cameraManager, &FrigateCameraManager::cameraOffline,
@@ -62,6 +78,8 @@ FrigateAPI::FrigateAPI(QObject* parent)
             this, &FrigateAPI::fullscreenFrameReady);
     connect(m_streamManager, &FrigateStreamManager::fullscreenUsingSub,
             this, &FrigateAPI::fullscreenUsingSub);
+    connect(m_streamManager, &FrigateStreamManager::fullscreenMainStatus,
+            this, &FrigateAPI::fullscreenMainStatus);
 
     connect(m_cameraManager, &FrigateCameraManager::moduleInformationReceived,
             this, &FrigateAPI::moduleInformationReceived);
@@ -302,4 +320,9 @@ int FrigateAPI::cameraBitrateKbps(const QString& cameraName) const
 QString FrigateAPI::cameraCodec(const QString& cameraName) const
 {
     return m_streamManager ? m_streamManager->cameraCodec(cameraName) : QString();
+}
+
+bool FrigateAPI::isFullscreenTrueMain(const QString& cameraName) const
+{
+    return m_streamManager ? m_streamManager->isFullscreenTrueMain(cameraName) : false;
 }

@@ -18,6 +18,8 @@ Item {
     property bool closeEnabled: false
 
     property alias mainReady: liveLayers.mainReady
+    /** true only when C++ confirmed the real _main profile opened */
+    property bool trueMain: false
 
     property bool isPlayback: false
     property bool playbackReady: false
@@ -173,6 +175,11 @@ Item {
                 playbackQueueConn.target = null
             }
         }
+
+        function onFullscreenMainStatus(name, isTrueMain) {
+            if (name === root.cameraId || name === root.cameraName)
+                root.trueMain = isTrueMain
+        }
     }
 
     Timer {
@@ -325,8 +332,8 @@ Item {
                 font.bold: true
             }
             Text {
-                text: root.playbackReady ? "" : (liveLayers.mainReady ? "MAIN" : "SUB")
-                color: liveLayers.mainReady ? "#FFC107" : "#90CAF9"
+                text: root.playbackReady ? "" : ((liveLayers.mainReady && root.trueMain) ? "MAIN" : "SUB")
+                color: (liveLayers.mainReady && root.trueMain) ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
             }
         }
@@ -573,6 +580,9 @@ Item {
         if (typeof liveLayers.resumeMain === "function")
             liveLayers.resumeMain(id)
         root.mainQueue = liveLayers.mainQueue
+        root.trueMain = false
+        if (frigateRef && typeof frigateRef.isFullscreenTrueMain === "function")
+            root.trueMain = frigateRef.isFullscreenTrueMain(id)
 
         Qt.callLater(function() {
             root._returningLive = false
@@ -602,6 +612,7 @@ Item {
         _returningLive = false
         _seekGen = 0
         _activeSeekGen = -1
+        trueMain = false
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
@@ -634,6 +645,7 @@ Item {
         root.mainQueue = null
         root.subQueue = null
         root.playbackQueue = null
+        root.trueMain = false
 
         if (frigateRef) {
             if (typeof frigateRef.switchToLive === "function")
