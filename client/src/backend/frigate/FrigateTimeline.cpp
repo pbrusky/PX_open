@@ -8,7 +8,6 @@
 #include <QUrlQuery>
 #include <QDateTime>
 #include <QTimeZone>
-#include <QDebug>
 
 namespace {
 
@@ -153,16 +152,13 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         QVariantList segments;
 
         if (netErr != QNetworkReply::NoError || status >= 400) {
-            qWarning() << "[Timeline] summary failed for" << cameraId
-                       << "status" << status << "— falling back to segments";
+            Q_UNUSED(status);
             loadRecordingsFallback(cameraId);
             return;
         }
 
         const QJsonDocument doc = QJsonDocument::fromJson(data);
         if (!doc.isArray()) {
-            qWarning() << "[Timeline] summary not array for" << cameraId
-                       << "— falling back to segments";
             loadRecordingsFallback(cameraId);
             return;
         }
@@ -170,8 +166,6 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         segments = blocksFromSummary(doc.array(), afterSec, nowSec);
 
         m_recordingsByCamera[cameraId] = segments;
-        qDebug() << "[Timeline] summary for" << cameraId
-                 << ":" << segments.size() << "blocks (fast)";
         emit recordingsLoaded(cameraId, segments);
     });
 }
@@ -260,8 +254,6 @@ void FrigateTimeline::loadRecordingsFallback(const QString& cameraId)
         }
 
         m_recordingsByCamera[cameraId] = segments;
-        qDebug() << "[Timeline] fallback segments for" << cameraId
-                 << ":" << rawCount << "raw ->" << segments.size() << "blocks";
         emit recordingsLoaded(cameraId, segments);
     });
 }
@@ -326,7 +318,6 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
         }
 
         m_eventsByCamera[cameraId] = events;
-        qDebug() << "[Timeline] events for" << cameraId << ":" << events.size();
         emit eventsLoaded(cameraId, events);
     });
 }

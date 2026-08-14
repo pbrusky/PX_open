@@ -85,20 +85,24 @@ void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
         QObject::connect(thread, &QThread::finished,
                          thread, &QObject::deleteLater,
                          Qt::UniqueConnection);
-        if (!thread->isRunning()) {
-            worker->deleteLater();
-            thread->deleteLater();
-        }
         return;
     }
 
-    if (worker)
-        worker->deleteLater();
+    if (worker) {
+        QObject::connect(worker, &FFmpegWorker::finished,
+                         worker, &QObject::deleteLater,
+                         Qt::UniqueConnection);
+        return;
+    }
 
     if (thread) {
+        QObject::connect(thread, &QThread::finished,
+                         thread, &QObject::deleteLater,
+                         Qt::UniqueConnection);
         if (thread->isRunning())
             QMetaObject::invokeMethod(thread, "quit", Qt::QueuedConnection);
-        thread->deleteLater();
+        else
+            thread->deleteLater();
     }
 }
 
@@ -123,14 +127,13 @@ void FrigatePlayback::seek(const QString& cameraId, qint64 timestampMs)
 void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 {
     if (cameraId.trimmed().isEmpty() || m_server.isEmpty()) {
-        qWarning() << "[Playback] missing camera or server"
-                   << "cam=" << cameraId << "server=" << m_server;
+        qWarning() << "[Playback] missing camera or server";
         return;
     }
 
     const qint64 wall = QDateTime::currentMSecsSinceEpoch();
     if (m_lastSeekMs.contains(cameraId) &&
-        (wall - m_lastSeekMs.value(cameraId) < 400)) {
+        (wall - m_lastSeekMs.value(cameraId) < 700)) {
         return;
     }
     m_lastSeekMs[cameraId] = wall;
@@ -148,7 +151,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     if (startSec < 1)
         startSec = 1;
 
-    // 30 second clips — was 6s which felt like "plays a few seconds then stops"
     qint64 endSec = startSec + 30;
     if (endSec > nowSec)
         endSec = nowSec;
@@ -160,41 +162,35 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
                             .arg(startSec)
                             .arg(endSec);
 
-    qDebug() << "[Playback] start HTTP" << cameraId
-             << startSec << "->" << endSec << url;
-
     stopWorkerAsync(cameraId);
 
     FrameQueue* queue = nullptr;
     {
         QMutexLocker lock(&m_mutex);
-        if (m_playbackQueues.contains(cameraId)) {
-            FrameQueue* old = m_playbackQueues.take(cameraId);
-            if (old) {
-                old->setParent(nullptr);
-                QTimer::singleShot(500, old, &QObject::deleteLater);
-            }
+        if (!m_playbackQueues.contains(cameraId)) {
+            FrameQueue* q = new FrameQueue(this);
+            q->setMaxSize(2);
+            m_playbackQueues.insert(cameraId, q);
         }
-        queue = new FrameQueue(this);
-        queue->setMaxSize(2);
-        m_playbackQueues.insert(cameraId, queue);
+        queue = m_playbackQueues.value(cameraId);
+        if (queue)
+            queue->resetReceived();
+    }
+
+    if (!queue) {
+        qWarning() << "[Playback] no queue" << cameraId;
+        return;
     }
 
     const qint64 posMs = startSec * 1000;
     m_playbackPositionByCamera[cameraId] = posMs;
     emit playbackPositionChanged(cameraId, posMs);
 
-    QTimer::singleShot(200, this, [this, cameraId, gen, url, queue, endSec]() {
+    QTimer::singleShot(300, this, [this, cameraId, gen, url, queue, endSec]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
         if (!queue)
             return;
-
-        {
-            QMutexLocker lock(&m_mutex);
-            if (m_playbackQueues.value(cameraId) != queue)
-                return;
-        }
 
         FFmpegWorker* worker = new FFmpegWorker(nullptr);
         worker->setUrl(url);
@@ -207,7 +203,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
                 [this, cameraId, gen]() {
             if (m_seekGen.value(cameraId, 0) != gen)
                 return;
-            qDebug() << "[Playback] open OK" << cameraId;
             emit cameraOnline(cameraId);
             emit playbackStarted(cameraId);
         }, Qt::QueuedConnection);
@@ -221,14 +216,10 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
             emit playbackStopped(cameraId);
         }, Qt::QueuedConnection);
 
-        // When this 30s clip ends, automatically request the next 30s
-        // (same seek gen = still in this playback session, user has not pressed Live)
         connect(worker, &FFmpegWorker::streamStopped, this,
                 [this, cameraId, gen, endSec]() {
             if (m_seekGen.value(cameraId, 0) != gen)
                 return;
-            qDebug() << "[Playback] clip ended — continue from" << endSec << cameraId;
-            // Clear debounce so continue is allowed
             m_lastSeekMs.remove(cameraId);
             QTimer::singleShot(150, this, [this, cameraId, gen, endSec]() {
                 if (m_seekGen.value(cameraId, 0) != gen)
@@ -236,15 +227,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
                 startPlayback(cameraId, endSec * 1000);
             });
         }, Qt::QueuedConnection);
-
-        connect(worker, &FFmpegWorker::finished, this,
-                [this, cameraId, worker, thread]() {
-            QMutexLocker lock(&m_mutex);
-            if (m_playbackWorkers.value(cameraId) == worker)
-                m_playbackWorkers.remove(cameraId);
-            if (m_playbackThreads.value(cameraId) == thread)
-                m_playbackThreads.remove(cameraId);
-        }, Qt::DirectConnection);
 
         connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
         connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
@@ -283,5 +265,4 @@ void FrigatePlayback::switchToLive(const QString& cameraId)
     m_lastSeekMs.remove(cameraId);
     emit playbackStopped(cameraId);
     emit playbackPositionChanged(cameraId, 0);
-    qDebug() << "[Playback] live mode" << cameraId;
 }

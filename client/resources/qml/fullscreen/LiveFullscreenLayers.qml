@@ -1,6 +1,8 @@
 import QtQuick 2.15
 import PxOpen 1.0
 
+// LIVE SUB + MAIN layers only.
+// Do not put timeline or playback logic in this file.
 Item {
     id: live
     anchors.fill: parent
@@ -24,14 +26,16 @@ Item {
 
     onMainQueueChanged: {
         mainQueueConn.target = mainQueue
-        if (!playbackReady)
+        if (!isPlayback && !playbackReady)
             mainReady = false
-        if (!playbackReady)
+        if (!isPlayback)
             mainVideo.queue = mainQueue
-        if (mainQueue && !playbackReady) {
-            forceMainTimer.ticks = 0
+        if (visible && mainQueue && !isPlayback && !playbackReady) {
             forceMainTimer.restart()
-            tryPromote("onMainQueueChanged")
+            if (typeof mainQueue.hasReceivedFrames === "function"
+                    && mainQueue.hasReceivedFrames()) {
+                promoteMain("onMainQueueChanged existing frames")
+            }
         }
     }
 
@@ -49,13 +53,17 @@ Item {
         id: mainVideo
         anchors.fill: parent
         z: 1
-        opacity: live.playbackReady ? 0.0 : (live.mainReady ? 1.0 : 0.05)
+        opacity: live.playbackReady ? 0.0 : (live.mainReady ? 1.0 : 0.02)
         queue: live.mainQueue
 
-        onFramePresented: tryPromote("mainVideo.framePresented")
+        onFramePresented: {
+            if (!live.isPlayback && !live.playbackReady)
+                promoteMain("mainVideo.framePresented")
+        }
+
         onHasFrameChanged: {
-            if (hasFrame)
-                tryPromote("mainVideo.hasFrame")
+            if (hasFrame && !live.isPlayback && !live.playbackReady)
+                promoteMain("mainVideo.hasFrame")
         }
     }
 
@@ -63,97 +71,81 @@ Item {
         id: mainQueueConn
         target: live.mainQueue
         ignoreUnknownSignals: true
-        function onFrameReady() { tryPromote("mainQueue.frameReady") }
+
+        function onFrameReady() {
+            if (!live.isPlayback && !live.playbackReady)
+                promoteMain("mainQueue.frameReady")
+        }
     }
 
     Connections {
         id: apiConn
         target: live.frigateRef
         ignoreUnknownSignals: true
+
         function onFullscreenFrameReady(name) {
+            if (live.isPlayback || live.playbackReady)
+                return
             if (name === live.cameraName || name === live.cameraId)
-                tryPromote("fullscreenFrameReady")
+                promoteMain("fullscreenFrameReady")
         }
     }
 
     Timer {
         id: forceMainTimer
-        interval: 100
+        interval: 50
         repeat: true
         running: false
         property int ticks: 0
+
         onTriggered: {
             ticks++
-            if (live.mainReady || live.playbackReady) {
+            if (live.isPlayback || live.playbackReady || live.mainReady) {
                 stop()
                 return
             }
-            if (live.mainQueue && mainVideo.queue !== live.mainQueue)
-                mainVideo.queue = live.mainQueue
-
-            tryPromote("forceMainTimer")
-
-            if (ticks % 10 === 0) {
-                var got = false
-                if (live.mainQueue && typeof live.mainQueue.hasReceivedFrames === "function")
-                    got = live.mainQueue.hasReceivedFrames()
-                console.log("Fullscreen waiting MAIN", live.cameraName,
-                            "ticks=", ticks, "hasFrame=", mainVideo.hasFrame, "received=", got)
+            if (mainVideo.hasFrame) {
+                promoteMain("forceMainTimer.hasFrame")
+                return
             }
-            if (ticks > 200) {
-                console.log("Fullscreen MAIN timeout", live.cameraName)
+            if (live.mainQueue
+                    && typeof live.mainQueue.hasReceivedFrames === "function"
+                    && live.mainQueue.hasReceivedFrames()) {
+                promoteMain("forceMainTimer.hasReceivedFrames")
+                return
+            }
+            if (live.mainQueue
+                    && typeof live.mainQueue.hasFrames === "function"
+                    && live.mainQueue.hasFrames()) {
+                promoteMain("forceMainTimer.hasFrames")
+                return
+            }
+            if (ticks > 100)
                 stop()
-            }
         }
     }
 
-    // Only block when a clip is actually on screen (playbackReady).
-    // Do NOT block on isPlayback — that prevented promote forever.
-    function tryPromote(reason) {
-        if (live.mainReady || live.playbackReady)
+    function promoteMain(reason) {
+        if (live.mainReady || live.isPlayback || live.playbackReady)
             return
-
-        var ok = false
-        if (mainVideo.hasFrame)
-            ok = true
-        if (!ok && live.mainQueue && typeof live.mainQueue.hasReceivedFrames === "function"
-                && live.mainQueue.hasReceivedFrames())
-            ok = true
-        if (!ok && live.mainQueue && typeof live.mainQueue.hasFrames === "function"
-                && live.mainQueue.hasFrames())
-            ok = true
-        if (!ok)
-            return
-
         live.mainReady = true
         forceMainTimer.stop()
-        console.log("Fullscreen SUB -> MAIN", live.cameraName, reason)
         live.mainPromoted(reason)
     }
 
     function startLive() {
         live.mainReady = false
-        live.playbackReady = false
         forceMainTimer.ticks = 0
         apiConn.target = live.frigateRef
-
-        if (!live.mainQueue && live.frigateRef
-                && typeof live.frigateRef.getFullscreenQueue === "function") {
-            var id = live.cameraId !== "" ? live.cameraId : live.cameraName
-            if (id !== "")
-                live.mainQueue = live.frigateRef.getFullscreenQueue(id)
-        }
-
         mainQueueConn.target = live.mainQueue
         subVideo.queue = live.subQueue
         mainVideo.queue = live.mainQueue
-
-        console.log("Fullscreen startLive", live.cameraName,
-                    "mainQueue=", live.mainQueue !== null && live.mainQueue !== undefined)
-
         if (live.mainQueue) {
             forceMainTimer.restart()
-            tryPromote("startLive")
+            if (typeof live.mainQueue.hasReceivedFrames === "function"
+                    && live.mainQueue.hasReceivedFrames()) {
+                promoteMain("startLive existing frames")
+            }
         } else {
             forceMainTimer.stop()
         }
@@ -172,7 +164,9 @@ Item {
     function resumeMain(id) {
         if (live.subQueue)
             subVideo.queue = live.subQueue
-        if (live.frigateRef && typeof live.frigateRef.getFullscreenQueue === "function") {
+
+        if (live.frigateRef
+                && typeof live.frigateRef.getFullscreenQueue === "function") {
             live.mainQueue = live.frigateRef.getFullscreenQueue(id)
             mainVideo.queue = live.mainQueue
             mainQueueConn.target = live.mainQueue
