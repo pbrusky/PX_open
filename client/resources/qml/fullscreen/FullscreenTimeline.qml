@@ -8,8 +8,10 @@ Rectangle {
 
     property bool collapsed: true
     property bool allowAutoReveal: false
+    property bool pointerInside: false
 
     signal seekRequested(real timestampMs)
+    signal hoverActiveChanged(bool active)
 
     function showTimeline() {
         if (!allowAutoReveal)
@@ -19,16 +21,18 @@ Rectangle {
 
     function hideTimeline() {
         collapsed = true
+        hoverTsMs = -1
+        pointerInside = false
     }
 
-    height: collapsed ? 4 : 100
+    height: collapsed ? 4 : 150
     visible: true
     color: collapsed ? "#00000000" : "#0E0E0E"
     border.color: collapsed ? "transparent" : "#333333"
     border.width: collapsed ? 0 : 1
     radius: collapsed ? 0 : 6
     z: 10
-    clip: true
+    clip: false
 
     property string cameraId: ""
     property string cameraName: ""
@@ -39,6 +43,7 @@ Rectangle {
     property real startTs: 0
     property real endTs: 0
     property bool isPlayback: false
+    property real hoverTsMs: -1
 
     property int currentTimeMs: Date.now()
     Timer {
@@ -46,6 +51,18 @@ Rectangle {
         running: true
         repeat: true
         onTriggered: currentTimeMs = Date.now()
+    }
+
+    // Hover over the whole timeline keeps it open; does not block clicks
+    HoverHandler {
+        id: rootHover
+        enabled: !collapsed
+        onHoveredChanged: {
+            pointerInside = hovered
+            hoverActiveChanged(hovered)
+            if (!hovered)
+                hoverTsMs = -1
+        }
     }
 
     Connections {
@@ -103,27 +120,85 @@ Rectangle {
         return (s + ratio * (e - s)) * 1000
     }
 
+    function formatFull(tsMs) {
+        if (tsMs <= 0)
+            return ""
+        return Qt.formatDateTime(new Date(tsMs), "ddd MMM dd  hh:mm:ss")
+    }
+
+    Rectangle {
+        id: statusBar
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: collapsed ? 0 : 32
+        color: "#161616"
+        visible: !collapsed
+        z: 20
+        clip: false
+
+        Text {
+            id: statusTime
+            anchors.left: parent.left
+            anchors.leftMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            text: {
+                if (hoverTsMs > 0)
+                    return "Cursor   " + formatFull(hoverTsMs)
+                if (isPlayback && playbackPositionMs > 0)
+                    return "Playback   " + formatFull(playbackPositionMs)
+                return "Live   " + formatFull(currentTimeMs)
+            }
+            color: hoverTsMs > 0 ? "#FFC107" : (isPlayback ? "#FFC107" : "#00C853")
+            font.pixelSize: 16
+            font.bold: true
+        }
+
+        Text {
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            text: {
+                var s = effectiveStartTs()
+                var e = effectiveEndTs()
+                return Qt.formatDateTime(new Date(s * 1000), "hh:mm:ss")
+                       + "  -  "
+                       + Qt.formatDateTime(new Date(e * 1000), "hh:mm:ss")
+            }
+            color: "#888888"
+            font.pixelSize: 12
+        }
+    }
+
     TimelineRuler {
         id: ruler
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: parent.top
+        anchors.top: statusBar.bottom
+        anchors.topMargin: 2
         startTs: timeline.effectiveStartTs()
         endTs: timeline.effectiveEndTs()
-        segmentCount: 10
+        segmentCount: 12
         visible: !collapsed
+        z: 5
     }
 
     Rectangle {
         id: trackBg
         anchors.left: parent.left
         anchors.right: parent.right
+        anchors.leftMargin: 4
+        anchors.rightMargin: 4
         anchors.top: ruler.bottom
-        anchors.topMargin: 4
-        height: 28
+        anchors.topMargin: 6
+        height: 36
         color: "#1A1A1A"
         radius: 3
         visible: !collapsed
+        border.color: "#333"
+        border.width: 1
+        z: 5
+        clip: false
     }
 
     TimelineSegments {
@@ -136,35 +211,41 @@ Rectangle {
         timelineWidth: timeline.width
         timestampToX: timeline.timestampToX
         visible: !collapsed
+        z: 6
     }
 
-    // Scrubber playhead
-    Rectangle {
-        id: playhead
+    Item {
+        id: playheadItem
         width: 3
         height: trackBg.height + 6
-        color: isPlayback ? "#FFC107" : "#FFFFFF"
         anchors.top: trackBg.top
         anchors.topMargin: -3
         x: {
             var ts = isPlayback && playbackPositionMs > 0
                      ? playbackPositionMs
                      : currentTimeMs
-            return timestampToX(ts) - width / 2
+            return trackBg.x + timestampToX(ts) - width / 2
         }
         visible: !collapsed
         z: 30
+
+        Rectangle {
+            anchors.fill: parent
+            color: isPlayback ? "#FFC107" : "#FFFFFF"
+        }
     }
 
-    // Full bar is clickable; high z so nothing covers it
     TimelineMouseHandler {
         id: mouseHandler
-        anchors.fill: parent
+        anchors.fill: trackBg
         z: 50
-        scrubber: playhead
-        hoverPreview: hoverPreview
+        scrubber: playheadItem
+        hoverPreview: null
         pan: 0
-        xToTimestamp: timeline.xToTimestamp
+        xToTimestamp: function(x) {
+            return timeline.xToTimestamp(x)
+        }
+        trackHeight: trackBg.height
         visible: !collapsed
         enabled: !collapsed
 
@@ -172,23 +253,58 @@ Rectangle {
             timeline.playbackPositionMs = tsMs
             timeline.seekRequested(tsMs)
         }
+        onHoverTimeChanged: function(tsMs) {
+            timeline.hoverTsMs = tsMs
+            if (tsMs > 0) {
+                cursorLine.visible = true
+                cursorLine.x = trackBg.x + timeline.timestampToX(tsMs) - 1
+            } else {
+                cursorLine.visible = false
+            }
+        }
     }
 
-    TimelineHoverPreview {
-        id: hoverPreview
+    Rectangle {
+        id: cursorLine
+        width: 2
+        anchors.top: trackBg.top
+        anchors.bottom: trackBg.bottom
+        color: "#FFC107"
+        opacity: 0.9
         visible: false
-        z: 60
+        z: 40
     }
 
-    Text {
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.margins: 6
-        text: Qt.formatDateTime(new Date(currentTimeMs), "hh:mm:ss")
-        color: "#FF4444"
-        font.pixelSize: 10
-        opacity: collapsed ? 0 : 0.85
-        z: 55
+    Rectangle {
+        id: cursorBubble
+        visible: !collapsed && hoverTsMs > 0
+        z: 100
+        width: cursorBubbleText.implicitWidth + 20
+        height: 28
+        radius: 6
+        color: "#F0000000"
+        border.color: "#FFC107"
+        border.width: 1
+
+        x: {
+            var cx = trackBg.x + timeline.timestampToX(hoverTsMs) - width / 2
+            if (cx < 4) cx = 4
+            if (cx + width > timeline.width - 4)
+                cx = timeline.width - width - 4
+            return cx
+        }
+        y: trackBg.y - height - 4
+
+        Text {
+            id: cursorBubbleText
+            anchors.centerIn: parent
+            text: hoverTsMs > 0
+                  ? Qt.formatDateTime(new Date(hoverTsMs), "MMM dd  hh:mm:ss")
+                  : ""
+            color: "#FFC107"
+            font.pixelSize: 14
+            font.bold: true
+        }
     }
 
     Text {
@@ -198,15 +314,13 @@ Rectangle {
         text: {
             if (collapsed)
                 return ""
-            if (isPlayback && playbackPositionMs > 0)
-                return "REC  " + Qt.formatDateTime(new Date(playbackPositionMs), "hh:mm:ss")
             if (recordings.length > 0)
-                return recordings.length + " recording block(s) — click to play"
+                return recordings.length + " recording block(s) - hover for time, click to play"
             return "No recordings in range"
         }
-        color: isPlayback ? "#FFC107" : "#888888"
+        color: "#777777"
         font.pixelSize: 10
         visible: !collapsed
-        z: 55
+        z: 5
     }
 }

@@ -53,6 +53,15 @@ void FrameQueue::resetReceived()
     m_receivedAny = false;
 }
 
+void FrameQueue::clear()
+{
+    QMutexLocker locker(&m_mutex);
+    m_imageQueue.clear();
+    m_lastImage = QImage();
+    m_textureQueue.clear();
+    m_receivedAny = false;
+}
+
 int FrameQueue::frameCount() const
 {
     QMutexLocker locker(&m_mutex);

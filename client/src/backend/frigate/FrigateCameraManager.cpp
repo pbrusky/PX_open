@@ -63,27 +63,55 @@ void FrigateCameraManager::loadCameras()
                 entry["id"]   = id;
                 entry["name"] = id;
 
-                QString rtsp = "";
+                QString subPath;
+                QString mainPath;
                 if (camObj.contains("ffmpeg")) {
                     QJsonObject ff = camObj["ffmpeg"].toObject();
                     if (ff.contains("inputs")) {
                         QJsonArray inputs = ff["inputs"].toArray();
-                        if (!inputs.isEmpty()) {
-                            QJsonObject inp = inputs[0].toObject();
-                            rtsp = inp.value("path").toString();
+                        for (const QJsonValue& v : inputs) {
+                            QJsonObject inp = v.toObject();
+                            const QString path = inp.value("path").toString().trimmed();
+                            if (path.isEmpty())
+                                continue;
+                            QJsonArray roles = inp.value("roles").toArray();
+                            bool isDetect = false;
+                            bool isRecord = false;
+                            for (const QJsonValue& r : roles) {
+                                const QString role = r.toString();
+                                if (role == QLatin1String("detect"))
+                                    isDetect = true;
+                                if (role == QLatin1String("record"))
+                                    isRecord = true;
+                            }
+                            if (isRecord && mainPath.isEmpty())
+                                mainPath = path;
+                            if (isDetect && subPath.isEmpty())
+                                subPath = path;
+                            if (subPath.isEmpty())
+                                subPath = path;
+                            if (mainPath.isEmpty())
+                                mainPath = path;
                         }
                     }
                 }
+                if (mainPath.isEmpty())
+                    mainPath = subPath;
+                if (subPath.isEmpty())
+                    subPath = mainPath;
 
-                entry["rtsp"]      = rtsp;
-                entry["streamUrl"] = rtsp;
+                entry["rtsp"]      = subPath;
+                entry["streamUrl"] = subPath;
+                entry["mainUrl"]   = mainPath;
+                entry["subUrl"]    = subPath;
 
                 QString username = camObj.value("username").toString();
                 QString password = camObj.value("password").toString();
                 QString ip       = "";
 
-                if (rtsp.startsWith("rtsp://")) {
-                    QString withoutPrefix = rtsp.mid(7);
+                const QString parseSrc = mainPath.isEmpty() ? subPath : mainPath;
+                if (parseSrc.startsWith("rtsp://")) {
+                    QString withoutPrefix = parseSrc.mid(7);
 
                     int atIndex = withoutPrefix.indexOf("@");
                     if (atIndex > 0) {

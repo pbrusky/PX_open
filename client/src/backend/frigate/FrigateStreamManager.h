@@ -21,6 +21,12 @@ public:
     void setServer(const QString& server);
     void setServerIp(const QString& ip);
 
+    void setCameraDirectMainUrl(const QString& cameraName,
+                                const QString& mainRtspUrl,
+                                const QString& username = QString(),
+                                const QString& password = QString());
+    void clearCameraDirectMainUrls();
+
     Q_INVOKABLE QObject* getQueue(const QString& cameraName);
     Q_INVOKABLE QObject* getFullscreenQueue(const QString& cameraName);
     Q_INVOKABLE QObject* getPlaybackQueue(const QString& cameraName);
@@ -41,6 +47,8 @@ public:
     Q_INVOKABLE int cameraBitrateKbps(const QString& cameraName) const;
     Q_INVOKABLE QString cameraCodec(const QString& cameraName) const;
 
+    Q_INVOKABLE bool isFullscreenTrueMain(const QString& cameraName) const;
+
 signals:
     void cameraOnline(QString id);
     void cameraOffline(QString id);
@@ -48,19 +56,29 @@ signals:
                             double fps, int bitrateKbps, QString codec);
     void fullscreenFrameReady(QString cameraName);
     void fullscreenUsingSub(QString cameraName);
+    void fullscreenMainStatus(QString cameraName, bool isTrueMain);
 
 private:
     void stopFullscreenInternal(const QString& cameraName);
+    // stage 0 = go2rtc name_main, 1 = direct camera main, 2 = go2rtc name (sub)
     void startFullscreenWorker(const QString& cameraName,
                                FrameQueue* queue,
-                               const QString& url,
-                               bool isFallback);
+                               int stage);
+    QString urlForFullscreenStage(const QString& cameraName, int stage) const;
+    static QString injectRtspAuth(const QString& url,
+                                  const QString& user,
+                                  const QString& pass);
 
     QString m_server;
     QString m_serverIp;
 
     QSet<QString> m_mainMissing;
     QSet<QString> m_fullscreenFrameNotified;
+    QSet<QString> m_fullscreenIsTrueMain;
+
+    QHash<QString, QString> m_directMainUrls;
+    QHash<QString, QString> m_cameraUser;
+    QHash<QString, QString> m_cameraPass;
 
     QHash<QString, FrameQueue*>   m_queues;
     QHash<QString, FFmpegWorker*> m_workers;

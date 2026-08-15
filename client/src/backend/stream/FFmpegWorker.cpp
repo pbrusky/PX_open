@@ -6,6 +6,7 @@
 
 extern "C" {
 #include <libavutil/error.h>
+#include <libavutil/mathematics.h>
 #include <libavutil/pixfmt.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -144,6 +145,7 @@ void FFmpegWorker::startDecoding()
 void FFmpegWorker::stopDecoding()
 {
     m_abort.store(true);
+    m_queue = nullptr;
 }
 
 void FFmpegWorker::decodeLoop()
@@ -169,12 +171,11 @@ void FFmpegWorker::decodeLoop()
 
     AVDictionary* opts = nullptr;
     if (isHttp) {
-        // Frigate mux can take ~12s+ on 4K — allow up to 60s
-        av_dict_set(&opts, "rw_timeout", "60000000", 0);   // 60s
-        av_dict_set(&opts, "timeout", "60000000", 0);
+        av_dict_set(&opts, "rw_timeout", "8000000", 0);
+        av_dict_set(&opts, "timeout", "8000000", 0);
         av_dict_set(&opts, "reconnect", "0", 0);
-        av_dict_set(&opts, "probesize", "5000000", 0);
-        av_dict_set(&opts, "analyzeduration", "5000000", 0);
+        av_dict_set(&opts, "probesize", "1000000", 0);
+        av_dict_set(&opts, "analyzeduration", "1000000", 0);
     } else {
         av_dict_set(&opts, "rtsp_transport", "tcp", 0);
         av_dict_set(&opts, "stimeout", "5000000", 0);
@@ -254,6 +255,10 @@ void FFmpegWorker::decodeLoop()
     int lastSrcW = 0, lastSrcH = 0, lastDstW = 0, lastDstH = 0;
     qint64 lastStatsMs = 0;
     bool statsSent = false;
+
+    // Real-time pace for HTTP/file clips only (not live RTSP)
+    qint64 playStartPtsMs = -1;
+    qint64 playStartWallMs = 0;
 
     const int kMaxOutW = m_highQuality ? 3840 : 1280;
     const int kMaxOutH = m_highQuality ? 2160 : 720;
@@ -354,6 +359,30 @@ void FFmpegWorker::decodeLoop()
                       frame->height,
                       dest,
                       destStride);
+
+            // Pace HTTP/file playback to wall-clock time (fixes fast-forward)
+            if (isHttp && !m_abort.load()) {
+                int64_t pts = frame->best_effort_timestamp;
+                if (pts == AV_NOPTS_VALUE)
+                    pts = frame->pts;
+
+                if (pts != AV_NOPTS_VALUE) {
+                    const qint64 ptsMs = av_rescale_q(pts, videoStream->time_base, {1, 1000});
+                    if (playStartPtsMs < 0) {
+                        playStartPtsMs = ptsMs;
+                        playStartWallMs = QDateTime::currentMSecsSinceEpoch();
+                    } else {
+                        const qint64 targetWall = playStartWallMs + (ptsMs - playStartPtsMs);
+                        const qint64 delay = targetWall - QDateTime::currentMSecsSinceEpoch();
+                        // Clamp: ignore tiny/jitter and huge jumps (gaps in recording)
+                        if (delay > 2 && delay < 1500)
+                            QThread::msleep(static_cast<unsigned long>(delay));
+                    }
+                } else {
+                    // No PTS: ~30 fps fallback
+                    QThread::msleep(33);
+                }
+            }
 
             if (m_queue && img.width() > 16 && img.height() > 16)
                 m_queue->pushImage(img);

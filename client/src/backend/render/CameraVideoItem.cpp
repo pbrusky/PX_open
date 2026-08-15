@@ -45,13 +45,13 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
         if (!img.isNull()) {
             m_lastImage = img;
             m_lastPaintMs = QDateTime::currentMSecsSinceEpoch();
-            if (!m_hasFrame) {
-                m_hasFrame = true;
-                QMetaObject::invokeMethod(this, [this]() {
+            const bool first = !m_hasFrame;
+            m_hasFrame = true;
+            QMetaObject::invokeMethod(this, [this, first]() {
+                if (first)
                     emit hasFrameChanged();
-                    emit framePresented();
-                }, Qt::QueuedConnection);
-            }
+                emit framePresented();
+            }, Qt::QueuedConnection);
         }
     }
 
