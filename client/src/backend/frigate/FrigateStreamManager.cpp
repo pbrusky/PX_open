@@ -7,7 +7,6 @@
 #include <QThread>
 #include <QTimer>
 #include <QDateTime>
-#include <QDebug>
 #include <QUrl>
 
 FrigateStreamManager::FrigateStreamManager(QObject* parent)
@@ -228,10 +227,7 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     }, Qt::QueuedConnection);
 
     connect(worker, &FFmpegWorker::openInputFailed, this,
-            [this, cameraName, stage](const QString& reason) {
-        qWarning() << "[StreamManager] fullscreen stage" << stage
-                   << "failed for" << cameraName << ":" << reason;
-
+            [this, cameraName, stage](const QString&) {
         FFmpegWorker* w = m_fullscreenWorkers.take(cameraName);
         QThread* t = m_fullscreenThreads.take(cameraName);
         stopWorkerThreadAsync(w, t);
