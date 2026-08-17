@@ -7,6 +7,7 @@
 #include <QVariantMap>
 #include <QHash>
 #include <QNetworkAccessManager>
+#include <QTimer>
 
 class FrigateCameraManager : public QObject
 {
@@ -49,11 +50,15 @@ signals:
                                    QString moduleId);
 
 private:
+    void refreshCameraStats();
+    void applyStatsPayload(const QByteArray& data);
+
     QString m_server;
     QString m_moduleServer;
     QString m_serverIp;
 
     QNetworkAccessManager* m_net;
+    QTimer* m_statsTimer;
 
     QHash<QString, bool> m_cameraOnline;
     QVariantList m_cameraList;

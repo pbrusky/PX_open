@@ -5,17 +5,23 @@
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QNetworkReply>
-#include <QDebug>
 
 FrigateCameraManager::FrigateCameraManager(QObject* parent)
     : QObject(parent),
-      m_net(new QNetworkAccessManager(this))
+      m_net(new QNetworkAccessManager(this)),
+      m_statsTimer(new QTimer(this))
 {
+    m_statsTimer->setInterval(10000); // every 10s
+    connect(m_statsTimer, &QTimer::timeout, this, &FrigateCameraManager::refreshCameraStats);
 }
 
 void FrigateCameraManager::setServer(const QString& server)
 {
     m_server = server;
+    if (m_server.isEmpty()) {
+        m_statsTimer->stop();
+        clearCameraOnlineState();
+    }
 }
 
 void FrigateCameraManager::setModuleServer(const QString& server)
@@ -28,10 +34,96 @@ void FrigateCameraManager::setServerIp(const QString& ip)
     m_serverIp = ip;
 }
 
+void FrigateCameraManager::setCameraOnline(const QString& id, bool online)
+{
+    if (id.trimmed().isEmpty())
+        return;
+
+    const bool prev = m_cameraOnline.value(id, false);
+    if (prev == online)
+        return;
+
+    m_cameraOnline[id] = online;
+    if (online)
+        emit cameraOnline(id);
+    else
+        emit cameraOffline(id);
+}
+
+void FrigateCameraManager::clearCameraOnlineState()
+{
+    const QStringList ids = m_cameraOnline.keys();
+    m_cameraOnline.clear();
+    for (const QString& id : ids)
+        emit cameraOffline(id);
+}
+
+void FrigateCameraManager::refreshCameraStats()
+{
+    if (m_server.isEmpty())
+        return;
+
+    QUrl url(m_server + "/api/stats");
+    QNetworkRequest req(url);
+    QNetworkReply* reply = m_net->get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray data = reply->readAll();
+        reply->deleteLater();
+        if (data.isEmpty())
+            return;
+        applyStatsPayload(data);
+    });
+}
+
+void FrigateCameraManager::applyStatsPayload(const QByteArray& data)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (!doc.isObject())
+        return;
+
+    const QJsonObject root = doc.object();
+    const QJsonObject cams = root.value(QStringLiteral("cameras")).toObject();
+    if (cams.isEmpty())
+        return;
+
+    // Known camera ids from last loadCameras
+    QSet<QString> known;
+    for (const QVariant& v : m_cameraList) {
+        const QString id = v.toMap().value(QStringLiteral("id")).toString();
+        if (!id.isEmpty())
+            known.insert(id);
+    }
+
+    for (auto it = cams.begin(); it != cams.end(); ++it) {
+        const QString id = it.key();
+        if (!known.isEmpty() && !known.contains(id))
+            continue;
+
+        const QJsonObject cam = it.value().toObject();
+
+        // Frigate marks a camera as producing frames when these are > 0
+        const double cameraFps  = cam.value(QStringLiteral("camera_fps")).toDouble(0.0);
+        const double processFps = cam.value(QStringLiteral("process_fps")).toDouble(0.0);
+        const double detection  = cam.value(QStringLiteral("detection_fps")).toDouble(0.0);
+        const bool ffmpegPid    = cam.value(QStringLiteral("ffmpeg_pid")).toInt(0) > 0
+                               || cam.value(QStringLiteral("pid")).toInt(0) > 0;
+
+        const bool online = (cameraFps > 0.05)
+                         || (processFps > 0.05)
+                         || (detection > 0.0)
+                         || ffmpegPid;
+
+        setCameraOnline(id, online);
+    }
+}
+
 void FrigateCameraManager::loadCameras()
 {
     if (m_server.isEmpty()) {
         m_cameraList.clear();
+        m_cameraOnline.clear();
+        m_statsTimer->stop();
         emit camerasLoaded(QVariantList());
         return;
     }
@@ -49,6 +141,7 @@ void FrigateCameraManager::loadCameras()
         QJsonObject root = doc.object();
 
         m_cameraList.clear();
+        QHash<QString, bool> previousOnline = m_cameraOnline;
         m_cameraOnline.clear();
         m_cameraMetadata.clear();
 
@@ -107,51 +200,46 @@ void FrigateCameraManager::loadCameras()
 
                 QString username = camObj.value("username").toString();
                 QString password = camObj.value("password").toString();
-                QString ip       = "";
+                QString ip;
 
                 const QString parseSrc = mainPath.isEmpty() ? subPath : mainPath;
                 if (parseSrc.startsWith("rtsp://")) {
                     QString withoutPrefix = parseSrc.mid(7);
-
                     int atIndex = withoutPrefix.indexOf("@");
                     if (atIndex > 0) {
                         QString creds    = withoutPrefix.left(atIndex);
                         QString hostPart = withoutPrefix.mid(atIndex + 1);
-
                         int colonIndex = creds.indexOf(":");
                         if (colonIndex > 0 && (username.isEmpty() || password.isEmpty())) {
                             username = creds.left(colonIndex);
                             password = creds.mid(colonIndex + 1);
                         }
-
                         int slashIndex = hostPart.indexOf("/");
-                        if (slashIndex > 0)
-                            ip = hostPart.left(slashIndex);
-                        else
-                            ip = hostPart;
+                        ip = (slashIndex > 0) ? hostPart.left(slashIndex) : hostPart;
                     } else {
                         int slashIndex = withoutPrefix.indexOf("/");
-                        if (slashIndex > 0)
-                            ip = withoutPrefix.left(slashIndex);
-                        else
-                            ip = withoutPrefix;
+                        ip = (slashIndex > 0) ? withoutPrefix.left(slashIndex) : withoutPrefix;
                     }
                 }
 
-                entry["username"] = username;
-                entry["password"] = password;
-                entry["ip"]       = ip;
-
+                entry["username"]    = username;
+                entry["password"]    = password;
+                entry["ip"]          = ip;
                 entry["resolution"]  = "";
                 entry["fps"]         = 0;
                 entry["codec"]       = "";
                 entry["bitrateKbps"] = 0;
                 entry["streamType"]  = "rtsp";
+                entry["isOnline"]    = previousOnline.value(id, false);
 
                 m_cameraList.append(entry);
 
-                m_cameraOnline[id] = true;
-                emit cameraOnline(id);
+                const bool wasOnline = previousOnline.value(id, false);
+                m_cameraOnline[id] = wasOnline;
+                if (wasOnline)
+                    emit cameraOnline(id);
+                else
+                    emit cameraOffline(id);
 
                 QVariantMap meta;
                 meta["resolution"]  = "";
@@ -164,6 +252,11 @@ void FrigateCameraManager::loadCameras()
         }
 
         emit camerasLoaded(m_cameraList);
+
+        // Immediately + periodically refresh online from Frigate stats
+        refreshCameraStats();
+        if (!m_statsTimer->isActive())
+            m_statsTimer->start();
     });
 }
 
@@ -211,20 +304,15 @@ void FrigateCameraManager::addCamera(const QString& id,
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         QByteArray data = reply->readAll();
         reply->deleteLater();
-
         QJsonDocument doc = QJsonDocument::fromJson(data);
         QJsonObject root  = doc.object();
-
         QString event = root.value("event").toString();
         bool ok       = root.value("status").toString() == "ok";
         QString msg   = root.value("message").toString();
-
-        if (event == "cameraAddResult") {
+        if (event == "cameraAddResult")
             emit cameraAddResult(ok, msg);
-        } else {
+        else
             emit cameraAddResult(ok, ok ? "Camera added" : "Failed to add camera");
-        }
-
         if (ok)
             loadCameras();
     });
@@ -243,7 +331,6 @@ void FrigateCameraManager::editCamera(const QString& id, const QString& url)
 
     QString username;
     QString password;
-
     if (url.startsWith("rtsp://")) {
         QString withoutPrefix = url.mid(7);
         int atIndex = withoutPrefix.indexOf("@");
@@ -268,20 +355,15 @@ void FrigateCameraManager::editCamera(const QString& id, const QString& url)
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         QByteArray data = reply->readAll();
         reply->deleteLater();
-
         QJsonDocument doc = QJsonDocument::fromJson(data);
         QJsonObject root  = doc.object();
-
         QString event = root.value("event").toString();
         bool ok       = root.value("status").toString() == "ok";
         QString msg   = root.value("message").toString();
-
-        if (event == "cameraEditResult") {
+        if (event == "cameraEditResult")
             emit cameraEditResult(ok, msg);
-        } else {
+        else
             emit cameraEditResult(ok, ok ? "OK" : "Failed to update camera");
-        }
-
         if (ok)
             loadCameras();
     });
@@ -306,22 +388,17 @@ void FrigateCameraManager::removeCamera(const QString& id)
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         QByteArray data = reply->readAll();
         reply->deleteLater();
-
         QJsonDocument doc = QJsonDocument::fromJson(data);
         QJsonObject root  = doc.object();
-
         QString event = root.value("event").toString();
         bool ok       = root.value("status").toString() == "ok";
         if (!ok && root.contains("ok"))
             ok = root.value("ok").toBool();
         QString msg   = root.value("message").toString();
-
-        if (event == "cameraRemoveResult") {
+        if (event == "cameraRemoveResult")
             emit cameraRemoveResult(ok, msg);
-        } else {
+        else
             emit cameraRemoveResult(ok, ok ? "Camera removed" : "Failed to remove camera");
-        }
-
         if (ok)
             loadCameras();
     });
@@ -351,16 +428,13 @@ void FrigateCameraManager::loadModuleInformation()
 
     QUrl endpoint(m_moduleServer + "/api/moduleInfo");
     QNetworkRequest req(endpoint);
-
     QNetworkReply* reply = m_net->get(req);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         QByteArray data = reply->readAll();
         reply->deleteLater();
-
         QJsonDocument doc = QJsonDocument::fromJson(data);
         QJsonObject root  = doc.object();
-
         emit moduleInformationReceived(
             root.value("name").toString(),
             root.value("version").toString(),
@@ -369,25 +443,4 @@ void FrigateCameraManager::loadModuleInformation()
             root.value("moduleId").toString()
         );
     });
-}
-void FrigateCameraManager::setCameraOnline(const QString& id, bool online)
-{
-    if (id.trimmed().isEmpty())
-        return;
-    const bool prev = m_cameraOnline.value(id, false);
-    if (prev == online)
-        return;
-    m_cameraOnline[id] = online;
-    if (online)
-        emit cameraOnline(id);
-    else
-        emit cameraOffline(id);
-}
-
-void FrigateCameraManager::clearCameraOnlineState()
-{
-    const QStringList ids = m_cameraOnline.keys();
-    m_cameraOnline.clear();
-    for (const QString& id : ids)
-        emit cameraOffline(id);
 }

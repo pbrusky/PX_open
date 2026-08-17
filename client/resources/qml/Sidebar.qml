@@ -20,6 +20,7 @@ Item {
 
     property bool isStartupPage: false
     property bool isCameraPage: false
+    property bool collapsed: false
 
     signal cameraSelected(string cameraId)
     signal requestRemoveCamera(string cameraId)
@@ -77,7 +78,6 @@ Item {
                 color: "transparent"
 
                 Text {
-                    id: sidebarServerNameText
                     anchors.verticalCenter: parent.verticalCenter
                     text: serverName !== "" ? serverName : "No server"
                     color: "white"
@@ -89,9 +89,8 @@ Item {
                     acceptedButtons: Qt.RightButton
                     hoverEnabled: true
                     onPressed: function(mouse) {
-                        if (mouse.button === Qt.RightButton) {
+                        if (mouse.button === Qt.RightButton)
                             serverNameContextMenu.open()
-                        }
                     }
                 }
             }
@@ -102,7 +101,6 @@ Item {
             width: parent.width
             height: sidebar.height - 60
             clip: true
-
             model: sidebar.cameraList
 
             delegate: Rectangle {
@@ -113,10 +111,24 @@ Item {
 
                 property string cameraId: modelData.id
                 property string cameraName: modelData.name
+                property bool isOnline: false
 
-                property bool isOnline: frigateRef
-                                        ? frigateRef.isCameraOnline(cameraId)
-                                        : false
+                Component.onCompleted: {
+                    isOnline = frigateRef ? frigateRef.isCameraOnline(cameraId) : false
+                }
+
+                Connections {
+                    target: frigateRef
+                    ignoreUnknownSignals: true
+                    function onCameraOnline(name) {
+                        if (name === cameraId || name === cameraName)
+                            cameraRow.isOnline = true
+                    }
+                    function onCameraOffline(name) {
+                        if (name === cameraId || name === cameraName)
+                            cameraRow.isOnline = false
+                    }
+                }
 
                 color: (cameraId === sidebar.selectedCameraId)
                        ? "#404060"
@@ -125,20 +137,44 @@ Item {
                 Row {
                     anchors.fill: parent
                     anchors.margins: 8
-                    spacing: 8
+                    spacing: 10
 
-                    Rectangle {
-                        width: 10
-                        height: 10
-                        radius: 5
-                        color: isOnline ? "#4CAF50" : "#D32F2F"
+                    // NX-style camera icon + status
+                    Item {
+                        width: 22
+                        height: 22
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Image {
+                            anchors.centerIn: parent
+                            width: 18
+                            height: 18
+                            source: "qrc:/app/assets/icons/nx/cameras.svg"
+                            fillMode: Image.PreserveAspectFit
+                            // Tint: green online, red offline, white selected
+                            opacity: cameraRow.isOnline ? 1.0 : 0.55
+                        }
+
+                        // Small status pip (NX-like)
+                        Rectangle {
+                            width: 7
+                            height: 7
+                            radius: 3.5
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            color: cameraRow.isOnline ? "#4CAF50" : "#D32F2F"
+                            border.color: "#202020"
+                            border.width: 1
+                        }
                     }
 
                     Text {
+                        anchors.verticalCenter: parent.verticalCenter
                         text: cameraName
                         color: "white"
                         font.pixelSize: 14
                         elide: Text.ElideRight
+                        width: cameraRow.width - 56
                     }
                 }
 
@@ -154,7 +190,6 @@ Item {
                             sidebar.cameraSelected(cameraId)
                         }
                     }
-
                     MenuItem {
                         text: "Edit Camera"
                         enabled: cameraName !== ""
@@ -164,19 +199,13 @@ Item {
                             sidebar.navigate("editCamera:" + cameraId)
                         }
                     }
-
                     MenuItem {
                         text: "Remove Camera"
-                        onTriggered: {
-                            sidebar.requestRemoveCamera(cameraId)
-                        }
+                        onTriggered: sidebar.requestRemoveCamera(cameraId)
                     }
-
                     MenuItem {
                         text: "Add Camera"
-                        onTriggered: {
-                            sidebar.navigate("addCamera")
-                        }
+                        onTriggered: sidebar.navigate("addCamera")
                     }
                 }
 
@@ -215,7 +244,6 @@ Item {
                     sidebar.dragging = true
                     sidebar.draggingCameraId = sidebar.pressCameraId
                     sidebar.draggingCameraName = sidebar.pressCameraName
-
                     let p = globalDrag.centroid && globalDrag.centroid.scenePosition
                     if (p) {
                         sidebar.dragX = p.x
@@ -224,16 +252,12 @@ Item {
                 }
             } else {
                 if (sidebar.dragging) {
-                    const dropX = sidebar.dragX
-                    const dropY = sidebar.dragY + 40
-
                     sidebar.cameraDropped(
-                        dropX,
-                        dropY,
+                        sidebar.dragX,
+                        sidebar.dragY + 40,
                         sidebar.draggingCameraName
                     )
                 }
-
                 Qt.callLater(function() {
                     sidebar.dragging = false
                     sidebar.draggingCameraName = ""
@@ -262,7 +286,6 @@ Item {
         border.color: "#A0A0FF"
         border.width: 1
         z: 100000
-
         x: sidebar.dragX - width / 2
         y: sidebar.dragY - height / 2 + 4
 
