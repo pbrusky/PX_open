@@ -121,17 +121,18 @@ static void stopWorkerThreadAsync(FFmpegWorker* worker, QThread* thread)
     worker->stopDecoding();
 }
 
-QObject* FrigateStreamManager::getQueue(const QString& cameraName)
+void FrigateStreamManager::startGridWorker(const QString& cameraName,
+                                           FrameQueue* queue,
+                                           int attempt)
 {
-    if (cameraName.trimmed().isEmpty() || m_serverIp.trimmed().isEmpty())
-        return nullptr;
+    if (!queue || cameraName.isEmpty() || m_serverIp.isEmpty())
+        return;
 
-    if (m_queues.contains(cameraName))
-        return m_queues[cameraName];
-
-    FrameQueue* queue = new FrameQueue(this);
-    queue->setMaxSize(2);
-    m_queues.insert(cameraName, queue);
+    if (m_workers.contains(cameraName)) {
+        FFmpegWorker* oldW = m_workers.take(cameraName);
+        QThread* oldT = m_threads.take(cameraName);
+        stopWorkerThreadAsync(oldW, oldT);
+    }
 
     const QString url = buildRtspUrl(m_serverIp, cameraName);
 
@@ -145,8 +146,29 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
         emit cameraOnline(cameraName);
     }, Qt::QueuedConnection);
 
-    connect(worker, &FFmpegWorker::openInputFailed, this, [this, cameraName](const QString&) {
+    connect(worker, &FFmpegWorker::openInputFailed, this,
+            [this, cameraName, attempt](const QString&) {
         emit cameraOffline(cameraName);
+
+        FFmpegWorker* w = m_workers.take(cameraName);
+        QThread* t = m_threads.take(cameraName);
+        stopWorkerThreadAsync(w, t);
+
+        // Retry: go2rtc often not ready right after server select
+        if (attempt < 4) {
+            const int delayMs = (attempt == 0) ? 2000
+                              : (attempt == 1) ? 3000
+                              : (attempt == 2) ? 5000
+                              : 8000;
+            QTimer::singleShot(delayMs, this, [this, cameraName, attempt]() {
+                if (!m_queues.contains(cameraName))
+                    return;
+                FrameQueue* q = m_queues.value(cameraName);
+                if (!q)
+                    return;
+                startGridWorker(cameraName, q, attempt + 1);
+            });
+        }
     }, Qt::QueuedConnection);
 
     connect(worker, &FFmpegWorker::statsUpdated, this,
@@ -169,6 +191,24 @@ QObject* FrigateStreamManager::getQueue(const QString& cameraName)
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
 
     thread->start();
+}
+
+QObject* FrigateStreamManager::getQueue(const QString& cameraName)
+{
+    if (cameraName.trimmed().isEmpty() || m_serverIp.trimmed().isEmpty())
+        return nullptr;
+
+    if (m_queues.contains(cameraName) && m_workers.contains(cameraName))
+        return m_queues[cameraName];
+
+    FrameQueue* queue = m_queues.value(cameraName, nullptr);
+    if (!queue) {
+        queue = new FrameQueue(this);
+        queue->setMaxSize(2);
+        m_queues.insert(cameraName, queue);
+    }
+
+    startGridWorker(cameraName, queue, 0);
     return queue;
 }
 
@@ -202,8 +242,6 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     m_fullscreenWorkers.insert(cameraName, worker);
 
     connect(worker, &FFmpegWorker::openInputOk, this, [this, cameraName, stage]() {
-        // stage 0/1 = dedicated main
-        // stage 2 + no go2rtc _main = single-stream camera → show MAIN
         const bool trueMain = (stage == 0 || stage == 1)
             || (stage == 2 && m_mainMissing.contains(cameraName));
         if (trueMain) {

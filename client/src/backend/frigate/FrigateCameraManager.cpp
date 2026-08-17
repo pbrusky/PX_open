@@ -370,3 +370,24 @@ void FrigateCameraManager::loadModuleInformation()
         );
     });
 }
+void FrigateCameraManager::setCameraOnline(const QString& id, bool online)
+{
+    if (id.trimmed().isEmpty())
+        return;
+    const bool prev = m_cameraOnline.value(id, false);
+    if (prev == online)
+        return;
+    m_cameraOnline[id] = online;
+    if (online)
+        emit cameraOnline(id);
+    else
+        emit cameraOffline(id);
+}
+
+void FrigateCameraManager::clearCameraOnlineState()
+{
+    const QStringList ids = m_cameraOnline.keys();
+    m_cameraOnline.clear();
+    for (const QString& id : ids)
+        emit cameraOffline(id);
+}

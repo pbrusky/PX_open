@@ -60,7 +60,7 @@ signals:
 
 private:
     void stopFullscreenInternal(const QString& cameraName);
-    // stage 0 = go2rtc name_main, 1 = direct camera main, 2 = go2rtc name (sub)
+    void startGridWorker(const QString& cameraName, FrameQueue* queue, int attempt);
     void startFullscreenWorker(const QString& cameraName,
                                FrameQueue* queue,
                                int stage);

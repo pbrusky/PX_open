@@ -33,7 +33,9 @@ FrigateAPI::FrigateAPI(QObject* parent)
             QString mainUrl = m.value(QStringLiteral("mainUrl")).toString();
             if (mainUrl.isEmpty())
                 mainUrl = m.value(QStringLiteral("rtsp")).toString();
-            m_streamManager->setCameraDirectMainUrl(id, mainUrl);
+            const QString user = m.value(QStringLiteral("username")).toString();
+            const QString pass = m.value(QStringLiteral("password")).toString();
+            m_streamManager->setCameraDirectMainUrl(id, mainUrl, user, pass);
         }
     });
     connect(m_cameraManager, &FrigateCameraManager::cameraOnline,
@@ -68,10 +70,17 @@ FrigateAPI::FrigateAPI(QObject* parent)
     connect(m_playback, &FrigatePlayback::playbackStopped,
             this, &FrigateAPI::playbackStopped);
 
+    // Stream status → CameraManager (source of truth for isCameraOnline)
     connect(m_streamManager, &FrigateStreamManager::cameraOnline,
-            this, &FrigateAPI::cameraOnline);
+            this, [this](const QString& id) {
+        if (m_cameraManager)
+            m_cameraManager->setCameraOnline(id, true);
+    });
     connect(m_streamManager, &FrigateStreamManager::cameraOffline,
-            this, &FrigateAPI::cameraOffline);
+            this, [this](const QString& id) {
+        if (m_cameraManager)
+            m_cameraManager->setCameraOnline(id, false);
+    });
     connect(m_streamManager, &FrigateStreamManager::cameraStatsChanged,
             this, &FrigateAPI::cameraStatsChanged);
     connect(m_streamManager, &FrigateStreamManager::fullscreenFrameReady,
@@ -114,8 +123,14 @@ void FrigateAPI::setServerIp(QString ip)
     if (m_serverIp == ip)
         return;
     m_serverIp = ip;
-    m_streamManager->setServerIp(ip);
-    m_playback->setServerIp(ip);
+    if (m_streamManager) {
+        m_streamManager->stopAllStreams();
+        m_streamManager->setServerIp(ip);
+    }
+    if (m_cameraManager)
+        m_cameraManager->clearCameraOnlineState();
+    if (m_playback)
+        m_playback->setServerIp(ip);
     emit serverIpChanged();
 }
 
@@ -261,8 +276,6 @@ void FrigateAPI::loadModuleInformation()
 
 void FrigateAPI::testRtsp(const QString& url)
 {
-    qDebug() << "FrigateAPI::testRtsp REAL TEST for URL:" << url;
-
     QString program = "ffmpeg";
     QStringList args;
     args << "-rtsp_transport" << "tcp"

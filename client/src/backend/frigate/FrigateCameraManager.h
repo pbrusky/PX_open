@@ -28,6 +28,9 @@ public:
     void removeCamera(const QString& id);
 
     bool isCameraOnline(const QString& id) const;
+    void setCameraOnline(const QString& id, bool online);
+    void clearCameraOnlineState();
+
     QVariantList getCameraList() const;
     QVariantMap getCameraMetadata(const QString& id) const;
     void loadModuleInformation();
