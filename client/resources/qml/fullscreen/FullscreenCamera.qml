@@ -599,6 +599,8 @@ Item {
             frigateRef.loadRecordings(id)
         if (typeof frigateRef.loadEvents === "function")
             frigateRef.loadEvents(id)
+        if (typeof frigateRef.loadMotionActivity === "function")
+            frigateRef.loadMotionActivity(id)
         recordingsPollTimer.tries = 0
         recordingsPollTimer.start()
     }

@@ -10,6 +10,9 @@ Rectangle {
     property bool allowAutoReveal: false
     property bool pointerInside: false
 
+    // Raise this to show fewer orange ticks (10 = busy, 25 = default, 50–100 = strong only)
+    property real minMotion: 25
+
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
 
@@ -74,8 +77,8 @@ Rectangle {
                 return
             recordings = segments
             if (segments && segments.length > 0) {
-                startTs = segments[0].start
-                endTs = segments[segments.length - 1].end
+                startTs = Number(segments[0].start)
+                endTs = Number(segments[segments.length - 1].end)
             }
         }
 
@@ -88,13 +91,43 @@ Rectangle {
         function onMotionActivityLoaded(id, points) {
             if (id !== cameraId && id !== cameraName)
                 return
-            motionPoints = points
+            applyMotionPoints(points)
         }
 
         function onPlaybackPositionChanged(id, posMs) {
             if (id !== cameraId && id !== cameraName)
                 return
             playbackPositionMs = posMs
+        }
+    }
+
+    function normalizeSec(t) {
+        t = Number(t || 0)
+        if (t > 100000000000)
+            t = t / 1000
+        return t
+    }
+
+    function applyMotionPoints(points) {
+        motionPoints = points || []
+        if (!motionPoints || motionPoints.length === 0)
+            return
+
+        var minT = startTs > 0 ? startTs : Number.MAX_VALUE
+        var maxT = endTs > 0 ? endTs : 0
+        for (var i = 0; i < motionPoints.length; ++i) {
+            var p = motionPoints[i]
+            var t = normalizeSec(p.start !== undefined ? p.start : p.start_time)
+            if (t <= 0)
+                continue
+            if (t < minT) minT = t
+            if (t > maxT) maxT = t
+        }
+        if (minT < Number.MAX_VALUE) {
+            if (startTs <= 0 || minT < startTs)
+                startTs = minT
+            if (maxT > endTs)
+                endTs = maxT
         }
     }
 
@@ -113,16 +146,18 @@ Rectangle {
     function timestampToX(tsMs) {
         var s = effectiveStartTs()
         var e = effectiveEndTs()
-        if (e <= s || width <= 0)
+        var w = trackBg.width > 0 ? trackBg.width : Math.max(1, width - 8)
+        if (e <= s || w <= 0)
             return 0
         var ratio = (tsMs - s * 1000) / ((e - s) * 1000)
-        return Math.max(0, Math.min(width, ratio * width))
+        return Math.max(0, Math.min(w, ratio * w))
     }
 
     function xToTimestamp(x) {
         var s = effectiveStartTs()
         var e = effectiveEndTs()
-        var ratio = Math.max(0, Math.min(1, x / Math.max(1, width)))
+        var w = trackBg.width > 0 ? trackBg.width : Math.max(1, width - 8)
+        var ratio = Math.max(0, Math.min(1, x / Math.max(1, w)))
         return (s + ratio * (e - s)) * 1000
     }
 
@@ -130,6 +165,19 @@ Rectangle {
         if (tsMs <= 0)
             return ""
         return Qt.formatDateTime(new Date(tsMs), "ddd MMM dd  hh:mm:ss")
+    }
+
+    function visibleMotionCount() {
+        var n = 0
+        if (!motionPoints)
+            return 0
+        for (var i = 0; i < motionPoints.length; ++i) {
+            var p = motionPoints[i]
+            var m = Number(p.motion !== undefined ? p.motion : 0)
+            if (m >= minMotion)
+                n++
+        }
+        return n
     }
 
     Rectangle {
@@ -195,63 +243,87 @@ Rectangle {
         anchors.rightMargin: 4
         anchors.top: ruler.bottom
         anchors.topMargin: 6
-        height: 36
+        height: 40
         color: "#1A1A1A"
         radius: 3
         visible: !collapsed
         border.color: "#333"
         border.width: 1
         z: 5
-    }
+        clip: true
 
-    TimelineSegments {
-        anchors.fill: trackBg
-        recordings: timeline.recordings
-        startTs: timeline.effectiveStartTs()
-        endTs: timeline.effectiveEndTs()
-        zoom: 1.0
-        pan: 0
-        timelineWidth: timeline.width
-        timestampToX: timeline.timestampToX
-        visible: !collapsed
-        z: 6
-    }
-
-    // Motion ticks — same data Frigate web uses for orange activity
-    Repeater {
-        model: timeline.motionPoints
-        visible: !collapsed
-        z: 9
-
-        Rectangle {
-            width: 2
-            height: {
-                var m = Number(modelData.motion || 0)
-                return Math.min(trackBg.height - 4, 8 + Math.min(24, m / 5.0))
-            }
-            y: trackBg.y + trackBg.height - height - 2
-            color: "#FF9800"
-            opacity: 0.95
-            x: trackBg.x + timeline.timestampToX(Number(modelData.start) * 1000) - 1
-            visible: Number(modelData.start) > 0 && Number(modelData.motion || 0) > 0
+        TimelineSegments {
+            anchors.fill: parent
+            recordings: timeline.recordings
+            startTs: timeline.effectiveStartTs()
+            endTs: timeline.effectiveEndTs()
+            zoom: 1.0
+            pan: 0
+            timelineWidth: trackBg.width
+            timestampToX: timeline.timestampToX
+            z: 1
         }
-    }
 
-    // Detection event ticks
-    Repeater {
-        model: timeline.events
-        visible: !collapsed
-        z: 10
+        // MOTION TICKS (filtered by minMotion)
+        Repeater {
+            model: timeline.motionPoints
+            z: 5
 
-        Rectangle {
-            width: 3
-            height: 16
-            y: trackBg.y + 2
-            radius: 1
-            color: "#FFC107"
-            opacity: 0.95
-            x: trackBg.x + timeline.timestampToX(Number(modelData.start) * 1000) - 1
-            visible: Number(modelData.start) > 0
+            Rectangle {
+                property real sec: {
+                    var t = 0
+                    if (typeof start !== "undefined" && start)
+                        t = Number(start)
+                    else if (modelData)
+                        t = Number(modelData.start || modelData.start_time || 0)
+                    if (t > 100000000000)
+                        t = t / 1000
+                    return t
+                }
+                property real mot: {
+                    if (typeof motion !== "undefined" && motion)
+                        return Number(motion)
+                    if (modelData)
+                        return Number(modelData.motion || 0)
+                    return 0
+                }
+
+                width: 3
+                height: Math.min(parent.height - 4, 14 + Math.min(22, mot / 8.0))
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 2
+                color: "#FF6D00"
+                opacity: 1.0
+                x: timeline.timestampToX(sec * 1000) - 1
+                visible: sec > 0 && mot >= timeline.minMotion
+            }
+        }
+
+        // Event ticks
+        Repeater {
+            model: timeline.events
+            z: 6
+
+            Rectangle {
+                property real sec: {
+                    var t = 0
+                    if (typeof start !== "undefined" && start)
+                        t = Number(start)
+                    else if (modelData)
+                        t = Number(modelData.start || 0)
+                    if (t > 100000000000)
+                        t = t / 1000
+                    return t
+                }
+
+                width: 3
+                height: 18
+                y: 2
+                radius: 1
+                color: "#FFC107"
+                x: timeline.timestampToX(sec * 1000) - 1
+                visible: sec > 0
+            }
         }
     }
 
@@ -356,7 +428,7 @@ Rectangle {
             if (collapsed)
                 return ""
             return recordings.length + " rec, "
-                 + motionPoints.length + " motion, "
+                 + visibleMotionCount() + "/" + motionPoints.length + " motion (min " + minMotion + "), "
                  + events.length + " events — green=record, orange=motion"
         }
         color: "#777777"
