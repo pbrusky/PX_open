@@ -16,6 +16,9 @@ FrigatePlayback::FrigatePlayback(QObject* parent)
 
 FrigatePlayback::~FrigatePlayback()
 {
+    for (auto it = m_seekGen.begin(); it != m_seekGen.end(); ++it)
+        it.value() = it.value() + 1;
+
     const QStringList keys = m_playbackWorkers.keys();
     for (const QString& id : keys)
         stopWorkerAsync(id);
@@ -133,7 +136,7 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 
     const qint64 wall = QDateTime::currentMSecsSinceEpoch();
     if (m_lastSeekMs.contains(cameraId) &&
-        (wall - m_lastSeekMs.value(cameraId) < 700)) {
+        (wall - m_lastSeekMs.value(cameraId) < 800)) {
         return;
     }
     m_lastSeekMs[cameraId] = wall;
@@ -146,16 +149,16 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         startSec = timestampMs / 1000;
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    if (startSec > nowSec - 10)
-        startSec = nowSec - 10;
+    if (startSec > nowSec - 30)
+        startSec = nowSec - 30;
     if (startSec < 1)
         startSec = 1;
 
-    qint64 endSec = startSec + 30;
-    if (endSec > nowSec)
-        endSec = nowSec;
+    qint64 endSec = startSec + 60;
+    if (endSec > nowSec - 5)
+        endSec = nowSec - 5;
     if (endSec <= startSec)
-        endSec = startSec + 5;
+        endSec = startSec + 10;
 
     const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
                             .arg(m_server, cameraId)
@@ -186,11 +189,18 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     m_playbackPositionByCamera[cameraId] = posMs;
     emit playbackPositionChanged(cameraId, posMs);
 
-    QTimer::singleShot(300, this, [this, cameraId, gen, url, queue, endSec]() {
+    // Let previous worker/thread finish before starting a new one
+    QTimer::singleShot(500, this, [this, cameraId, gen, url, queue]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
         if (!queue)
             return;
+
+        {
+            QMutexLocker lock(&m_mutex);
+            if (m_playbackWorkers.contains(cameraId))
+                return;
+        }
 
         FFmpegWorker* worker = new FFmpegWorker(nullptr);
         worker->setUrl(url);
@@ -207,31 +217,52 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
             emit playbackStarted(cameraId);
         }, Qt::QueuedConnection);
 
+        // 400 / no video: clear maps so we never use a deleted worker
         connect(worker, &FFmpegWorker::openInputFailed, this,
-                [this, cameraId, gen](const QString& reason) {
+                [this, cameraId, gen, url](const QString& reason) {
             if (m_seekGen.value(cameraId, 0) != gen)
                 return;
-            qWarning() << "[Playback] open failed" << cameraId << reason;
+            qWarning() << "[Playback] open failed" << cameraId << reason << url;
+
+            {
+                QMutexLocker lock(&m_mutex);
+                m_playbackWorkers.remove(cameraId);
+                m_playbackThreads.remove(cameraId);
+            }
+
             emit cameraOffline(cameraId);
             emit playbackStopped(cameraId);
         }, Qt::QueuedConnection);
 
+        // Normal end of clip — no auto-chain (that caused races)
         connect(worker, &FFmpegWorker::streamStopped, this,
-                [this, cameraId, gen, endSec]() {
+                [this, cameraId, gen]() {
             if (m_seekGen.value(cameraId, 0) != gen)
                 return;
-            m_lastSeekMs.remove(cameraId);
-            QTimer::singleShot(150, this, [this, cameraId, gen, endSec]() {
-                if (m_seekGen.value(cameraId, 0) != gen)
-                    return;
-                startPlayback(cameraId, endSec * 1000);
-            });
+
+            {
+                QMutexLocker lock(&m_mutex);
+                m_playbackWorkers.remove(cameraId);
+                m_playbackThreads.remove(cameraId);
+            }
+
+            emit playbackStopped(cameraId);
         }, Qt::QueuedConnection);
 
         connect(thread, &QThread::started, worker, &FFmpegWorker::startDecoding);
         connect(worker, &FFmpegWorker::finished, thread, &QThread::quit);
         connect(thread, &QThread::finished, worker, &QObject::deleteLater);
         connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+
+        // Thread fully done — clear maps again if still present
+        connect(thread, &QThread::finished, this,
+                [this, cameraId, gen]() {
+            if (m_seekGen.value(cameraId, 0) != gen)
+                return;
+            QMutexLocker lock(&m_mutex);
+            m_playbackWorkers.remove(cameraId);
+            m_playbackThreads.remove(cameraId);
+        }, Qt::QueuedConnection);
 
         {
             QMutexLocker lock(&m_mutex);
