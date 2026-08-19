@@ -11,7 +11,7 @@ Rectangle {
     property bool pointerInside: false
 
     // Raise this to show fewer orange ticks (10 = busy, 25 = default, 50–100 = strong only)
-    property real minMotion: 25
+    property real minMotion: 15
 
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
@@ -43,18 +43,39 @@ Rectangle {
     property var recordings: []
     property var events: []
     property var motionPoints: []
-    property int playbackPositionMs: 0
+    // Must be real: epoch-ms does not fit in QML int (overflow hides the playhead).
+    property real playbackPositionMs: 0
     property real startTs: 0
     property real endTs: 0
     property bool isPlayback: false
     property real hoverTsMs: -1
 
-    property int currentTimeMs: Date.now()
+    property real currentTimeMs: Date.now()
+    readonly property real playheadTsMs: {
+        if (isPlayback && playbackPositionMs > 0)
+            return playbackPositionMs
+        return currentTimeMs
+    }
+
     Timer {
         interval: 1000
         running: true
         repeat: true
         onTriggered: currentTimeMs = Date.now()
+    }
+
+    // Advance the needle while a clip is playing (backend only reports seek start).
+    Timer {
+        interval: 250
+        running: !collapsed && isPlayback && playbackPositionMs > 0
+        repeat: true
+        onTriggered: {
+            var next = playbackPositionMs + interval
+            var endMs = effectiveEndTs() * 1000
+            if (endMs > 0 && next > endMs)
+                next = endMs
+            playbackPositionMs = next
+        }
     }
 
     HoverHandler {
@@ -325,26 +346,48 @@ Rectangle {
                 visible: sec > 0
             }
         }
+
+        // Current playback / live position on the motion bar
+        Rectangle {
+            id: trackPlayhead
+            width: 3
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            x: timeline.timestampToX(timeline.playheadTsMs) - width / 2
+            color: timeline.isPlayback ? "#FFFFFF" : "#90CAF9"
+            border.color: "#000000"
+            border.width: 1
+            visible: timeline.playheadTsMs > 0
+            z: 80
+        }
     }
 
     Item {
         id: playheadItem
-        width: 3
-        height: trackBg.height + 6
+        width: 18
+        height: trackBg.height + 22
         anchors.top: trackBg.top
-        anchors.topMargin: -3
-        x: {
-            var ts = isPlayback && playbackPositionMs > 0
-                     ? playbackPositionMs
-                     : currentTimeMs
-            return trackBg.x + timestampToX(ts) - width / 2
-        }
-        visible: !collapsed
-        z: 30
+        anchors.topMargin: -14
+        x: trackBg.x + timestampToX(playheadTsMs) - width / 2
+        visible: !collapsed && playheadTsMs > 0
+        z: 80
 
         Rectangle {
-            anchors.fill: parent
-            color: isPlayback ? "#FFC107" : "#FFFFFF"
+            width: 3
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            color: isPlayback ? "#FFFFFF" : "#90CAF9"
+        }
+
+        Rectangle {
+            width: 12
+            height: 8
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            color: isPlayback ? "#FFFFFF" : "#90CAF9"
+            border.color: "#000000"
+            border.width: 1
         }
     }
 

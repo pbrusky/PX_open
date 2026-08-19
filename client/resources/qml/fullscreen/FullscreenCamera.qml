@@ -41,7 +41,11 @@ Item {
     }
     onCameraNameChanged: liveLayers.cameraName = cameraName
     onCameraIdChanged: liveLayers.cameraId = cameraId
-    onIsPlaybackChanged: liveLayers.isPlayback = isPlayback
+    onIsPlaybackChanged: {
+        liveLayers.isPlayback = isPlayback
+        if (timelineLoader.item)
+            timelineLoader.item.isPlayback = isPlayback
+    }
     onPlaybackReadyChanged: liveLayers.playbackReady = playbackReady
 
     onPlaybackQueueChanged: {
