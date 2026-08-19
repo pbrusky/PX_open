@@ -62,6 +62,8 @@ FrigateAPI::FrigateAPI(QObject* parent)
             this, &FrigateAPI::recordingsLoaded);
     connect(m_timeline, &FrigateTimeline::eventsLoaded,
             this, &FrigateAPI::eventsLoaded);
+    connect(m_timeline, &FrigateTimeline::motionActivityLoaded,
+            this, &FrigateAPI::motionActivityLoaded);
 
     connect(m_playback, &FrigatePlayback::playbackPositionChanged,
             this, &FrigateAPI::playbackPositionChanged);
@@ -70,7 +72,6 @@ FrigateAPI::FrigateAPI(QObject* parent)
     connect(m_playback, &FrigatePlayback::playbackStopped,
             this, &FrigateAPI::playbackStopped);
 
-    // Stream status → CameraManager (source of truth for isCameraOnline)
     connect(m_streamManager, &FrigateStreamManager::cameraOnline,
             this, [this](const QString& id) {
         if (m_cameraManager)
@@ -234,6 +235,11 @@ void FrigateAPI::loadEvents(const QString& cameraId)
     m_timeline->loadEvents(cameraId);
 }
 
+void FrigateAPI::loadMotionActivity(const QString& cameraId)
+{
+    m_timeline->loadMotionActivity(cameraId);
+}
+
 QVariantList FrigateAPI::getRecordingsForCamera(const QString& cameraId)
 {
     return m_timeline->getRecordings(cameraId);
@@ -242,6 +248,11 @@ QVariantList FrigateAPI::getRecordingsForCamera(const QString& cameraId)
 QVariantList FrigateAPI::getEventsForCamera(const QString& cameraId)
 {
     return m_timeline->getEvents(cameraId);
+}
+
+QVariantList FrigateAPI::getMotionActivityForCamera(const QString& cameraId)
+{
+    return m_timeline->getMotionActivity(cameraId);
 }
 
 void FrigateAPI::seek(const QString& cameraId, qint64 timestampMs)

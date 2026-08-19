@@ -39,6 +39,7 @@ Rectangle {
     property var frigateRef: null
     property var recordings: []
     property var events: []
+    property var motionPoints: []
     property int playbackPositionMs: 0
     property real startTs: 0
     property real endTs: 0
@@ -53,7 +54,6 @@ Rectangle {
         onTriggered: currentTimeMs = Date.now()
     }
 
-    // Hover over the whole timeline keeps it open; does not block clicks
     HoverHandler {
         id: rootHover
         enabled: !collapsed
@@ -83,6 +83,12 @@ Rectangle {
             if (id !== cameraId && id !== cameraName)
                 return
             events = list
+        }
+
+        function onMotionActivityLoaded(id, points) {
+            if (id !== cameraId && id !== cameraName)
+                return
+            motionPoints = points
         }
 
         function onPlaybackPositionChanged(id, posMs) {
@@ -135,10 +141,8 @@ Rectangle {
         color: "#161616"
         visible: !collapsed
         z: 20
-        clip: false
 
         Text {
-            id: statusTime
             anchors.left: parent.left
             anchors.leftMargin: 12
             anchors.verticalCenter: parent.verticalCenter
@@ -198,7 +202,6 @@ Rectangle {
         border.color: "#333"
         border.width: 1
         z: 5
-        clip: false
     }
 
     TimelineSegments {
@@ -212,6 +215,44 @@ Rectangle {
         timestampToX: timeline.timestampToX
         visible: !collapsed
         z: 6
+    }
+
+    // Motion ticks — same data Frigate web uses for orange activity
+    Repeater {
+        model: timeline.motionPoints
+        visible: !collapsed
+        z: 9
+
+        Rectangle {
+            width: 2
+            height: {
+                var m = Number(modelData.motion || 0)
+                return Math.min(trackBg.height - 4, 8 + Math.min(24, m / 5.0))
+            }
+            y: trackBg.y + trackBg.height - height - 2
+            color: "#FF9800"
+            opacity: 0.95
+            x: trackBg.x + timeline.timestampToX(Number(modelData.start) * 1000) - 1
+            visible: Number(modelData.start) > 0 && Number(modelData.motion || 0) > 0
+        }
+    }
+
+    // Detection event ticks
+    Repeater {
+        model: timeline.events
+        visible: !collapsed
+        z: 10
+
+        Rectangle {
+            width: 3
+            height: 16
+            y: trackBg.y + 2
+            radius: 1
+            color: "#FFC107"
+            opacity: 0.95
+            x: trackBg.x + timeline.timestampToX(Number(modelData.start) * 1000) - 1
+            visible: Number(modelData.start) > 0
+        }
     }
 
     Item {
@@ -314,9 +355,9 @@ Rectangle {
         text: {
             if (collapsed)
                 return ""
-            if (recordings.length > 0)
-                return recordings.length + " recording block(s) - hover for time, click to play"
-            return "No recordings in range"
+            return recordings.length + " rec, "
+                 + motionPoints.length + " motion, "
+                 + events.length + " events — green=record, orange=motion"
         }
         color: "#777777"
         font.pixelSize: 10
