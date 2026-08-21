@@ -69,7 +69,7 @@ Rectangle {
                 }
             }
             Text {
-                width: parent.width - 72
+                width: parent.width - 100
                 height: 28
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
@@ -98,6 +98,23 @@ Rectangle {
                             calYear += 1
                         }
                     }
+                }
+            }
+            Rectangle {
+                width: 28
+                height: 28
+                radius: 4
+                color: "#444"
+                Text {
+                    anchors.centerIn: parent
+                    text: "✕"
+                    color: "#FFCDD2"
+                    font.pixelSize: 12
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.visible = false
                 }
             }
         }
@@ -158,7 +175,7 @@ Rectangle {
 
         Text {
             width: parent.width
-            text: "Green = has recording. Click a day to jump."
+            text: "Green = has recording. Click a day to jump. Esc or outside closes."
             color: "#777"
             font.pixelSize: 10
             wrapMode: Text.WordWrap

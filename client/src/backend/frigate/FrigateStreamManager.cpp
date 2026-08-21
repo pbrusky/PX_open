@@ -91,11 +91,18 @@ static QString buildRtspUrl(const QString& serverIp, const QString& cameraName)
 
 QString FrigateStreamManager::urlForFullscreenStage(const QString& cameraName, int stage) const
 {
+    // Prefer go2rtc first so we do not hang on camera RTSP 401:
+    //   0 = "<name>_main" (dual-stream main)
+    //   1 = "<name>"      (single-stream / sub)
+    //   2 = direct camera RTSP (last resort)
     if (stage == 0)
         return buildRtspUrl(m_serverIp, cameraName + QStringLiteral("_main"));
 
-    if (stage == 1) {
-        QString direct = m_directMainUrls.value(cameraName);
+    if (stage == 1)
+        return buildRtspUrl(m_serverIp, cameraName);
+
+    if (stage == 2) {
+        const QString direct = m_directMainUrls.value(cameraName);
         if (direct.isEmpty())
             return QString();
         if (direct.contains(QLatin1String(":8554/")))
@@ -105,7 +112,7 @@ QString FrigateStreamManager::urlForFullscreenStage(const QString& cameraName, i
                               m_cameraPass.value(cameraName));
     }
 
-    return buildRtspUrl(m_serverIp, cameraName);
+    return QString();
 }
 
 static void stopWorkerThreadAsync(FFmpegWorker* worker, QThread* thread)
@@ -154,7 +161,6 @@ void FrigateStreamManager::startGridWorker(const QString& cameraName,
         QThread* t = m_threads.take(cameraName);
         stopWorkerThreadAsync(w, t);
 
-        // Retry: go2rtc often not ready right after server select
         if (attempt < 4) {
             const int delayMs = (attempt == 0) ? 2000
                               : (attempt == 1) ? 3000
@@ -238,12 +244,13 @@ void FrigateStreamManager::startFullscreenWorker(const QString& cameraName,
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
-    worker->setHighQuality(false);
+    worker->setHighQuality(true);
     m_fullscreenWorkers.insert(cameraName, worker);
 
     connect(worker, &FFmpegWorker::openInputOk, this, [this, cameraName, stage]() {
-        const bool trueMain = (stage == 0 || stage == 1)
-            || (stage == 2 && m_mainMissing.contains(cameraName));
+        const bool trueMain = (stage == 0)
+            || (stage == 1 && m_mainMissing.contains(cameraName))
+            || (stage == 2);
         if (trueMain) {
             m_fullscreenIsTrueMain.insert(cameraName);
             emit fullscreenMainStatus(cameraName, true);

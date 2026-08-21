@@ -653,6 +653,9 @@ Item {
         root.playbackQueue = null
         root.trueMain = false
 
+        if (frigateRef && typeof frigateRef.stopFullscreenStream === "function")
+            frigateRef.stopFullscreenStream(id)
+
         if (frigateRef) {
             if (typeof frigateRef.switchToLive === "function")
                 frigateRef.switchToLive(id)
