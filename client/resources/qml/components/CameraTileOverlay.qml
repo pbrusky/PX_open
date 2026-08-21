@@ -21,12 +21,17 @@ Item {
 
     property bool hovered: hover.hovered
 
+    // Highlight border only — do NOT darken the video
     Rectangle {
         anchors.fill: parent
         radius: 6
-        color: "#000000"
-        opacity: hovered ? 0.22 : 0.0
+        color: "transparent"
+        border.width: hovered ? 2 : 0
+        border.color: "#5B8CFF"
+        opacity: hovered ? 1.0 : 0.0
         Behavior on opacity { NumberAnimation { duration: 120 } }
+        Behavior on border.width { NumberAnimation { duration: 80 } }
+        z: 5
     }
 
     Rectangle {
@@ -39,6 +44,7 @@ Item {
         height: 24
         width: nameText.contentWidth + 16
         opacity: cameraName !== "" ? 1.0 : 0.0
+        z: 6
 
         Text {
             id: nameText
@@ -61,6 +67,7 @@ Item {
         width: statsText.contentWidth + 16
         opacity: hovered && (resolution !== "" || fps > 0) ? 1.0 : 0.0
         Behavior on opacity { NumberAnimation { duration: 120 } }
+        z: 6
 
         Text {
             id: statsText

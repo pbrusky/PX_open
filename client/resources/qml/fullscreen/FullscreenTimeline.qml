@@ -17,6 +17,7 @@ Rectangle {
     property real viewEndTs: 0
     readonly property real minViewSpan: 30
     readonly property real maxViewSpan: 7 * 24 * 3600
+    readonly property real defaultViewSpan: 24 * 3600
 
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
@@ -49,6 +50,7 @@ Rectangle {
     property var recordings: []
     property var events: []
     property var motionPoints: []
+    property var recordingDays: []   // ["YYYY-MM-DD", ...] from Frigate summary
     property real playbackPositionMs: 0
     property real startTs: 0
     property real endTs: 0
@@ -94,6 +96,7 @@ Rectangle {
     Connections {
         target: frigateRef
         ignoreUnknownSignals: true
+
         function onRecordingsLoaded(id, segments) {
             if (id !== cameraId && id !== cameraName)
                 return
@@ -114,6 +117,12 @@ Rectangle {
                 return
             applyMotionPoints(points)
         }
+        function onRecordingDaysLoaded(id, days) {
+            if (id !== cameraId && id !== cameraName)
+                return
+            recordingDays = days || []
+            console.log("[Timeline] recordingDays:", recordingDays.length, recordingDays)
+        }
         function onPlaybackPositionChanged(id, posMs) {
             if (id !== cameraId && id !== cameraName)
                 return
@@ -132,7 +141,7 @@ Rectangle {
             return dataStartTs
         if (endTs > startTs)
             return startTs
-        return Date.now() / 1000 - 3600
+        return Date.now() / 1000 - defaultViewSpan
     }
     function dataEndBound() {
         if (dataEndTs > dataStartTs)
@@ -141,6 +150,18 @@ Rectangle {
             return endTs
         return Date.now() / 1000
     }
+
+    function applyDefaultView() {
+        var nowSec = Date.now() / 1000
+        var de = dataEndBound()
+        var ds = dataStartBound()
+        viewEndTs = Math.min(de, nowSec)
+        viewStartTs = viewEndTs - defaultViewSpan
+        if (viewStartTs < ds)
+            viewStartTs = ds
+        clampView()
+    }
+
     function setDataRange(s, e) {
         s = normalizeSec(s)
         e = normalizeSec(e)
@@ -150,11 +171,11 @@ Rectangle {
             dataStartTs = s
         if (e > dataEndTs)
             dataEndTs = e
-        if (viewEndTs <= viewStartTs) {
-            viewStartTs = dataStartTs
-            viewEndTs = dataEndTs
-        }
-        clampView()
+        // First open: last 24 hours only
+        if (viewEndTs <= viewStartTs)
+            applyDefaultView()
+        else
+            clampView()
     }
     function applyMotionPoints(points) {
         motionPoints = points || []
@@ -233,9 +254,7 @@ Rectangle {
         clampView()
     }
     function resetZoom() {
-        viewStartTs = dataStartBound()
-        viewEndTs = dataEndBound()
-        clampView()
+        applyDefaultView()
     }
     function timestampToX(tsMs) {
         var s = effectiveStartTs(), e = effectiveEndTs()
@@ -276,30 +295,56 @@ Rectangle {
             return (span / 3600).toFixed(1) + "h"
         return (span / 86400).toFixed(1) + "d"
     }
+
+    // Calendar green cells — uses Frigate day summary, not 24h segments
     function dayHasRecording(y, m, d) {
-        var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
-        var dayEnd = dayStart + 86400
+        var mm = (m < 10 ? "0" : "") + m
+        var dd = (d < 10 ? "0" : "") + d
+        var key = y + "-" + mm + "-" + dd
+
+        if (recordingDays && recordingDays.length > 0) {
+            for (var i = 0; i < recordingDays.length; ++i) {
+                if (String(recordingDays[i]) === key)
+                    return true
+            }
+            return false
+        }
+
+        // Fallback while summary loads
         if (!recordings)
             return false
-        for (var i = 0; i < recordings.length; ++i) {
-            var s = normalizeSec(recordings[i].start)
-            var e = normalizeSec(recordings[i].end)
+        var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
+        var dayEnd = dayStart + 86400
+        for (var j = 0; j < recordings.length; ++j) {
+            var s = normalizeSec(recordings[j].start)
+            var e = normalizeSec(recordings[j].end)
             if (e > dayStart && s < dayEnd)
                 return true
         }
         return false
     }
+
     function jumpToDay(y, m, d) {
         var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
         var dayEnd = dayStart + 86400
-        if (dayStart < dataStartBound())
-            dataStartTs = dayStart
-        if (dayEnd > dataEndBound())
-            dataEndTs = dayEnd
+
+        dataStartTs = dayStart
+        dataEndTs = dayEnd
         viewStartTs = dayStart
         viewEndTs = dayEnd
         clampView()
         calendarPopup.visible = false
+
+        var id = cameraId !== "" ? cameraId : cameraName
+        if (frigateRef && id !== "") {
+            if (typeof frigateRef.loadRecordingsRange === "function")
+                frigateRef.loadRecordingsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
+            if (typeof frigateRef.loadEventsRange === "function")
+                frigateRef.loadEventsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
+            if (typeof frigateRef.loadMotionActivityRange === "function")
+                frigateRef.loadMotionActivityRange(id, Math.floor(dayStart), Math.floor(dayEnd))
+        }
+
         if (dayHasRecording(y, m, d)) {
             seekRequested(dayStart * 1000)
             playbackPositionMs = dayStart * 1000
@@ -320,6 +365,9 @@ Rectangle {
                 var d = new Date(effectiveStartTs() * 1000)
                 calendarPopup.calYear = d.getFullYear()
                 calendarPopup.calMonth = d.getMonth() + 1
+                var id = cameraId !== "" ? cameraId : cameraName
+                if (frigateRef && typeof frigateRef.loadRecordingDays === "function" && id !== "")
+                    frigateRef.loadRecordingDays(id)
             }
             calendarPopup.visible = !calendarPopup.visible
         }
@@ -424,7 +472,8 @@ Rectangle {
                 return ""
             return recordings.length + " rec, "
                  + visibleMotionCount() + "/" + motionPoints.length + " motion, "
-                 + events.length + " events — wheel=zoom, Shift+drag=pan"
+                 + events.length + " events, "
+                 + recordingDays.length + " days — wheel=zoom, Shift+drag=pan"
         }
         color: "#777777"
         font.pixelSize: 10

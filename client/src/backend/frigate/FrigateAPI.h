@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 
 class FrigateCameraManager;
@@ -61,6 +62,14 @@ public:
     Q_INVOKABLE void loadRecordings(const QString& cameraId);
     Q_INVOKABLE void loadEvents(const QString& cameraId);
     Q_INVOKABLE void loadMotionActivity(const QString& cameraId);
+
+    Q_INVOKABLE void loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
+    Q_INVOKABLE void loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
+    Q_INVOKABLE void loadMotionActivityRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
+
+    Q_INVOKABLE void loadRecordingDays(const QString& cameraId);
+    Q_INVOKABLE QStringList getRecordingDaysForCamera(const QString& cameraId);
+
     Q_INVOKABLE QVariantList getRecordingsForCamera(const QString& cameraId);
     Q_INVOKABLE QVariantList getEventsForCamera(const QString& cameraId);
     Q_INVOKABLE QVariantList getMotionActivityForCamera(const QString& cameraId);
@@ -103,6 +112,7 @@ signals:
     void recordingsLoaded(const QString& cameraId, const QVariantList& segments);
     void eventsLoaded(const QString& cameraId, const QVariantList& events);
     void motionActivityLoaded(const QString& cameraId, const QVariantList& points);
+    void recordingDaysLoaded(const QString& cameraId, const QStringList& days);
 
     void playbackPositionChanged(const QString& cameraId, qint64 positionMs);
     void playbackStarted(const QString& cameraId);
