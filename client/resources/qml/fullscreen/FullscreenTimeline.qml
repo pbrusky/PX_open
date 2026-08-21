@@ -12,15 +12,12 @@ Rectangle {
 
     property real minMotion: 15
 
-    // Full data range (from Frigate recordings/motion)
     property real dataStartTs: 0
     property real dataEndTs: 0
 
-    // Visible window (zoom/pan) — seconds since epoch
     property real viewStartTs: 0
     property real viewEndTs: 0
 
-    // Min/max visible span (seconds): 30s … 7 days
     readonly property real minViewSpan: 30
     readonly property real maxViewSpan: 7 * 24 * 3600
 
@@ -37,6 +34,7 @@ Rectangle {
         collapsed = true
         hoverTsMs = -1
         pointerInside = false
+        calendarPopup.visible = false
     }
 
     height: collapsed ? 4 : 150
@@ -66,6 +64,9 @@ Rectangle {
             return playbackPositionMs
         return currentTimeMs
     }
+
+    property int calYear: new Date().getFullYear()
+    property int calMonth: new Date().getMonth() + 1
 
     Timer {
         interval: 1000
@@ -164,7 +165,6 @@ Rectangle {
             dataStartTs = s
         if (e > dataEndTs)
             dataEndTs = e
-        // First time: fit full range
         if (viewEndTs <= viewStartTs) {
             viewStartTs = dataStartTs
             viewEndTs = dataEndTs
@@ -235,7 +235,6 @@ Rectangle {
         return dataEndBound()
     }
 
-    // Zoom centered on time under cursor (cursorX relative to trackBg)
     function zoomAt(cursorX, factor) {
         var s = effectiveStartTs()
         var e = effectiveEndTs()
@@ -317,6 +316,55 @@ Rectangle {
         return (span / 86400).toFixed(1) + "d"
     }
 
+    function dayHasRecording(y, m, d) {
+        var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
+        var dayEnd = dayStart + 86400
+        if (!recordings)
+            return false
+        for (var i = 0; i < recordings.length; ++i) {
+            var s = normalizeSec(recordings[i].start)
+            var e = normalizeSec(recordings[i].end)
+            if (e > dayStart && s < dayEnd)
+                return true
+        }
+        return false
+    }
+
+    function jumpToDay(y, m, d) {
+        var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
+        var dayEnd = dayStart + 86400
+        var ds = dataStartBound()
+        var de = dataEndBound()
+        if (dayStart < ds)
+            dataStartTs = dayStart
+        if (dayEnd > de)
+            dataEndTs = dayEnd
+        viewStartTs = dayStart
+        viewEndTs = dayEnd
+        clampView()
+        calendarPopup.visible = false
+        if (dayHasRecording(y, m, d)) {
+            seekRequested(dayStart * 1000)
+            playbackPositionMs = dayStart * 1000
+        }
+    }
+
+    function calMonthName() {
+        var names = ["January", "February", "March", "April", "May", "June",
+                     "July", "August", "September", "October", "November", "December"]
+        return names[calMonth - 1] + " " + calYear
+    }
+
+    function calCellDay(index) {
+        var first = new Date(calYear, calMonth - 1, 1)
+        var startPad = (first.getDay() + 6) % 7
+        var dayNum = index - startPad + 1
+        var dim = new Date(calYear, calMonth, 0).getDate()
+        if (dayNum < 1 || dayNum > dim)
+            return 0
+        return dayNum
+    }
+
     Rectangle {
         id: statusBar
         anchors.left: parent.left
@@ -363,7 +411,29 @@ Rectangle {
                 font.pixelSize: 12
             }
 
-            // Zoom controls
+            Rectangle {
+                width: 36
+                height: 22
+                radius: 3
+                color: calendarPopup.visible ? "#555" : "#333"
+                Text {
+                    anchors.centerIn: parent
+                    text: "Cal"
+                    color: "white"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        var d = new Date(effectiveStartTs() * 1000)
+                        calYear = d.getFullYear()
+                        calMonth = d.getMonth() + 1
+                        calendarPopup.visible = !calendarPopup.visible
+                    }
+                }
+            }
+
             Rectangle {
                 width: 28
                 height: 22
@@ -414,7 +484,6 @@ Rectangle {
             }
         }
     }
-
     TimelineRuler {
         id: ruler
         anchors.left: parent.left
@@ -534,7 +603,6 @@ Rectangle {
             z: 80
         }
 
-        // Wheel zoom (NX-style)
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: function(event) {
@@ -544,7 +612,6 @@ Rectangle {
             }
         }
 
-        // Shift+drag to pan
         DragHandler {
             id: panHandler
             acceptedButtons: Qt.LeftButton
@@ -565,7 +632,6 @@ Rectangle {
             }
         }
 
-        // Double-click → fit full range
         TapHandler {
             acceptedButtons: Qt.LeftButton
             onDoubleTapped: resetZoom()
@@ -673,6 +739,155 @@ Rectangle {
         }
     }
 
+    Rectangle {
+        id: calendarPopup
+        visible: false
+        width: 280
+        height: 310
+        anchors.right: parent.right
+        anchors.rightMargin: 8
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 28
+        z: 200
+        color: "#1E1E1E"
+        border.color: "#555"
+        border.width: 1
+        radius: 6
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 10
+            spacing: 8
+
+            Row {
+                width: parent.width
+                spacing: 8
+                Rectangle {
+                    width: 28
+                    height: 28
+                    radius: 4
+                    color: "#333"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "<"
+                        color: "white"
+                        font.pixelSize: 14
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            calMonth -= 1
+                            if (calMonth < 1) {
+                                calMonth = 12
+                                calYear -= 1
+                            }
+                        }
+                    }
+                }
+                Text {
+                    width: parent.width - 72
+                    height: 28
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    text: calMonthName()
+                    color: "white"
+                    font.pixelSize: 14
+                    font.bold: true
+                }
+                Rectangle {
+                    width: 28
+                    height: 28
+                    radius: 4
+                    color: "#333"
+                    Text {
+                        anchors.centerIn: parent
+                        text: ">"
+                        color: "white"
+                        font.pixelSize: 14
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            calMonth += 1
+                            if (calMonth > 12) {
+                                calMonth = 1
+                                calYear += 1
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row {
+                width: parent.width
+                Repeater {
+                    model: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+                    Text {
+                        width: parent.width / 7
+                        height: 20
+                        horizontalAlignment: Text.AlignHCenter
+                        text: modelData
+                        color: "#888"
+                        font.pixelSize: 11
+                    }
+                }
+            }
+
+            Grid {
+                id: dayGrid
+                width: parent.width
+                columns: 7
+                spacing: 2
+                Repeater {
+                    model: 42
+                    Rectangle {
+                        property int dayNum: calCellDay(index)
+                        property bool hasRec: dayNum > 0 && dayHasRecording(calYear, calMonth, dayNum)
+                        property bool isToday: {
+                            var n = new Date()
+                            return dayNum > 0
+                                && calYear === n.getFullYear()
+                                && calMonth === (n.getMonth() + 1)
+                                && dayNum === n.getDate()
+                        }
+                        width: (dayGrid.width - 12) / 7
+                        height: 32
+                        radius: 4
+                        color: {
+                            if (dayNum <= 0)
+                                return "transparent"
+                            if (hasRec)
+                                return "#1B5E20"
+                            return "#2A2A2A"
+                        }
+                        border.color: isToday ? "#FFC107" : "transparent"
+                        border.width: isToday ? 1 : 0
+                        Text {
+                            anchors.centerIn: parent
+                            text: dayNum > 0 ? dayNum : ""
+                            color: hasRec ? "#A5D6A7" : (dayNum > 0 ? "#CCC" : "transparent")
+                            font.pixelSize: 12
+                            font.bold: hasRec
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: dayNum > 0
+                            onClicked: jumpToDay(calYear, calMonth, dayNum)
+                        }
+                    }
+                }
+            }
+
+            Text {
+                width: parent.width
+                text: "Green = has recording. Click a day to jump."
+                color: "#777"
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+        }
+    }
+
     Text {
         anchors.left: parent.left
         anchors.bottom: parent.bottom
@@ -682,7 +897,7 @@ Rectangle {
                 return ""
             return recordings.length + " rec, "
                  + visibleMotionCount() + "/" + motionPoints.length + " motion, "
-                 + events.length + " events — wheel=zoom, Shift+drag=pan, dbl-click=reset"
+                 + events.length + " events — wheel=zoom, Shift+drag=pan, Cal=date"
         }
         color: "#777777"
         font.pixelSize: 10
