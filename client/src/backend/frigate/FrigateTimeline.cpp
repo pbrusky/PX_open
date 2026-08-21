@@ -7,11 +7,12 @@
 #include <QNetworkReply>
 #include <QUrlQuery>
 #include <QDateTime>
+#include <QTimeZone>
 #include <algorithm>
 
 namespace {
 
-QVariantList mergeTouchingOnly(QVariantList blocks, double gapTol = 3.0)
+QVariantList mergeTouchingOnly(QVariantList blocks, double gapTol = 120.0)
 {
     if (blocks.isEmpty())
         return blocks;
@@ -40,6 +41,35 @@ QVariantList mergeTouchingOnly(QVariantList blocks, double gapTol = 3.0)
     }
     out.append(cur);
     return out;
+}
+
+QVariantList capMotionPoints(QVariantList points, int maxKeep = 400)
+{
+    if (points.size() <= maxKeep)
+        return points;
+
+    std::sort(points.begin(), points.end(), [](const QVariant& a, const QVariant& b) {
+        return a.toMap().value(QStringLiteral("motion")).toDouble()
+             > b.toMap().value(QStringLiteral("motion")).toDouble();
+    });
+    QVariantList top;
+    top.reserve(maxKeep);
+    for (int i = 0; i < maxKeep; ++i)
+        top.append(points.at(i));
+
+    std::sort(top.begin(), top.end(), [](const QVariant& a, const QVariant& b) {
+        return a.toMap().value(QStringLiteral("start")).toDouble()
+             < b.toMap().value(QStringLiteral("start")).toDouble();
+    });
+    return top;
+}
+
+QString systemTzName()
+{
+    const QByteArray id = QTimeZone::systemTimeZoneId();
+    if (!id.isEmpty())
+        return QString::fromUtf8(id);
+    return QStringLiteral("UTC");
 }
 
 } // namespace
@@ -71,24 +101,23 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         emit recordingsLoaded(cameraId, QVariantList());
         return;
     }
-
-    if (m_recordingsByCamera.contains(cameraId)
-            && !m_recordingsByCamera.value(cameraId).isEmpty()) {
-        emit recordingsLoaded(cameraId, m_recordingsByCamera.value(cameraId));
-    }
-
-    loadRecordingsFallback(cameraId);
+    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
+    loadRecordingsRange(cameraId, nowSec - 24 * 3600, nowSec);
+    loadRecordingDays(cameraId);
 }
 
-void FrigateTimeline::loadRecordingsFallback(const QString& cameraId)
+void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
 {
-    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    const qint64 afterSec = nowSec - 24 * 3600;
+    if (m_server.isEmpty() || cameraId.isEmpty()) {
+        m_recordingsByCamera[cameraId] = QVariantList();
+        emit recordingsLoaded(cameraId, QVariantList());
+        return;
+    }
 
     QUrl url(QStringLiteral("%1/api/%2/recordings").arg(m_server, cameraId));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
-    query.addQueryItem(QStringLiteral("before"), QString::number(nowSec));
+    query.addQueryItem(QStringLiteral("before"), QString::number(beforeSec));
     url.setQuery(query);
 
     QNetworkRequest req(url);
@@ -122,13 +151,106 @@ void FrigateTimeline::loadRecordingsFallback(const QString& cameraId)
             }
         }
 
-        segments = mergeTouchingOnly(segments, 3.0);
+        segments = mergeTouchingOnly(segments, 120.0);
         m_recordingsByCamera[cameraId] = segments;
         emit recordingsLoaded(cameraId, segments);
     });
 }
 
+void FrigateTimeline::loadRecordingDays(const QString& cameraId)
+{
+    if (m_server.isEmpty() || cameraId.isEmpty()) {
+        m_recordingDaysByCamera[cameraId] = QStringList();
+        emit recordingDaysLoaded(cameraId, QStringList());
+        return;
+    }
+
+    QUrl url(QStringLiteral("%1/api/recordings/summary").arg(m_server));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("cameras"), cameraId);
+    query.addQueryItem(QStringLiteral("timezone"), systemTzName());
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    QNetworkReply* reply = m_net->get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId]() {
+        const QByteArray data = reply->readAll();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        reply->deleteLater();
+
+        QStringList days;
+        if (status < 400) {
+            const QJsonDocument doc = QJsonDocument::fromJson(data);
+            if (doc.isObject()) {
+                const QJsonObject obj = doc.object();
+                for (auto it = obj.begin(); it != obj.end(); ++it) {
+                    if (it.key().size() >= 10)
+                        days.append(it.key().left(10));
+                }
+            }
+        }
+
+        if (!days.isEmpty()) {
+            days.removeDuplicates();
+            days.sort();
+            m_recordingDaysByCamera[cameraId] = days;
+            emit recordingDaysLoaded(cameraId, days);
+            return;
+        }
+
+        // Fallback: per-camera hourly summary
+        QUrl url2(QStringLiteral("%1/api/%2/recordings/summary").arg(m_server, cameraId));
+        QUrlQuery q2;
+        q2.addQueryItem(QStringLiteral("timezone"), systemTzName());
+        url2.setQuery(q2);
+
+        QNetworkRequest req2(url2);
+        QNetworkReply* reply2 = m_net->get(req2);
+        connect(reply2, &QNetworkReply::finished, this, [this, reply2, cameraId]() {
+            const QByteArray data2 = reply2->readAll();
+            const int status2 = reply2->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            reply2->deleteLater();
+
+            QStringList days2;
+            if (status2 < 400) {
+                const QJsonDocument doc2 = QJsonDocument::fromJson(data2);
+                if (doc2.isArray()) {
+                    for (const QJsonValue& v : doc2.array()) {
+                        const QJsonObject o = v.toObject();
+                        QString date = o.value(QStringLiteral("date")).toString();
+                        if (date.isEmpty()) {
+                            const QString hour = o.value(QStringLiteral("hour")).toString();
+                            if (hour.size() >= 10)
+                                date = hour.left(10);
+                        }
+                        if (date.size() >= 10)
+                            days2.append(date.left(10));
+                    }
+                } else if (doc2.isObject()) {
+                    const QJsonObject root = doc2.object();
+                    for (auto it = root.begin(); it != root.end(); ++it) {
+                        if (it.key().size() >= 10)
+                            days2.append(it.key().left(10));
+                    }
+                }
+            }
+
+            days2.removeDuplicates();
+            days2.sort();
+            m_recordingDaysByCamera[cameraId] = days2;
+            emit recordingDaysLoaded(cameraId, days2);
+        });
+    });
+}
+
 void FrigateTimeline::loadEvents(const QString& cameraId)
+{
+    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
+    loadEventsRange(cameraId, nowSec - 24 * 3600, nowSec);
+}
+
+void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
 {
     if (m_server.isEmpty() || cameraId.isEmpty()) {
         m_eventsByCamera[cameraId] = QVariantList();
@@ -136,17 +258,11 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
         return;
     }
 
-    if (m_eventsByCamera.contains(cameraId))
-        emit eventsLoaded(cameraId, m_eventsByCamera.value(cameraId));
-
-    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    const qint64 afterSec = nowSec - 24 * 3600;
-
     QUrl url(QStringLiteral("%1/api/events").arg(m_server));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
-    query.addQueryItem(QStringLiteral("before"), QString::number(nowSec));
+    query.addQueryItem(QStringLiteral("before"), QString::number(beforeSec));
     query.addQueryItem(QStringLiteral("limit"), QStringLiteral("500"));
     query.addQueryItem(QStringLiteral("include_thumbnails"), QStringLiteral("0"));
     url.setQuery(query);
@@ -189,26 +305,24 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
 
 void FrigateTimeline::loadMotionActivity(const QString& cameraId)
 {
+    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
+    loadMotionActivityRange(cameraId, nowSec - 24 * 3600, nowSec);
+}
+
+void FrigateTimeline::loadMotionActivityRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
+{
     if (m_server.isEmpty() || cameraId.isEmpty()) {
         m_motionByCamera[cameraId] = QVariantList();
         emit motionActivityLoaded(cameraId, QVariantList());
         return;
     }
 
-    if (m_motionByCamera.contains(cameraId)
-            && !m_motionByCamera.value(cameraId).isEmpty()) {
-        emit motionActivityLoaded(cameraId, m_motionByCamera.value(cameraId));
-    }
-
-    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    const qint64 afterSec = nowSec - 24 * 3600;
-
     QUrl url(QStringLiteral("%1/api/review/activity/motion").arg(m_server));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
-    query.addQueryItem(QStringLiteral("before"), QString::number(nowSec));
-    query.addQueryItem(QStringLiteral("scale"), QStringLiteral("30"));
+    query.addQueryItem(QStringLiteral("before"), QString::number(beforeSec));
+    query.addQueryItem(QStringLiteral("scale"), QStringLiteral("300"));
     url.setQuery(query);
 
     QNetworkRequest req(url);
@@ -247,6 +361,7 @@ void FrigateTimeline::loadMotionActivity(const QString& cameraId)
             }
         }
 
+        points = capMotionPoints(points, 400);
         m_motionByCamera[cameraId] = points;
         emit motionActivityLoaded(cameraId, points);
     });
@@ -265,6 +380,11 @@ QVariantList FrigateTimeline::getEvents(const QString& cameraId) const
 QVariantList FrigateTimeline::getMotionActivity(const QString& cameraId) const
 {
     return m_motionByCamera.value(cameraId);
+}
+
+QStringList FrigateTimeline::getRecordingDays(const QString& cameraId) const
+{
+    return m_recordingDaysByCamera.value(cameraId);
 }
 
 void FrigateTimeline::loadPlaybackWindow(const QString& cameraId, qint64 timestampMs)
@@ -286,4 +406,5 @@ void FrigateTimeline::clearCamera(const QString& cameraId)
     m_recordingsByCamera.remove(cameraId);
     m_eventsByCamera.remove(cameraId);
     m_motionByCamera.remove(cameraId);
+    m_recordingDaysByCamera.remove(cameraId);
 }

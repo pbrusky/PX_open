@@ -64,6 +64,8 @@ FrigateAPI::FrigateAPI(QObject* parent)
             this, &FrigateAPI::eventsLoaded);
     connect(m_timeline, &FrigateTimeline::motionActivityLoaded,
             this, &FrigateAPI::motionActivityLoaded);
+    connect(m_timeline, &FrigateTimeline::recordingDaysLoaded,
+            this, &FrigateAPI::recordingDaysLoaded);
 
     connect(m_playback, &FrigatePlayback::playbackPositionChanged,
             this, &FrigateAPI::playbackPositionChanged);
@@ -238,6 +240,31 @@ void FrigateAPI::loadEvents(const QString& cameraId)
 void FrigateAPI::loadMotionActivity(const QString& cameraId)
 {
     m_timeline->loadMotionActivity(cameraId);
+}
+
+void FrigateAPI::loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
+{
+    m_timeline->loadRecordingsRange(cameraId, afterSec, beforeSec);
+}
+
+void FrigateAPI::loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
+{
+    m_timeline->loadEventsRange(cameraId, afterSec, beforeSec);
+}
+
+void FrigateAPI::loadMotionActivityRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
+{
+    m_timeline->loadMotionActivityRange(cameraId, afterSec, beforeSec);
+}
+
+void FrigateAPI::loadRecordingDays(const QString& cameraId)
+{
+    m_timeline->loadRecordingDays(cameraId);
+}
+
+QStringList FrigateAPI::getRecordingDaysForCamera(const QString& cameraId)
+{
+    return m_timeline->getRecordingDays(cameraId);
 }
 
 QVariantList FrigateAPI::getRecordingsForCamera(const QString& cameraId)
