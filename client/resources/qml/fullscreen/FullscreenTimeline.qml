@@ -111,9 +111,6 @@ Rectangle {
                     setDataRange(startTs, endTs)
                 else
                     clampView()
-
-                if (_fixedDayMode)
-                    Qt.callLater(seekToFirstRecording)
             }
         }
 
@@ -376,43 +373,25 @@ Rectangle {
     function jumpToDay(y, m, d) {
         var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
         var dayEnd = dayStart + 86400
-
         _fixedDayMode = true
-        dataStartTs = dayStart
-        dataEndTs = dayEnd
+        if (dayStart < dataStartBound())
+            dataStartTs = dayStart
+        if (dayEnd > dataEndBound())
+            dataEndTs = dayEnd
         viewStartTs = dayStart
         viewEndTs = dayEnd
-        recordings = []
-        events = []
-        motionPoints = []
+        clampView()
         calendarPopup.visible = false
 
         var id = cameraId !== "" ? cameraId : cameraName
-        if (!frigateRef || id === "")
-            return
-
-        if (typeof frigateRef.loadRecordingsRange === "function")
-            frigateRef.loadRecordingsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
-        if (typeof frigateRef.loadEventsRange === "function")
-            frigateRef.loadEventsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
-        if (typeof frigateRef.loadMotionActivityRange === "function")
-            frigateRef.loadMotionActivityRange(id, Math.floor(dayStart), Math.floor(dayEnd))
-    }
-
-    function seekToFirstRecording() {
-        if (!recordings || recordings.length === 0)
-            return
-        var s = normalizeSec(recordings[0].start)
-        if (s <= 0)
-            return
-        var seekSec = s + 2
-        var nowSec = Date.now() / 1000
-        if (seekSec > nowSec - 35)
-            seekSec = nowSec - 35
-        if (seekSec < 1)
-            return
-        playbackPositionMs = seekSec * 1000
-        seekRequested(seekSec * 1000)
+        if (frigateRef && id !== "") {
+            if (typeof frigateRef.loadRecordingsRange === "function")
+                frigateRef.loadRecordingsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
+            if (typeof frigateRef.loadEventsRange === "function")
+                frigateRef.loadEventsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
+            if (typeof frigateRef.loadMotionActivityRange === "function")
+                frigateRef.loadMotionActivityRange(id, Math.floor(dayStart), Math.floor(dayEnd))
+        }
     }
 
     TimelineStatusBar {

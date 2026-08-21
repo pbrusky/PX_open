@@ -75,21 +75,17 @@ Item {
 
         onReleased: function(mouse) {
             mouseHandler.released()
-
             if (mouse.button === Qt.LeftButton && !mouseHandler.didSeek) {
                 mouseHandler.didSeek = true
-                if (xToTimestamp)
-                    mouseHandler.seekRequested(xToTimestamp(mouse.x))
+                if (xToTimestamp) {
+                    var ts = xToTimestamp(mouse.x)
+                    if (ts > 0)
+                        mouseHandler.seekRequested(ts)
+                }
             }
-            // Keep time visible briefly after click; hide on exit
         }
 
         onClicked: function(mouse) {
-            if (mouse.button === Qt.LeftButton && !mouseHandler.didSeek) {
-                mouseHandler.didSeek = true
-                if (xToTimestamp)
-                    mouseHandler.seekRequested(xToTimestamp(mouse.x))
-            }
         }
 
         onExited: {

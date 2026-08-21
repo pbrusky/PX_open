@@ -30,6 +30,7 @@ Item {
     property bool _returningLive: false
     property int _seekGen: 0
     property int _activeSeekGen: -1
+    property bool seekArmed: false
 
     signal requestClose()
 
@@ -240,6 +241,13 @@ Item {
         id: closeArmTimer
         interval: 400
         onTriggered: root.closeEnabled = true
+    }
+
+    Timer {
+        id: seekArmTimer
+        interval: 600
+        repeat: false
+        onTriggered: root.seekArmed = true
     }
 
     Timer {
@@ -512,6 +520,11 @@ Item {
     function onTimelineSeek(tsMs) {
         if (!frigateRef)
             return
+        if (!root.seekArmed)
+            return
+        if (tsMs <= 0)
+            return
+
         var wall = Date.now()
         if (Math.abs(tsMs - root._lastSeekTs) < 200 && (wall - root._lastSeekWall) < 300)
             return
@@ -618,11 +631,22 @@ Item {
         _returningLive = false
         _seekGen = 0
         _activeSeekGen = -1
+        _lastSeekTs = -1
         trueMain = false
+        seekArmed = false
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
         apiConn.target = frigateRef
+
+        var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+
+        if (frigateRef && id !== "") {
+            if (typeof frigateRef.switchToLive === "function")
+                frigateRef.switchToLive(id)
+            else if (typeof frigateRef.stopPlayback === "function")
+                frigateRef.stopPlayback(id)
+        }
 
         liveLayers.cameraId = root.cameraId
         liveLayers.cameraName = root.cameraName
@@ -635,9 +659,21 @@ Item {
 
         playbackQueueConn.target = null
         playbackVideo.queue = null
+        root.playbackQueue = null
+
+        if (timelineLoader.item) {
+            timelineLoader.item.isPlayback = false
+            timelineLoader.item.playbackPositionMs = 0
+            timelineLoader.item.collapsed = true
+            timelineLoader.item.allowAutoReveal = false
+        }
 
         applyTimelineCamera()
         loadTimelineData()
+
+        Qt.callLater(function() {
+            seekArmTimer.restart()
+        })
     }
 
     function close() {
@@ -670,6 +706,8 @@ Item {
         _returningLive = false
         _seekGen = 0
         _activeSeekGen = -1
+        seekArmed = false
+        seekArmTimer.stop()
         closeArmTimer.stop()
         timelineHideTimer.stop()
         recordingsPollTimer.stop()
