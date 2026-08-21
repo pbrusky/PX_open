@@ -10,8 +10,19 @@ Rectangle {
     property bool allowAutoReveal: false
     property bool pointerInside: false
 
-    // Raise this to show fewer orange ticks (10 = busy, 25 = default, 50–100 = strong only)
     property real minMotion: 15
+
+    // Full data range (from Frigate recordings/motion)
+    property real dataStartTs: 0
+    property real dataEndTs: 0
+
+    // Visible window (zoom/pan) — seconds since epoch
+    property real viewStartTs: 0
+    property real viewEndTs: 0
+
+    // Min/max visible span (seconds): 30s … 7 days
+    readonly property real minViewSpan: 30
+    readonly property real maxViewSpan: 7 * 24 * 3600
 
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
@@ -43,7 +54,6 @@ Rectangle {
     property var recordings: []
     property var events: []
     property var motionPoints: []
-    // Must be real: epoch-ms does not fit in QML int (overflow hides the playhead).
     property real playbackPositionMs: 0
     property real startTs: 0
     property real endTs: 0
@@ -64,14 +74,13 @@ Rectangle {
         onTriggered: currentTimeMs = Date.now()
     }
 
-    // Advance the needle while a clip is playing (backend only reports seek start).
     Timer {
         interval: 250
         running: !collapsed && isPlayback && playbackPositionMs > 0
         repeat: true
         onTriggered: {
             var next = playbackPositionMs + interval
-            var endMs = effectiveEndTs() * 1000
+            var endMs = dataEndBound() * 1000
             if (endMs > 0 && next > endMs)
                 next = endMs
             playbackPositionMs = next
@@ -100,6 +109,7 @@ Rectangle {
             if (segments && segments.length > 0) {
                 startTs = Number(segments[0].start)
                 endTs = Number(segments[segments.length - 1].end)
+                setDataRange(startTs, endTs)
             }
         }
 
@@ -129,39 +139,134 @@ Rectangle {
         return t
     }
 
-    function applyMotionPoints(points) {
-        motionPoints = points || []
-        if (!motionPoints || motionPoints.length === 0)
-            return
-
-        var minT = startTs > 0 ? startTs : Number.MAX_VALUE
-        var maxT = endTs > 0 ? endTs : 0
-        for (var i = 0; i < motionPoints.length; ++i) {
-            var p = motionPoints[i]
-            var t = normalizeSec(p.start !== undefined ? p.start : p.start_time)
-            if (t <= 0)
-                continue
-            if (t < minT) minT = t
-            if (t > maxT) maxT = t
-        }
-        if (minT < Number.MAX_VALUE) {
-            if (startTs <= 0 || minT < startTs)
-                startTs = minT
-            if (maxT > endTs)
-                endTs = maxT
-        }
-    }
-
-    function effectiveStartTs() {
+    function dataStartBound() {
+        if (dataStartTs > 0)
+            return dataStartTs
         if (endTs > startTs)
             return startTs
         return Date.now() / 1000 - 3600
     }
 
-    function effectiveEndTs() {
+    function dataEndBound() {
+        if (dataEndTs > dataStartTs)
+            return dataEndTs
         if (endTs > startTs)
             return endTs
         return Date.now() / 1000
+    }
+
+    function setDataRange(s, e) {
+        s = normalizeSec(s)
+        e = normalizeSec(e)
+        if (e <= s)
+            return
+        if (dataStartTs <= 0 || s < dataStartTs)
+            dataStartTs = s
+        if (e > dataEndTs)
+            dataEndTs = e
+        // First time: fit full range
+        if (viewEndTs <= viewStartTs) {
+            viewStartTs = dataStartTs
+            viewEndTs = dataEndTs
+        }
+        clampView()
+    }
+
+    function applyMotionPoints(points) {
+        motionPoints = points || []
+        if (!motionPoints || motionPoints.length === 0)
+            return
+
+        var minT = dataStartBound()
+        var maxT = dataEndBound()
+        var first = true
+        for (var i = 0; i < motionPoints.length; ++i) {
+            var p = motionPoints[i]
+            var t = normalizeSec(p.start !== undefined ? p.start : p.start_time)
+            if (t <= 0)
+                continue
+            if (first) {
+                minT = t
+                maxT = t
+                first = false
+            } else {
+                if (t < minT) minT = t
+                if (t > maxT) maxT = t
+            }
+        }
+        if (!first)
+            setDataRange(minT, maxT)
+    }
+
+    function clampView() {
+        var ds = dataStartBound()
+        var de = dataEndBound()
+        var span = viewEndTs - viewStartTs
+        if (span < minViewSpan)
+            span = minViewSpan
+        if (span > maxViewSpan)
+            span = maxViewSpan
+        if (span > de - ds && de > ds)
+            span = de - ds
+
+        if (viewStartTs < ds)
+            viewStartTs = ds
+        if (viewStartTs + span > de) {
+            viewStartTs = de - span
+            if (viewStartTs < ds)
+                viewStartTs = ds
+        }
+        viewEndTs = viewStartTs + span
+        if (viewEndTs > de)
+            viewEndTs = de
+        if (viewEndTs <= viewStartTs)
+            viewEndTs = viewStartTs + minViewSpan
+    }
+
+    function effectiveStartTs() {
+        if (viewEndTs > viewStartTs)
+            return viewStartTs
+        return dataStartBound()
+    }
+
+    function effectiveEndTs() {
+        if (viewEndTs > viewStartTs)
+            return viewEndTs
+        return dataEndBound()
+    }
+
+    // Zoom centered on time under cursor (cursorX relative to trackBg)
+    function zoomAt(cursorX, factor) {
+        var s = effectiveStartTs()
+        var e = effectiveEndTs()
+        var w = trackBg.width > 0 ? trackBg.width : 1
+        var ratio = Math.max(0, Math.min(1, cursorX / w))
+        var center = s + ratio * (e - s)
+        var span = (e - s) / factor
+        if (span < minViewSpan)
+            span = minViewSpan
+        if (span > maxViewSpan)
+            span = maxViewSpan
+        viewStartTs = center - span * ratio
+        viewEndTs = viewStartTs + span
+        clampView()
+    }
+
+    function panByPixels(dx) {
+        var s = effectiveStartTs()
+        var e = effectiveEndTs()
+        var w = trackBg.width > 0 ? trackBg.width : 1
+        var span = e - s
+        var dt = -(dx / w) * span
+        viewStartTs += dt
+        viewEndTs += dt
+        clampView()
+    }
+
+    function resetZoom() {
+        viewStartTs = dataStartBound()
+        viewEndTs = dataEndBound()
+        clampView()
     }
 
     function timestampToX(tsMs) {
@@ -201,6 +306,17 @@ Rectangle {
         return n
     }
 
+    function viewSpanLabel() {
+        var span = effectiveEndTs() - effectiveStartTs()
+        if (span < 90)
+            return Math.round(span) + "s"
+        if (span < 3600)
+            return Math.round(span / 60) + "m"
+        if (span < 86400)
+            return (span / 3600).toFixed(1) + "h"
+        return (span / 86400).toFixed(1) + "d"
+    }
+
     Rectangle {
         id: statusBar
         anchors.left: parent.left
@@ -227,19 +343,75 @@ Rectangle {
             font.bold: true
         }
 
-        Text {
+        Row {
             anchors.right: parent.right
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
-            text: {
-                var s = effectiveStartTs()
-                var e = effectiveEndTs()
-                return Qt.formatDateTime(new Date(s * 1000), "hh:mm:ss")
-                       + "  -  "
-                       + Qt.formatDateTime(new Date(e * 1000), "hh:mm:ss")
+            spacing: 10
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: {
+                    var s = effectiveStartTs()
+                    var e = effectiveEndTs()
+                    return Qt.formatDateTime(new Date(s * 1000), "hh:mm:ss")
+                           + "  -  "
+                           + Qt.formatDateTime(new Date(e * 1000), "hh:mm:ss")
+                           + "  (" + viewSpanLabel() + ")"
+                }
+                color: "#888888"
+                font.pixelSize: 12
             }
-            color: "#888888"
-            font.pixelSize: 12
+
+            // Zoom controls
+            Rectangle {
+                width: 28
+                height: 22
+                radius: 3
+                color: "#333"
+                Text {
+                    anchors.centerIn: parent
+                    text: "−"
+                    color: "white"
+                    font.pixelSize: 16
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: zoomAt(trackBg.width / 2, 0.7)
+                }
+            }
+            Rectangle {
+                width: 28
+                height: 22
+                radius: 3
+                color: "#333"
+                Text {
+                    anchors.centerIn: parent
+                    text: "+"
+                    color: "white"
+                    font.pixelSize: 16
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: zoomAt(trackBg.width / 2, 1.4)
+                }
+            }
+            Rectangle {
+                width: 44
+                height: 22
+                radius: 3
+                color: "#333"
+                Text {
+                    anchors.centerIn: parent
+                    text: "1:1"
+                    color: "white"
+                    font.pixelSize: 11
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: resetZoom()
+                }
+            }
         }
     }
 
@@ -285,7 +457,6 @@ Rectangle {
             z: 1
         }
 
-        // MOTION TICKS (filtered by minMotion)
         Repeater {
             model: timeline.motionPoints
             z: 5
@@ -317,10 +488,11 @@ Rectangle {
                 opacity: 1.0
                 x: timeline.timestampToX(sec * 1000) - 1
                 visible: sec > 0 && mot >= timeline.minMotion
+                        && sec >= timeline.effectiveStartTs()
+                        && sec <= timeline.effectiveEndTs()
             }
         }
 
-        // Event ticks
         Repeater {
             model: timeline.events
             z: 6
@@ -344,10 +516,11 @@ Rectangle {
                 color: "#FFC107"
                 x: timeline.timestampToX(sec * 1000) - 1
                 visible: sec > 0
+                        && sec >= timeline.effectiveStartTs()
+                        && sec <= timeline.effectiveEndTs()
             }
         }
 
-        // Current playback / live position on the motion bar
         Rectangle {
             id: trackPlayhead
             width: 3
@@ -359,6 +532,43 @@ Rectangle {
             border.width: 1
             visible: timeline.playheadTsMs > 0
             z: 80
+        }
+
+        // Wheel zoom (NX-style)
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: function(event) {
+                var factor = event.angleDelta.y > 0 ? 1.25 : 0.8
+                zoomAt(event.x, factor)
+                event.accepted = true
+            }
+        }
+
+        // Shift+drag to pan
+        DragHandler {
+            id: panHandler
+            acceptedButtons: Qt.LeftButton
+            acceptedModifiers: Qt.ShiftModifier
+            target: null
+            property real lastX: 0
+            onActiveChanged: {
+                if (active)
+                    lastX = centroid.position.x
+            }
+            onTranslationChanged: {
+                if (!active)
+                    return
+                var dx = centroid.position.x - lastX
+                lastX = centroid.position.x
+                if (Math.abs(dx) > 0.5)
+                    panByPixels(dx)
+            }
+        }
+
+        // Double-click → fit full range
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onDoubleTapped: resetZoom()
         }
     }
 
@@ -403,7 +613,7 @@ Rectangle {
         }
         trackHeight: trackBg.height
         visible: !collapsed
-        enabled: !collapsed
+        enabled: !collapsed && !panHandler.active
 
         onSeekRequested: function(tsMs) {
             timeline.playbackPositionMs = tsMs
@@ -471,8 +681,8 @@ Rectangle {
             if (collapsed)
                 return ""
             return recordings.length + " rec, "
-                 + visibleMotionCount() + "/" + motionPoints.length + " motion (min " + minMotion + "), "
-                 + events.length + " events — green=record, orange=motion"
+                 + visibleMotionCount() + "/" + motionPoints.length + " motion, "
+                 + events.length + " events — wheel=zoom, Shift+drag=pan, dbl-click=reset"
         }
         color: "#777777"
         font.pixelSize: 10
