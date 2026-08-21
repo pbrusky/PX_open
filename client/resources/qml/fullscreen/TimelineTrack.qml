@@ -24,7 +24,7 @@ Rectangle {
         endTs: timeline ? timeline.effectiveEndTs() : 0
         zoom: 1.0
         pan: 0
-        timelineWidth: trackBg.width
+        timelineWidth: timeline ? Math.max(1, timeline.width - 8) : width
         timestampToX: timeline ? timeline.timestampToX : function(t) { return 0 }
         z: 1
     }

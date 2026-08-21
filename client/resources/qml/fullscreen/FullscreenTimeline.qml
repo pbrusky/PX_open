@@ -184,15 +184,19 @@ Rectangle {
         if (span < minViewSpan) span = minViewSpan
         if (span > maxViewSpan) span = maxViewSpan
         if (span > de - ds && de > ds) span = de - ds
-        if (viewStartTs < ds) viewStartTs = ds
-        if (viewStartTs + span > de) {
-            viewStartTs = de - span
-            if (viewStartTs < ds) viewStartTs = ds
+        var ns = viewStartTs
+        if (ns < ds) ns = ds
+        if (ns + span > de) {
+            ns = de - span
+            if (ns < ds) ns = ds
         }
-        viewEndTs = viewStartTs + span
-        if (viewEndTs > de) viewEndTs = de
-        if (viewEndTs <= viewStartTs)
-            viewEndTs = viewStartTs + minViewSpan
+        var ne = ns + span
+        if (ne > de) ne = de
+        if (ne <= ns) ne = ns + minViewSpan
+        if (Math.abs(ns - viewStartTs) > 0.001)
+            viewStartTs = ns
+        if (Math.abs(ne - viewEndTs) > 0.001)
+            viewEndTs = ne
     }
     function effectiveStartTs() {
         if (viewEndTs > viewStartTs)
@@ -204,9 +208,12 @@ Rectangle {
             return viewEndTs
         return dataEndBound()
     }
+    function mapWidth() {
+        return Math.max(1, width - 8)
+    }
     function zoomAt(cursorX, factor) {
         var s = effectiveStartTs(), e = effectiveEndTs()
-        var w = track.width > 0 ? track.width : 1
+        var w = mapWidth()
         var ratio = Math.max(0, Math.min(1, cursorX / w))
         var center = s + ratio * (e - s)
         var span = (e - s) / factor
@@ -218,7 +225,7 @@ Rectangle {
     }
     function panByPixels(dx) {
         var s = effectiveStartTs(), e = effectiveEndTs()
-        var w = track.width > 0 ? track.width : 1
+        var w = mapWidth()
         var span = e - s
         var dt = -(dx / w) * span
         viewStartTs += dt
@@ -232,16 +239,16 @@ Rectangle {
     }
     function timestampToX(tsMs) {
         var s = effectiveStartTs(), e = effectiveEndTs()
-        var w = track.width > 0 ? track.width : Math.max(1, width - 8)
-        if (e <= s || w <= 0)
+        var w = mapWidth()
+        if (e <= s)
             return 0
         var ratio = (tsMs - s * 1000) / ((e - s) * 1000)
         return Math.max(0, Math.min(w, ratio * w))
     }
     function xToTimestamp(x) {
         var s = effectiveStartTs(), e = effectiveEndTs()
-        var w = track.width > 0 ? track.width : Math.max(1, width - 8)
-        var ratio = Math.max(0, Math.min(1, x / Math.max(1, w)))
+        var w = mapWidth()
+        var ratio = Math.max(0, Math.min(1, x / w))
         return (s + ratio * (e - s)) * 1000
     }
     function formatFull(tsMs) {
@@ -316,8 +323,8 @@ Rectangle {
             }
             calendarPopup.visible = !calendarPopup.visible
         }
-        onZoomOut: zoomAt(track.width / 2, 0.7)
-        onZoomIn: zoomAt(track.width / 2, 1.4)
+        onZoomOut: zoomAt(mapWidth() / 2, 0.7)
+        onZoomIn: zoomAt(mapWidth() / 2, 1.4)
         onResetZoom: resetZoom()
     }
 

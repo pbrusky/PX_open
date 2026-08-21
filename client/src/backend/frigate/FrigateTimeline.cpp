@@ -11,7 +11,8 @@
 
 namespace {
 
-QVariantList mergeTouchingOnly(QVariantList blocks, double gapTol = 3.0)
+// Wider gap collapses continuous recording into fewer UI blocks (avoids freeze)
+QVariantList mergeTouchingOnly(QVariantList blocks, double gapTol = 120.0)
 {
     if (blocks.isEmpty())
         return blocks;
@@ -40,6 +41,28 @@ QVariantList mergeTouchingOnly(QVariantList blocks, double gapTol = 3.0)
     }
     out.append(cur);
     return out;
+}
+
+// Cap motion ticks so QML Repeaters stay responsive
+QVariantList capMotionPoints(QVariantList points, int maxKeep = 1500)
+{
+    if (points.size() <= maxKeep)
+        return points;
+
+    std::sort(points.begin(), points.end(), [](const QVariant& a, const QVariant& b) {
+        return a.toMap().value(QStringLiteral("motion")).toDouble()
+             > b.toMap().value(QStringLiteral("motion")).toDouble();
+    });
+    QVariantList top;
+    top.reserve(maxKeep);
+    for (int i = 0; i < maxKeep; ++i)
+        top.append(points.at(i));
+
+    std::sort(top.begin(), top.end(), [](const QVariant& a, const QVariant& b) {
+        return a.toMap().value(QStringLiteral("start")).toDouble()
+             < b.toMap().value(QStringLiteral("start")).toDouble();
+    });
+    return top;
 }
 
 } // namespace
@@ -72,18 +95,13 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         return;
     }
 
-    if (m_recordingsByCamera.contains(cameraId)
-            && !m_recordingsByCamera.value(cameraId).isEmpty()) {
-        emit recordingsLoaded(cameraId, m_recordingsByCamera.value(cameraId));
-    }
-
     loadRecordingsFallback(cameraId);
 }
 
 void FrigateTimeline::loadRecordingsFallback(const QString& cameraId)
 {
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    const qint64 afterSec = nowSec - 24 * 3600;
+    const qint64 afterSec = nowSec - 7 * 24 * 3600;
 
     QUrl url(QStringLiteral("%1/api/%2/recordings").arg(m_server, cameraId));
     QUrlQuery query;
@@ -122,7 +140,7 @@ void FrigateTimeline::loadRecordingsFallback(const QString& cameraId)
             }
         }
 
-        segments = mergeTouchingOnly(segments, 3.0);
+        segments = mergeTouchingOnly(segments, 120.0);
         m_recordingsByCamera[cameraId] = segments;
         emit recordingsLoaded(cameraId, segments);
     });
@@ -136,11 +154,8 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
         return;
     }
 
-    if (m_eventsByCamera.contains(cameraId))
-        emit eventsLoaded(cameraId, m_eventsByCamera.value(cameraId));
-
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    const qint64 afterSec = nowSec - 24 * 3600;
+    const qint64 afterSec = nowSec - 7 * 24 * 3600;
 
     QUrl url(QStringLiteral("%1/api/events").arg(m_server));
     QUrlQuery query;
@@ -195,20 +210,15 @@ void FrigateTimeline::loadMotionActivity(const QString& cameraId)
         return;
     }
 
-    if (m_motionByCamera.contains(cameraId)
-            && !m_motionByCamera.value(cameraId).isEmpty()) {
-        emit motionActivityLoaded(cameraId, m_motionByCamera.value(cameraId));
-    }
-
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    const qint64 afterSec = nowSec - 24 * 3600;
+    const qint64 afterSec = nowSec - 7 * 24 * 3600;
 
     QUrl url(QStringLiteral("%1/api/review/activity/motion").arg(m_server));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
     query.addQueryItem(QStringLiteral("before"), QString::number(nowSec));
-    query.addQueryItem(QStringLiteral("scale"), QStringLiteral("30"));
+    query.addQueryItem(QStringLiteral("scale"), QStringLiteral("300"));
     url.setQuery(query);
 
     QNetworkRequest req(url);
@@ -247,6 +257,7 @@ void FrigateTimeline::loadMotionActivity(const QString& cameraId)
             }
         }
 
+        points = capMotionPoints(points, 1500);
         m_motionByCamera[cameraId] = points;
         emit motionActivityLoaded(cameraId, points);
     });
