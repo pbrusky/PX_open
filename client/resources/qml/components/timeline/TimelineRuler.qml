@@ -5,10 +5,11 @@ Item {
     property real startTs
     property real endTs
     property int segmentCount: 12
+    property int labelPixelSize: 14   // was 10 — increase further if needed
 
     anchors.left: parent.left
     anchors.right: parent.right
-    height: 22
+    height: 28                        // was 22 — room for larger text
 
     function labelFor(index) {
         if (endTs <= startTs)
@@ -16,7 +17,6 @@ Item {
         var frac = index / segmentCount
         var tsMs = (startTs + frac * (endTs - startTs)) * 1000
         var spanSec = endTs - startTs
-        // Short range → show seconds; multi-hour → date + time
         if (spanSec <= 3600)
             return Qt.formatDateTime(new Date(tsMs), "hh:mm:ss")
         if (spanSec <= 24 * 3600)
@@ -36,28 +36,28 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 width: 1
-                height: index % 2 === 0 ? 10 : 6
+                height: index % 2 === 0 ? 12 : 7
                 color: "#666666"
             }
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
-                font.pixelSize: 10
-                color: "#CCCCCC"
+                font.pixelSize: ruler.labelPixelSize
+                font.bold: false
+                color: "#EEEEEE"
                 text: ruler.labelFor(index)
-                // Hide edge labels that would clip
                 visible: index > 0 && index < segmentCount
             }
         }
     }
 
-    // Always show start / end clearly
+    // Start / end — slightly bolder and same size
     Text {
         anchors.left: parent.left
         anchors.leftMargin: 4
         anchors.top: parent.top
-        font.pixelSize: 10
+        font.pixelSize: ruler.labelPixelSize
         font.bold: true
         color: "#FFFFFF"
         text: ruler.labelFor(0)
@@ -66,7 +66,7 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: 4
         anchors.top: parent.top
-        font.pixelSize: 10
+        font.pixelSize: ruler.labelPixelSize
         font.bold: true
         color: "#FFFFFF"
         text: ruler.labelFor(segmentCount)

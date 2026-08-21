@@ -8,7 +8,6 @@
 #include <QUrlQuery>
 #include <QDateTime>
 #include <QTimeZone>
-#include <QDebug>
 #include <algorithm>
 
 namespace {
@@ -166,14 +165,11 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
         return;
     }
 
-    // Prefer global summary: { "YYYY-MM-DD": true, ... }
     QUrl url(QStringLiteral("%1/api/recordings/summary").arg(m_server));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("timezone"), systemTzName());
     url.setQuery(query);
-
-    qDebug() << "[Timeline] loadRecordingDays" << url.toString();
 
     QNetworkRequest req(url);
     QNetworkReply* reply = m_net->get(req);
@@ -198,7 +194,6 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
         if (!days.isEmpty()) {
             days.removeDuplicates();
             days.sort();
-            qDebug() << "[Timeline] recording days (global summary):" << days.size() << days;
             m_recordingDaysByCamera[cameraId] = days;
             emit recordingDaysLoaded(cameraId, days);
             return;
@@ -209,8 +204,6 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
         QUrlQuery q2;
         q2.addQueryItem(QStringLiteral("timezone"), systemTzName());
         url2.setQuery(q2);
-
-        qDebug() << "[Timeline] loadRecordingDays fallback" << url2.toString();
 
         QNetworkRequest req2(url2);
         QNetworkReply* reply2 = m_net->get(req2);
@@ -245,7 +238,6 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
 
             days2.removeDuplicates();
             days2.sort();
-            qDebug() << "[Timeline] recording days (camera summary):" << days2.size() << days2;
             m_recordingDaysByCamera[cameraId] = days2;
             emit recordingDaysLoaded(cameraId, days2);
         });

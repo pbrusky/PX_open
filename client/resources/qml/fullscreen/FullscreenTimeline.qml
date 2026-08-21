@@ -19,6 +19,9 @@ Rectangle {
     readonly property real maxViewSpan: 7 * 24 * 3600
     readonly property real defaultViewSpan: 24 * 3600
 
+    property bool _viewLock: false
+    property bool _fixedDayMode: false
+
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
 
@@ -50,7 +53,7 @@ Rectangle {
     property var recordings: []
     property var events: []
     property var motionPoints: []
-    property var recordingDays: []   // ["YYYY-MM-DD", ...] from Frigate summary
+    property var recordingDays: []
     property real playbackPositionMs: 0
     property real startTs: 0
     property real endTs: 0
@@ -100,29 +103,38 @@ Rectangle {
         function onRecordingsLoaded(id, segments) {
             if (id !== cameraId && id !== cameraName)
                 return
-            recordings = segments
-            if (segments && segments.length > 0) {
-                startTs = Number(segments[0].start)
-                endTs = Number(segments[segments.length - 1].end)
-                setDataRange(startTs, endTs)
+            recordings = segments || []
+            if (recordings.length > 0) {
+                startTs = Number(recordings[0].start)
+                endTs = Number(recordings[recordings.length - 1].end)
+                if (!_fixedDayMode)
+                    setDataRange(startTs, endTs)
+                else
+                    clampView()
+
+                if (_fixedDayMode)
+                    Qt.callLater(seekToFirstRecording)
             }
         }
+
         function onEventsLoaded(id, list) {
             if (id !== cameraId && id !== cameraName)
                 return
-            events = list
+            events = list || []
         }
+
         function onMotionActivityLoaded(id, points) {
             if (id !== cameraId && id !== cameraName)
                 return
             applyMotionPoints(points)
         }
+
         function onRecordingDaysLoaded(id, days) {
             if (id !== cameraId && id !== cameraName)
                 return
             recordingDays = days || []
-            console.log("[Timeline] recordingDays:", recordingDays.length, recordingDays)
         }
+
         function onPlaybackPositionChanged(id, posMs) {
             if (id !== cameraId && id !== cameraName)
                 return
@@ -136,6 +148,7 @@ Rectangle {
             t = t / 1000
         return t
     }
+
     function dataStartBound() {
         if (dataStartTs > 0)
             return dataStartTs
@@ -143,6 +156,7 @@ Rectangle {
             return startTs
         return Date.now() / 1000 - defaultViewSpan
     }
+
     function dataEndBound() {
         if (dataEndTs > dataStartTs)
             return dataEndTs
@@ -152,100 +166,130 @@ Rectangle {
     }
 
     function applyDefaultView() {
+        if (_viewLock)
+            return
+        _viewLock = true
+
         var nowSec = Date.now() / 1000
         var de = dataEndBound()
         var ds = dataStartBound()
-        viewEndTs = Math.min(de, nowSec)
-        viewStartTs = viewEndTs - defaultViewSpan
-        if (viewStartTs < ds)
-            viewStartTs = ds
-        clampView()
+        var end = Math.min(de, nowSec)
+        var start = end - defaultViewSpan
+        if (start < ds)
+            start = ds
+        viewStartTs = start
+        viewEndTs = end
+        if (viewEndTs <= viewStartTs)
+            viewEndTs = viewStartTs + minViewSpan
+
+        _viewLock = false
+    }
+
+    function clampView() {
+        if (_viewLock)
+            return
+        _viewLock = true
+
+        var ds = dataStartBound()
+        var de = dataEndBound()
+        if (!(de > ds)) {
+            _viewLock = false
+            return
+        }
+
+        var span = viewEndTs - viewStartTs
+        if (!(span > 0) || span < minViewSpan)
+            span = Math.min(defaultViewSpan, de - ds)
+        if (span < minViewSpan)
+            span = minViewSpan
+        if (span > maxViewSpan)
+            span = maxViewSpan
+        if (span > de - ds)
+            span = de - ds
+
+        var ns = viewStartTs
+        if (ns < ds)
+            ns = ds
+        if (ns + span > de)
+            ns = de - span
+        if (ns < ds)
+            ns = ds
+
+        var ne = ns + span
+        if (ne > de)
+            ne = de
+        if (ne <= ns)
+            ne = ns + minViewSpan
+
+        if (Math.abs(ns - viewStartTs) > 0.05)
+            viewStartTs = ns
+        if (Math.abs(ne - viewEndTs) > 0.05)
+            viewEndTs = ne
+
+        _viewLock = false
     }
 
     function setDataRange(s, e) {
         s = normalizeSec(s)
         e = normalizeSec(e)
-        if (e <= s)
+        if (!(e > s))
             return
+
+        if (_fixedDayMode) {
+            clampView()
+            return
+        }
+
         if (dataStartTs <= 0 || s < dataStartTs)
             dataStartTs = s
         if (e > dataEndTs)
             dataEndTs = e
-        // First open: last 24 hours only
+
         if (viewEndTs <= viewStartTs)
             applyDefaultView()
         else
             clampView()
     }
+
     function applyMotionPoints(points) {
         motionPoints = points || []
-        if (!motionPoints || motionPoints.length === 0)
-            return
-        var minT = dataStartBound(), maxT = dataEndBound(), first = true
-        for (var i = 0; i < motionPoints.length; ++i) {
-            var p = motionPoints[i]
-            var t = normalizeSec(p.start !== undefined ? p.start : p.start_time)
-            if (t <= 0)
-                continue
-            if (first) {
-                minT = t
-                maxT = t
-                first = false
-            } else {
-                if (t < minT) minT = t
-                if (t > maxT) maxT = t
-            }
-        }
-        if (!first)
-            setDataRange(minT, maxT)
     }
-    function clampView() {
-        var ds = dataStartBound(), de = dataEndBound()
-        var span = viewEndTs - viewStartTs
-        if (span < minViewSpan) span = minViewSpan
-        if (span > maxViewSpan) span = maxViewSpan
-        if (span > de - ds && de > ds) span = de - ds
-        var ns = viewStartTs
-        if (ns < ds) ns = ds
-        if (ns + span > de) {
-            ns = de - span
-            if (ns < ds) ns = ds
-        }
-        var ne = ns + span
-        if (ne > de) ne = de
-        if (ne <= ns) ne = ns + minViewSpan
-        if (Math.abs(ns - viewStartTs) > 0.001)
-            viewStartTs = ns
-        if (Math.abs(ne - viewEndTs) > 0.001)
-            viewEndTs = ne
-    }
+
     function effectiveStartTs() {
         if (viewEndTs > viewStartTs)
             return viewStartTs
         return dataStartBound()
     }
+
     function effectiveEndTs() {
         if (viewEndTs > viewStartTs)
             return viewEndTs
         return dataEndBound()
     }
+
     function mapWidth() {
         return Math.max(1, width - 8)
     }
+
     function zoomAt(cursorX, factor) {
-        var s = effectiveStartTs(), e = effectiveEndTs()
+        var s = effectiveStartTs()
+        var e = effectiveEndTs()
         var w = mapWidth()
         var ratio = Math.max(0, Math.min(1, cursorX / w))
         var center = s + ratio * (e - s)
         var span = (e - s) / factor
-        if (span < minViewSpan) span = minViewSpan
-        if (span > maxViewSpan) span = maxViewSpan
+        if (span < minViewSpan)
+            span = minViewSpan
+        if (span > maxViewSpan)
+            span = maxViewSpan
         viewStartTs = center - span * ratio
         viewEndTs = viewStartTs + span
         clampView()
     }
+
     function panByPixels(dx) {
-        var s = effectiveStartTs(), e = effectiveEndTs()
+        var s = effectiveStartTs()
+        var e = effectiveEndTs()
         var w = mapWidth()
         var span = e - s
         var dt = -(dx / w) * span
@@ -253,28 +297,36 @@ Rectangle {
         viewEndTs += dt
         clampView()
     }
+
     function resetZoom() {
+        _fixedDayMode = false
         applyDefaultView()
     }
+
     function timestampToX(tsMs) {
-        var s = effectiveStartTs(), e = effectiveEndTs()
+        var s = effectiveStartTs()
+        var e = effectiveEndTs()
         var w = mapWidth()
         if (e <= s)
             return 0
         var ratio = (tsMs - s * 1000) / ((e - s) * 1000)
         return Math.max(0, Math.min(w, ratio * w))
     }
+
     function xToTimestamp(x) {
-        var s = effectiveStartTs(), e = effectiveEndTs()
+        var s = effectiveStartTs()
+        var e = effectiveEndTs()
         var w = mapWidth()
         var ratio = Math.max(0, Math.min(1, x / w))
         return (s + ratio * (e - s)) * 1000
     }
+
     function formatFull(tsMs) {
         if (tsMs <= 0)
             return ""
         return Qt.formatDateTime(new Date(tsMs), "ddd MMM dd  hh:mm:ss")
     }
+
     function visibleMotionCount() {
         var n = 0
         if (!motionPoints)
@@ -285,6 +337,7 @@ Rectangle {
         }
         return n
     }
+
     function viewSpanLabel() {
         var span = effectiveEndTs() - effectiveStartTs()
         if (span < 90)
@@ -296,12 +349,10 @@ Rectangle {
         return (span / 86400).toFixed(1) + "d"
     }
 
-    // Calendar green cells — uses Frigate day summary, not 24h segments
     function dayHasRecording(y, m, d) {
         var mm = (m < 10 ? "0" : "") + m
         var dd = (d < 10 ? "0" : "") + d
         var key = y + "-" + mm + "-" + dd
-
         if (recordingDays && recordingDays.length > 0) {
             for (var i = 0; i < recordingDays.length; ++i) {
                 if (String(recordingDays[i]) === key)
@@ -309,9 +360,7 @@ Rectangle {
             }
             return false
         }
-
-        // Fallback while summary loads
-        if (!recordings)
+        if (!recordings || recordings.length === 0)
             return false
         var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
         var dayEnd = dayStart + 86400
@@ -328,27 +377,42 @@ Rectangle {
         var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
         var dayEnd = dayStart + 86400
 
+        _fixedDayMode = true
         dataStartTs = dayStart
         dataEndTs = dayEnd
         viewStartTs = dayStart
         viewEndTs = dayEnd
-        clampView()
+        recordings = []
+        events = []
+        motionPoints = []
         calendarPopup.visible = false
 
         var id = cameraId !== "" ? cameraId : cameraName
-        if (frigateRef && id !== "") {
-            if (typeof frigateRef.loadRecordingsRange === "function")
-                frigateRef.loadRecordingsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
-            if (typeof frigateRef.loadEventsRange === "function")
-                frigateRef.loadEventsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
-            if (typeof frigateRef.loadMotionActivityRange === "function")
-                frigateRef.loadMotionActivityRange(id, Math.floor(dayStart), Math.floor(dayEnd))
-        }
+        if (!frigateRef || id === "")
+            return
 
-        if (dayHasRecording(y, m, d)) {
-            seekRequested(dayStart * 1000)
-            playbackPositionMs = dayStart * 1000
-        }
+        if (typeof frigateRef.loadRecordingsRange === "function")
+            frigateRef.loadRecordingsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
+        if (typeof frigateRef.loadEventsRange === "function")
+            frigateRef.loadEventsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
+        if (typeof frigateRef.loadMotionActivityRange === "function")
+            frigateRef.loadMotionActivityRange(id, Math.floor(dayStart), Math.floor(dayEnd))
+    }
+
+    function seekToFirstRecording() {
+        if (!recordings || recordings.length === 0)
+            return
+        var s = normalizeSec(recordings[0].start)
+        if (s <= 0)
+            return
+        var seekSec = s + 2
+        var nowSec = Date.now() / 1000
+        if (seekSec > nowSec - 35)
+            seekSec = nowSec - 35
+        if (seekSec < 1)
+            return
+        playbackPositionMs = seekSec * 1000
+        seekRequested(seekSec * 1000)
     }
 
     TimelineStatusBar {

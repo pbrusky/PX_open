@@ -18,17 +18,14 @@ public:
     void setServer(const QString& server);
     void setModuleServer(const QString& server);
 
-    // Default window: last 24 hours
     void loadRecordings(const QString& cameraId);
     void loadEvents(const QString& cameraId);
     void loadMotionActivity(const QString& cameraId);
 
-    // Explicit range (Unix seconds) — used by calendar day jump
     void loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
     void loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
     void loadMotionActivityRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
 
-    // Lightweight list of days with recordings for the calendar
     void loadRecordingDays(const QString& cameraId);
 
     void loadPlaybackWindow(const QString& cameraId, qint64 timestampMs);
