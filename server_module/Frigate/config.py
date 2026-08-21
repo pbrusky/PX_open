@@ -177,9 +177,7 @@ def build_defaults() -> dict:
     if lan_ip == "127.0.0.1":
         lan_ip, subnet_mask = get_ip_and_mask()
     else:
-        _, subnet_mask = get_ip_and_mask()
-        # keep the good IP we already found
-        # subnet_mask may still be useful for broadcast
+        subnet_mask = "255.255.255.0"
 
     broadcast = compute_broadcast(lan_ip, subnet_mask)
 
@@ -203,6 +201,11 @@ def build_defaults() -> dict:
         "module_id": "{66666666-7777-8888-9999-000000000000}",
         "system_name": "Frigate System",
         "progress_file": r"C:\PX\onvif_progress.log",
+
+        # Network overrides (empty string = auto-detect)
+        "lan_ip": "",
+        "subnet_mask": "",
+        "broadcast_ip": "",
 
         "auto_detect_frigate_container": True,
         "auto_detect_go2rtc_container": True,
@@ -256,10 +259,24 @@ def load_user_config() -> dict:
 
 _cfg = load_user_config()
 
-# Network (still auto-detected every start – rarely needs override)
+# --- Network (same logic as original working config) ---
 LAN_IP = get_local_ip()
-_, SUBNET_MASK = get_ip_and_mask()
+if LAN_IP == "127.0.0.1":
+    LAN_IP, SUBNET_MASK = get_ip_and_mask()
+else:
+    # Original behaviour: always assume /24 when we already have a good IP
+    SUBNET_MASK = "255.255.255.0"
+
+# Optional overrides from config.json
+if _cfg.get("lan_ip"):
+    LAN_IP = str(_cfg["lan_ip"]).strip()
+if _cfg.get("subnet_mask"):
+    SUBNET_MASK = str(_cfg["subnet_mask"]).strip()
+
 BROADCAST_IP = compute_broadcast(LAN_IP, SUBNET_MASK)
+if _cfg.get("broadcast_ip"):
+    val = str(_cfg["broadcast_ip"]).strip()
+    BROADCAST_IP = val if val else BROADCAST_IP
 
 HTTP_PORT = int(_cfg["http_port"])
 HTTPS_PORT = int(_cfg["https_port"])
@@ -288,7 +305,7 @@ GO2RTC_CONFIG_PATH = Path(_cfg["go2rtc_config_path"])
 # ---------------------------------------------------------
 
 print(f"[CONFIG] Config file : {CONFIG_FILE}")
-print(f"[CONFIG] LAN IP      : {LAN_IP} | Broadcast: {BROADCAST_IP}")
+print(f"[CONFIG] LAN IP      : {LAN_IP} | Mask: {SUBNET_MASK} | Broadcast: {BROADCAST_IP}")
 print(f"[CONFIG] HTTP/HTTPS  : {HTTP_PORT} / {HTTPS_PORT}")
 print(f"[CONFIG] Frigate ctr : {FRIGATE_CONTAINER_NAME}")
 print(f"[CONFIG] go2rtc ctr  : {GO2RTC_CONTAINER_NAME}")

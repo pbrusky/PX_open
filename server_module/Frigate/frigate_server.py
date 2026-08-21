@@ -24,6 +24,7 @@ from remove_camera import remove_camera
 HOST = "0.0.0.0"
 DISCOVERY_PORT = 3666
 
+
 def broadcast_discovery():
     packet = json.dumps({
         "id": MODULE_ID,
@@ -34,27 +35,41 @@ def broadcast_discovery():
         "address": LAN_IP,
     }).encode("utf-8")
 
+    print(f"[Discovery] Broadcasting as {SYSTEM_NAME} @ {LAN_IP}:{HTTP_PORT}")
+    print(f"[Discovery] Primary broadcast target: {BROADCAST_IP}")
+
     while True:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-            targets = []
+            targets = set()
+
             if BROADCAST_IP:
-                targets.append(BROADCAST_IP)
-            else:
+                targets.add(BROADCAST_IP)
+
+            # Always try common fallbacks (helps on Windows / weird masks)
+            try:
                 base = LAN_IP.rsplit(".", 1)[0]
-                targets.extend([f"{base}.255", f"{base}.1", f"{base}.254"])
+                targets.update([
+                    f"{base}.255",
+                    f"{base}.1",
+                    f"{base}.254",
+                    "255.255.255.255",
+                ])
+            except Exception:
+                targets.add("255.255.255.255")
 
             for target in targets:
                 try:
                     sock.sendto(packet, (target, DISCOVERY_PORT))
-                except:
+                except Exception:
                     continue
+
             sock.close()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Discovery] Broadcast error: {e}")
 
         time.sleep(2)
 
@@ -227,7 +242,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
             try:
                 with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
                     lines = [line.strip() for line in f.readlines() if line.strip()]
-            except:
+            except Exception:
                 lines = []
             return self.send_json({"progress": lines})
 
