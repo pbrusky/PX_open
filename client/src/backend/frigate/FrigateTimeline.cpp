@@ -7,11 +7,11 @@
 #include <QNetworkReply>
 #include <QUrlQuery>
 #include <QDateTime>
-#include <QTimeZone>
+#include <algorithm>
 
 namespace {
 
-QVariantList mergeBlocks(QVariantList blocks)
+QVariantList mergeTouchingOnly(QVariantList blocks, double gapTol = 3.0)
 {
     if (blocks.isEmpty())
         return blocks;
@@ -26,13 +26,12 @@ QVariantList mergeBlocks(QVariantList blocks)
 
     for (int i = 1; i < blocks.size(); ++i) {
         const QVariantMap next = blocks.at(i).toMap();
-        const double curEnd = cur.value(QStringLiteral("end")).toDouble();
+        const double cEnd = cur.value(QStringLiteral("end")).toDouble();
         const double nextStart = next.value(QStringLiteral("start")).toDouble();
         const double nextEnd = next.value(QStringLiteral("end")).toDouble();
 
-        // Merge if touching / overlapping within 2 minutes
-        if (nextStart <= curEnd + 120.0) {
-            if (nextEnd > curEnd)
+        if (nextStart <= cEnd + gapTol) {
+            if (nextEnd > cEnd)
                 cur.insert(QStringLiteral("end"), nextEnd);
         } else {
             out.append(cur);
@@ -41,57 +40,6 @@ QVariantList mergeBlocks(QVariantList blocks)
     }
     out.append(cur);
     return out;
-}
-
-// Build timeline blocks from Frigate hourly summary (fast path)
-QVariantList blocksFromSummary(const QJsonArray& days, qint64 windowStart, qint64 windowEnd)
-{
-    QVariantList blocks;
-
-    for (const QJsonValue& dayVal : days) {
-        const QJsonObject dayObj = dayVal.toObject();
-        const QString dayStr = dayObj.value(QStringLiteral("day")).toString(); // "YYYY-MM-DD"
-        if (dayStr.isEmpty())
-            continue;
-
-        const QJsonArray hours = dayObj.value(QStringLiteral("hours")).toArray();
-        for (const QJsonValue& hourVal : hours) {
-            const QJsonObject h = hourVal.toObject();
-            const double duration = h.value(QStringLiteral("duration")).toDouble();
-            if (duration <= 0.0)
-                continue;
-
-            // hour is "00" .. "23"
-            const QString hourStr = h.value(QStringLiteral("hour")).toString();
-            bool ok = false;
-            const int hour = hourStr.toInt(&ok);
-            if (!ok)
-                continue;
-
-            // Interpret day+hour as local time, convert to epoch seconds
-            QDate date = QDate::fromString(dayStr, QStringLiteral("yyyy-MM-dd"));
-            if (!date.isValid())
-                continue;
-
-            QDateTime dt(date, QTime(hour, 0, 0));
-            dt.setTimeZone(QTimeZone::systemTimeZone());
-            const qint64 start = dt.toSecsSinceEpoch();
-            const qint64 end = start + qint64(duration);
-
-            // Keep only hours overlapping the requested window
-            if (end < windowStart || start > windowEnd)
-                continue;
-
-            QVariantMap seg;
-            seg.insert(QStringLiteral("start"), double(qMax(start, windowStart)));
-            seg.insert(QStringLiteral("end"), double(qMin(end, windowEnd)));
-            seg.insert(QStringLiteral("motion"), h.value(QStringLiteral("motion")).toInt());
-            seg.insert(QStringLiteral("objects"), h.value(QStringLiteral("objects")).toInt());
-            blocks.append(seg);
-        }
-    }
-
-    return mergeBlocks(blocks);
 }
 
 } // namespace
@@ -124,53 +72,14 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         return;
     }
 
-    // Serve cache immediately if we already loaded this camera
     if (m_recordingsByCamera.contains(cameraId)
             && !m_recordingsByCamera.value(cameraId).isEmpty()) {
         emit recordingsLoaded(cameraId, m_recordingsByCamera.value(cameraId));
-        // Still refresh in background below
     }
 
-    // FAST PATH: hourly summary (tiny payload, NX-style overview)
-    QUrl url(QStringLiteral("%1/api/%2/recordings/summary").arg(m_server, cameraId));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("timezone"), QStringLiteral("browser"));
-    url.setQuery(query);
-
-    QNetworkRequest req(url);
-    QNetworkReply* reply = m_net->get(req);
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId]() {
-        const QByteArray data = reply->readAll();
-        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QNetworkReply::NetworkError netErr = reply->error();
-        reply->deleteLater();
-
-        const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-        const qint64 afterSec = nowSec - 24 * 3600;
-
-        QVariantList segments;
-
-        if (netErr != QNetworkReply::NoError || status >= 400) {
-            Q_UNUSED(status);
-            loadRecordingsFallback(cameraId);
-            return;
-        }
-
-        const QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (!doc.isArray()) {
-            loadRecordingsFallback(cameraId);
-            return;
-        }
-
-        segments = blocksFromSummary(doc.array(), afterSec, nowSec);
-
-        m_recordingsByCamera[cameraId] = segments;
-        emit recordingsLoaded(cameraId, segments);
-    });
+    loadRecordingsFallback(cameraId);
 }
 
-// Slow fallback: raw segment list (only if summary fails)
 void FrigateTimeline::loadRecordingsFallback(const QString& cameraId)
 {
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
@@ -187,80 +96,36 @@ void FrigateTimeline::loadRecordingsFallback(const QString& cameraId)
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId]() {
         const QByteArray data = reply->readAll();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         reply->deleteLater();
 
         QVariantList segments;
-        double rangeStart = 0.0;
-        double rangeEnd = 0.0;
-        int rawCount = 0;
+        if (status < 400) {
+            const QJsonDocument doc = QJsonDocument::fromJson(data);
+            if (doc.isArray()) {
+                for (const QJsonValue& v : doc.array()) {
+                    const QJsonObject o = v.toObject();
+                    double start = o.value(QStringLiteral("start_time")).toDouble();
+                    double end   = o.value(QStringLiteral("end_time")).toDouble();
+                    if (start <= 0.0)
+                        start = o.value(QStringLiteral("start")).toDouble();
+                    if (end <= 0.0)
+                        end = o.value(QStringLiteral("end")).toDouble();
+                    if (end <= start)
+                        continue;
 
-        const QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (doc.isArray()) {
-            const QJsonArray arr = doc.array();
-            rawCount = arr.size();
-
-            double blockStart = 0.0;
-            double blockEnd = 0.0;
-            bool haveBlock = false;
-            const double gapTol = 3.0;
-
-            auto flush = [&]() {
-                if (!haveBlock || blockEnd <= blockStart)
-                    return;
-                QVariantMap seg;
-                seg.insert(QStringLiteral("start"), blockStart);
-                seg.insert(QStringLiteral("end"), blockEnd);
-                segments.append(seg);
-            };
-
-            for (const QJsonValue& v : arr) {
-                const QJsonObject o = v.toObject();
-                double start = o.value(QStringLiteral("start_time")).toDouble();
-                double end   = o.value(QStringLiteral("end_time")).toDouble();
-                if (start <= 0.0)
-                    start = o.value(QStringLiteral("start")).toDouble();
-                if (end <= 0.0)
-                    end = o.value(QStringLiteral("end")).toDouble();
-                if (end <= start)
-                    continue;
-
-                if (rangeStart == 0.0 || start < rangeStart)
-                    rangeStart = start;
-                if (end > rangeEnd)
-                    rangeEnd = end;
-
-                if (!haveBlock) {
-                    blockStart = start;
-                    blockEnd = end;
-                    haveBlock = true;
-                } else if (start <= blockEnd + gapTol) {
-                    if (end > blockEnd)
-                        blockEnd = end;
-                } else {
-                    flush();
-                    blockStart = start;
-                    blockEnd = end;
+                    QVariantMap seg;
+                    seg.insert(QStringLiteral("start"), start);
+                    seg.insert(QStringLiteral("end"), end);
+                    segments.append(seg);
                 }
-            }
-            flush();
-
-            if (rawCount > 50 && segments.size() <= 3 && rangeEnd > rangeStart) {
-                QVariantMap one;
-                one.insert(QStringLiteral("start"), rangeStart);
-                one.insert(QStringLiteral("end"), rangeEnd);
-                segments.clear();
-                segments.append(one);
             }
         }
 
+        segments = mergeTouchingOnly(segments, 3.0);
         m_recordingsByCamera[cameraId] = segments;
         emit recordingsLoaded(cameraId, segments);
     });
-}
-
-QVariantList FrigateTimeline::getRecordings(const QString& cameraId) const
-{
-    return m_recordingsByCamera.value(cameraId);
 }
 
 void FrigateTimeline::loadEvents(const QString& cameraId)
@@ -282,7 +147,7 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
     query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
     query.addQueryItem(QStringLiteral("before"), QString::number(nowSec));
-    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("300"));
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("500"));
     query.addQueryItem(QStringLiteral("include_thumbnails"), QStringLiteral("0"));
     url.setQuery(query);
 
@@ -322,9 +187,84 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
     });
 }
 
+void FrigateTimeline::loadMotionActivity(const QString& cameraId)
+{
+    if (m_server.isEmpty() || cameraId.isEmpty()) {
+        m_motionByCamera[cameraId] = QVariantList();
+        emit motionActivityLoaded(cameraId, QVariantList());
+        return;
+    }
+
+    if (m_motionByCamera.contains(cameraId)
+            && !m_motionByCamera.value(cameraId).isEmpty()) {
+        emit motionActivityLoaded(cameraId, m_motionByCamera.value(cameraId));
+    }
+
+    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
+    const qint64 afterSec = nowSec - 24 * 3600;
+
+    QUrl url(QStringLiteral("%1/api/review/activity/motion").arg(m_server));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("cameras"), cameraId);
+    query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
+    query.addQueryItem(QStringLiteral("before"), QString::number(nowSec));
+    query.addQueryItem(QStringLiteral("scale"), QStringLiteral("30"));
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    QNetworkReply* reply = m_net->get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId]() {
+        const QByteArray data = reply->readAll();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        reply->deleteLater();
+
+        QVariantList points;
+        if (status < 400) {
+            const QJsonDocument doc = QJsonDocument::fromJson(data);
+            if (doc.isArray()) {
+                for (const QJsonValue& v : doc.array()) {
+                    const QJsonObject o = v.toObject();
+                    const QString cam = o.value(QStringLiteral("camera")).toString();
+                    if (!cam.isEmpty() && cam != cameraId)
+                        continue;
+
+                    const double motion = o.value(QStringLiteral("motion")).toDouble();
+                    if (motion <= 0.0)
+                        continue;
+
+                    double start = o.value(QStringLiteral("start_time")).toDouble();
+                    if (start <= 0.0)
+                        start = o.value(QStringLiteral("start")).toDouble();
+                    if (start <= 0.0)
+                        continue;
+
+                    QVariantMap pt;
+                    pt.insert(QStringLiteral("start"), start);
+                    pt.insert(QStringLiteral("motion"), motion);
+                    points.append(pt);
+                }
+            }
+        }
+
+        m_motionByCamera[cameraId] = points;
+        emit motionActivityLoaded(cameraId, points);
+    });
+}
+
+QVariantList FrigateTimeline::getRecordings(const QString& cameraId) const
+{
+    return m_recordingsByCamera.value(cameraId);
+}
+
 QVariantList FrigateTimeline::getEvents(const QString& cameraId) const
 {
     return m_eventsByCamera.value(cameraId);
+}
+
+QVariantList FrigateTimeline::getMotionActivity(const QString& cameraId) const
+{
+    return m_motionByCamera.value(cameraId);
 }
 
 void FrigateTimeline::loadPlaybackWindow(const QString& cameraId, qint64 timestampMs)
@@ -345,4 +285,5 @@ void FrigateTimeline::clearCamera(const QString& cameraId)
 {
     m_recordingsByCamera.remove(cameraId);
     m_eventsByCamera.remove(cameraId);
+    m_motionByCamera.remove(cameraId);
 }

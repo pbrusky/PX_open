@@ -60,8 +60,10 @@ public:
 
     Q_INVOKABLE void loadRecordings(const QString& cameraId);
     Q_INVOKABLE void loadEvents(const QString& cameraId);
+    Q_INVOKABLE void loadMotionActivity(const QString& cameraId);
     Q_INVOKABLE QVariantList getRecordingsForCamera(const QString& cameraId);
     Q_INVOKABLE QVariantList getEventsForCamera(const QString& cameraId);
+    Q_INVOKABLE QVariantList getMotionActivityForCamera(const QString& cameraId);
 
     Q_INVOKABLE void seek(const QString& cameraId, qint64 timestampMs);
     Q_INVOKABLE void startPlayback(const QString& cameraId, qint64 timestampMs);
@@ -100,6 +102,7 @@ signals:
 
     void recordingsLoaded(const QString& cameraId, const QVariantList& segments);
     void eventsLoaded(const QString& cameraId, const QVariantList& events);
+    void motionActivityLoaded(const QString& cameraId, const QVariantList& points);
 
     void playbackPositionChanged(const QString& cameraId, qint64 positionMs);
     void playbackStarted(const QString& cameraId);

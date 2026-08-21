@@ -10,6 +10,9 @@ Rectangle {
     property bool allowAutoReveal: false
     property bool pointerInside: false
 
+    // Raise this to show fewer orange ticks (10 = busy, 25 = default, 50–100 = strong only)
+    property real minMotion: 15
+
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
 
@@ -39,13 +42,21 @@ Rectangle {
     property var frigateRef: null
     property var recordings: []
     property var events: []
-    property int playbackPositionMs: 0
+    property var motionPoints: []
+    // Must be real: epoch-ms does not fit in QML int (overflow hides the playhead).
+    property real playbackPositionMs: 0
     property real startTs: 0
     property real endTs: 0
     property bool isPlayback: false
     property real hoverTsMs: -1
 
-    property int currentTimeMs: Date.now()
+    property real currentTimeMs: Date.now()
+    readonly property real playheadTsMs: {
+        if (isPlayback && playbackPositionMs > 0)
+            return playbackPositionMs
+        return currentTimeMs
+    }
+
     Timer {
         interval: 1000
         running: true
@@ -53,7 +64,20 @@ Rectangle {
         onTriggered: currentTimeMs = Date.now()
     }
 
-    // Hover over the whole timeline keeps it open; does not block clicks
+    // Advance the needle while a clip is playing (backend only reports seek start).
+    Timer {
+        interval: 250
+        running: !collapsed && isPlayback && playbackPositionMs > 0
+        repeat: true
+        onTriggered: {
+            var next = playbackPositionMs + interval
+            var endMs = effectiveEndTs() * 1000
+            if (endMs > 0 && next > endMs)
+                next = endMs
+            playbackPositionMs = next
+        }
+    }
+
     HoverHandler {
         id: rootHover
         enabled: !collapsed
@@ -74,8 +98,8 @@ Rectangle {
                 return
             recordings = segments
             if (segments && segments.length > 0) {
-                startTs = segments[0].start
-                endTs = segments[segments.length - 1].end
+                startTs = Number(segments[0].start)
+                endTs = Number(segments[segments.length - 1].end)
             }
         }
 
@@ -85,10 +109,46 @@ Rectangle {
             events = list
         }
 
+        function onMotionActivityLoaded(id, points) {
+            if (id !== cameraId && id !== cameraName)
+                return
+            applyMotionPoints(points)
+        }
+
         function onPlaybackPositionChanged(id, posMs) {
             if (id !== cameraId && id !== cameraName)
                 return
             playbackPositionMs = posMs
+        }
+    }
+
+    function normalizeSec(t) {
+        t = Number(t || 0)
+        if (t > 100000000000)
+            t = t / 1000
+        return t
+    }
+
+    function applyMotionPoints(points) {
+        motionPoints = points || []
+        if (!motionPoints || motionPoints.length === 0)
+            return
+
+        var minT = startTs > 0 ? startTs : Number.MAX_VALUE
+        var maxT = endTs > 0 ? endTs : 0
+        for (var i = 0; i < motionPoints.length; ++i) {
+            var p = motionPoints[i]
+            var t = normalizeSec(p.start !== undefined ? p.start : p.start_time)
+            if (t <= 0)
+                continue
+            if (t < minT) minT = t
+            if (t > maxT) maxT = t
+        }
+        if (minT < Number.MAX_VALUE) {
+            if (startTs <= 0 || minT < startTs)
+                startTs = minT
+            if (maxT > endTs)
+                endTs = maxT
         }
     }
 
@@ -107,16 +167,18 @@ Rectangle {
     function timestampToX(tsMs) {
         var s = effectiveStartTs()
         var e = effectiveEndTs()
-        if (e <= s || width <= 0)
+        var w = trackBg.width > 0 ? trackBg.width : Math.max(1, width - 8)
+        if (e <= s || w <= 0)
             return 0
         var ratio = (tsMs - s * 1000) / ((e - s) * 1000)
-        return Math.max(0, Math.min(width, ratio * width))
+        return Math.max(0, Math.min(w, ratio * w))
     }
 
     function xToTimestamp(x) {
         var s = effectiveStartTs()
         var e = effectiveEndTs()
-        var ratio = Math.max(0, Math.min(1, x / Math.max(1, width)))
+        var w = trackBg.width > 0 ? trackBg.width : Math.max(1, width - 8)
+        var ratio = Math.max(0, Math.min(1, x / Math.max(1, w)))
         return (s + ratio * (e - s)) * 1000
     }
 
@@ -124,6 +186,19 @@ Rectangle {
         if (tsMs <= 0)
             return ""
         return Qt.formatDateTime(new Date(tsMs), "ddd MMM dd  hh:mm:ss")
+    }
+
+    function visibleMotionCount() {
+        var n = 0
+        if (!motionPoints)
+            return 0
+        for (var i = 0; i < motionPoints.length; ++i) {
+            var p = motionPoints[i]
+            var m = Number(p.motion !== undefined ? p.motion : 0)
+            if (m >= minMotion)
+                n++
+        }
+        return n
     }
 
     Rectangle {
@@ -135,10 +210,8 @@ Rectangle {
         color: "#161616"
         visible: !collapsed
         z: 20
-        clip: false
 
         Text {
-            id: statusTime
             anchors.left: parent.left
             anchors.leftMargin: 12
             anchors.verticalCenter: parent.verticalCenter
@@ -191,47 +264,130 @@ Rectangle {
         anchors.rightMargin: 4
         anchors.top: ruler.bottom
         anchors.topMargin: 6
-        height: 36
+        height: 40
         color: "#1A1A1A"
         radius: 3
         visible: !collapsed
         border.color: "#333"
         border.width: 1
         z: 5
-        clip: false
-    }
+        clip: true
 
-    TimelineSegments {
-        anchors.fill: trackBg
-        recordings: timeline.recordings
-        startTs: timeline.effectiveStartTs()
-        endTs: timeline.effectiveEndTs()
-        zoom: 1.0
-        pan: 0
-        timelineWidth: timeline.width
-        timestampToX: timeline.timestampToX
-        visible: !collapsed
-        z: 6
+        TimelineSegments {
+            anchors.fill: parent
+            recordings: timeline.recordings
+            startTs: timeline.effectiveStartTs()
+            endTs: timeline.effectiveEndTs()
+            zoom: 1.0
+            pan: 0
+            timelineWidth: trackBg.width
+            timestampToX: timeline.timestampToX
+            z: 1
+        }
+
+        // MOTION TICKS (filtered by minMotion)
+        Repeater {
+            model: timeline.motionPoints
+            z: 5
+
+            Rectangle {
+                property real sec: {
+                    var t = 0
+                    if (typeof start !== "undefined" && start)
+                        t = Number(start)
+                    else if (modelData)
+                        t = Number(modelData.start || modelData.start_time || 0)
+                    if (t > 100000000000)
+                        t = t / 1000
+                    return t
+                }
+                property real mot: {
+                    if (typeof motion !== "undefined" && motion)
+                        return Number(motion)
+                    if (modelData)
+                        return Number(modelData.motion || 0)
+                    return 0
+                }
+
+                width: 3
+                height: Math.min(parent.height - 4, 14 + Math.min(22, mot / 8.0))
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 2
+                color: "#FF6D00"
+                opacity: 1.0
+                x: timeline.timestampToX(sec * 1000) - 1
+                visible: sec > 0 && mot >= timeline.minMotion
+            }
+        }
+
+        // Event ticks
+        Repeater {
+            model: timeline.events
+            z: 6
+
+            Rectangle {
+                property real sec: {
+                    var t = 0
+                    if (typeof start !== "undefined" && start)
+                        t = Number(start)
+                    else if (modelData)
+                        t = Number(modelData.start || 0)
+                    if (t > 100000000000)
+                        t = t / 1000
+                    return t
+                }
+
+                width: 3
+                height: 18
+                y: 2
+                radius: 1
+                color: "#FFC107"
+                x: timeline.timestampToX(sec * 1000) - 1
+                visible: sec > 0
+            }
+        }
+
+        // Current playback / live position on the motion bar
+        Rectangle {
+            id: trackPlayhead
+            width: 3
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            x: timeline.timestampToX(timeline.playheadTsMs) - width / 2
+            color: timeline.isPlayback ? "#FFFFFF" : "#90CAF9"
+            border.color: "#000000"
+            border.width: 1
+            visible: timeline.playheadTsMs > 0
+            z: 80
+        }
     }
 
     Item {
         id: playheadItem
-        width: 3
-        height: trackBg.height + 6
+        width: 18
+        height: trackBg.height + 22
         anchors.top: trackBg.top
-        anchors.topMargin: -3
-        x: {
-            var ts = isPlayback && playbackPositionMs > 0
-                     ? playbackPositionMs
-                     : currentTimeMs
-            return trackBg.x + timestampToX(ts) - width / 2
-        }
-        visible: !collapsed
-        z: 30
+        anchors.topMargin: -14
+        x: trackBg.x + timestampToX(playheadTsMs) - width / 2
+        visible: !collapsed && playheadTsMs > 0
+        z: 80
 
         Rectangle {
-            anchors.fill: parent
-            color: isPlayback ? "#FFC107" : "#FFFFFF"
+            width: 3
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            color: isPlayback ? "#FFFFFF" : "#90CAF9"
+        }
+
+        Rectangle {
+            width: 12
+            height: 8
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            color: isPlayback ? "#FFFFFF" : "#90CAF9"
+            border.color: "#000000"
+            border.width: 1
         }
     }
 
@@ -314,9 +470,9 @@ Rectangle {
         text: {
             if (collapsed)
                 return ""
-            if (recordings.length > 0)
-                return recordings.length + " recording block(s) - hover for time, click to play"
-            return "No recordings in range"
+            return recordings.length + " rec, "
+                 + visibleMotionCount() + "/" + motionPoints.length + " motion (min " + minMotion + "), "
+                 + events.length + " events — green=record, orange=motion"
         }
         color: "#777777"
         font.pixelSize: 10

@@ -15,29 +15,19 @@ Item {
         model: recordings
 
         Rectangle {
-            height: parent ? parent.height : 28
-            y: 0
-            radius: 3
-            border.color: "#3A8DFFAA"
-            border.width: 1
-            clip: true
-
-            Rectangle {
-                anchors.fill: parent
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#3A8DFF88" }
-                    GradientStop { position: 1.0; color: "#2E6BFF44" }
-                }
-            }
+            height: Math.max(8, (parent ? parent.height : 28) * 0.35)
+            y: parent ? (parent.height - height - 2) : 0
+            radius: 1
+            color: "#2E7D32"
+            opacity: 0.85
 
             width: {
                 if (!timestampToX)
-                    return 8
+                    return 4
                 var x1 = timestampToX(modelData.start * 1000)
                 var x2 = timestampToX(modelData.end * 1000)
-                return Math.max(8, x2 - x1)
+                return Math.max(2, x2 - x1)
             }
-
             x: timestampToX ? timestampToX(modelData.start * 1000) : 0
         }
     }

@@ -5,6 +5,7 @@
 #include <QString>
 #include <QHash>
 #include <QMutex>
+#include <QNetworkAccessManager>
 
 class FrameQueue;
 class FFmpegWorker;
@@ -40,10 +41,14 @@ signals:
 
 private:
     void stopWorkerAsync(const QString& cameraId);
+    void openClip(const QString& cameraId, int gen, qint64 startSec, qint64 endSec);
+    void resolveAndOpen(const QString& cameraId, int gen, qint64 seekSec);
 
     QString m_server;
     QString m_moduleServer;
     QString m_serverIp;
+
+    QNetworkAccessManager* m_net = nullptr;
 
     QMutex m_mutex;
     QHash<QString, qint64> m_playbackPositionByCamera;

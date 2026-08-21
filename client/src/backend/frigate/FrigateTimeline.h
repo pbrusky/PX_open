@@ -19,16 +19,19 @@ public:
 
     void loadRecordings(const QString& cameraId);
     void loadEvents(const QString& cameraId);
+    void loadMotionActivity(const QString& cameraId);
     void loadPlaybackWindow(const QString& cameraId, qint64 timestampMs);
 
     QVariantList getRecordings(const QString& cameraId) const;
     QVariantList getEvents(const QString& cameraId) const;
+    QVariantList getMotionActivity(const QString& cameraId) const;
 
     void clearCamera(const QString& cameraId);
 
 signals:
     void recordingsLoaded(const QString& cameraId, const QVariantList& segments);
     void eventsLoaded(const QString& cameraId, const QVariantList& events);
+    void motionActivityLoaded(const QString& cameraId, const QVariantList& points);
 
 private:
     void loadRecordingsFallback(const QString& cameraId);
@@ -39,6 +42,7 @@ private:
 
     QHash<QString, QVariantList> m_recordingsByCamera;
     QHash<QString, QVariantList> m_eventsByCamera;
+    QHash<QString, QVariantList> m_motionByCamera;
 };
 
 #endif

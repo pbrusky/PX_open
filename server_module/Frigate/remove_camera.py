@@ -16,6 +16,10 @@ from config import (
     FRIGATE_CACHE_PATH
 )
 
+# ---------------------------------------------------------
+# UTILITIES
+# ---------------------------------------------------------
+
 def backup_file(path):
     if not os.path.exists(path):
         return
@@ -43,20 +47,45 @@ def save_yaml(path, data):
         print("[remove_camera] save_yaml ERROR:", e)
         return False
 
-def restart_docker(container):
+# ---------------------------------------------------------
+# SAFE DOCKER / RESTART HELPERS
+# ---------------------------------------------------------
+
+def safe_docker(cmd, *args):
+    """Run a docker command safely. Never crashes if docker is missing."""
     try:
-        print(f"[restart] Docker restart → {container}")
-        subprocess.run(["docker", "restart", container], capture_output=True, text=True)
+        print(f"[docker] {cmd} {' '.join(args)}")
+        result = subprocess.run(
+            ["docker", cmd, *args],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            print(f"[docker] warning: {result.stderr.strip() or result.stdout.strip()}")
+            return False
         return True
-    except Exception as e:
-        print("[restart] Docker ERROR:", e)
+    except FileNotFoundError:
+        print(f"[docker] not found – skipping '{cmd}' (config will still be updated)")
         return False
+    except Exception as e:
+        print(f"[docker] ERROR: {e}")
+        return False
+
+def restart_docker(container):
+    return safe_docker("restart", container)
 
 def restart_systemd(service):
     try:
         print(f"[restart] systemctl restart → {service}")
-        subprocess.run(["systemctl", "restart", service], capture_output=True, text=True)
-        return True
+        result = subprocess.run(
+            ["systemctl", "restart", service],
+            capture_output=True,
+            text=True
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        print("[restart] systemctl not found – skipping")
+        return False
     except Exception as e:
         print("[restart] systemd ERROR:", e)
         return False
@@ -70,12 +99,16 @@ def restart_frigate():
     if FRIGATE_INSTALL_TYPE == "baremetal":
         return restart_systemd(FRIGATE_SERVICE_NAME)
 
-    print("[frigate] Unknown install type → using Docker fallback")
+    print("[frigate] Unknown install type → trying Docker (will skip if not available)")
     return restart_docker(FRIGATE_CONTAINER_NAME)
 
 def restart_go2rtc():
     print("[go2rtc] Restart requested")
     return restart_docker(GO2RTC_CONTAINER_NAME)
+
+# ---------------------------------------------------------
+# REMOVE FROM CONFIG FILES
+# ---------------------------------------------------------
 
 def remove_go2rtc_streams(cam_id):
     backup_file(GO2RTC_CONFIG_PATH)
@@ -110,11 +143,14 @@ def remove_frigate_camera(cam_id):
 
     return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
+# ---------------------------------------------------------
+# FILE / FOLDER CLEANUP
+# ---------------------------------------------------------
+
 def delete_dir_if_exists(path):
     try:
         if not path.exists():
             return True
-
         print(f"[frigate] Deleting folder: {path}")
         shutil.rmtree(path, ignore_errors=False)
         return not path.exists()
@@ -122,19 +158,16 @@ def delete_dir_if_exists(path):
         print(f"[frigate] Failed to delete folder {path}: {e}")
         return False
 
-
 def delete_file_if_exists(path):
     try:
         if not path.exists():
             return True
-
         print(f"[frigate] Deleting file: {path}")
         path.unlink(missing_ok=True)
         return not path.exists()
     except Exception as e:
         print(f"[frigate] Failed to delete file {path}: {e}")
         return False
-
 
 def purge_cache_root():
     try:
@@ -157,7 +190,6 @@ def purge_cache_root():
         print(f"[frigate] Failed to purge cache root {FRIGATE_CACHE_PATH}: {e}")
         return False
 
-
 def _matches_camera_name(path, cam_id):
     target = cam_id.casefold()
     target_main = f"{cam_id}_main".casefold()
@@ -170,7 +202,6 @@ def _matches_camera_name(path, cam_id):
 
     parts = [part.casefold() for part in path.parts]
     return target in parts or target_main in parts
-
 
 def delete_camera_files(cam_id):
     success = True
@@ -213,6 +244,10 @@ def delete_camera_files(cam_id):
 
     return success
 
+# ---------------------------------------------------------
+# PUBLIC API
+# ---------------------------------------------------------
+
 def remove_camera(cam_id):
     print(f"[remove_camera] Removing {cam_id}")
 
@@ -224,21 +259,23 @@ def remove_camera(cam_id):
             "message": "Invalid camera name"
         }
 
-    # STOP FRIGATE FIRST
+    # Try to stop Frigate (safe – will skip if Docker is missing)
     print("[frigate] Stopping Frigate before deletion...")
-    subprocess.run(["docker", "stop", FRIGATE_CONTAINER_NAME], capture_output=True, text=True)
+    safe_docker("stop", FRIGATE_CONTAINER_NAME)
 
     go2_ok = remove_go2rtc_streams(cam_id)
     fr_ok = remove_frigate_camera(cam_id)
     delete_ok = delete_camera_files(cam_id)
 
+    # Restart is best-effort
     restart_ok = restart_frigate()
 
-    ok = go2_ok and fr_ok and delete_ok and restart_ok
+    # We consider success if the config files were updated
+    ok = go2_ok and fr_ok
 
     return {
         "event": "cameraRemoveResult",
         "status": "ok" if ok else "error",
         "ok": ok,
-        "message": f"Camera {cam_id} removed"
+        "message": f"Camera {cam_id} removed" + (" – restart skipped (no Docker)" if not restart_ok else "")
     }

@@ -48,14 +48,24 @@ def clean_rtsp(url):
     return (url or "").strip()
 
 # ---------------------------------------------------------
-# RESTART LOGIC
+# RESTART LOGIC  (SAFE – does not crash when Docker is missing)
 # ---------------------------------------------------------
 
 def restart_docker(container):
     try:
         print(f"[restart] Docker restart → {container}")
-        subprocess.run(["docker", "restart", container], capture_output=True, text=True)
+        result = subprocess.run(
+            ["docker", "restart", container],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            print(f"[restart] Docker warning: {result.stderr.strip() or result.stdout.strip()}")
+            return False
         return True
+    except FileNotFoundError:
+        print("[restart] Docker not found – skipping restart (config was still updated)")
+        return False
     except Exception as e:
         print("[restart] Docker ERROR:", e)
         return False
@@ -63,8 +73,15 @@ def restart_docker(container):
 def restart_systemd(service):
     try:
         print(f"[restart] systemctl restart → {service}")
-        subprocess.run(["systemctl", "restart", service], capture_output=True, text=True)
-        return True
+        result = subprocess.run(
+            ["systemctl", "restart", service],
+            capture_output=True,
+            text=True
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        print("[restart] systemctl not found – skipping")
+        return False
     except Exception as e:
         print("[restart] systemd ERROR:", e)
         return False
@@ -78,7 +95,7 @@ def restart_frigate():
     if FRIGATE_INSTALL_TYPE == "baremetal":
         return restart_systemd(FRIGATE_SERVICE_NAME)
 
-    print("[frigate] Unknown install type → using Docker fallback")
+    print("[frigate] Unknown install type → trying Docker (will skip if not available)")
     return restart_docker(FRIGATE_CONTAINER_NAME)
 
 def restart_go2rtc():
@@ -190,12 +207,16 @@ def add_camera(cam_id, rtsp_url, record=True, rtsp_sub=None):
 
     go2_ok = add_go2rtc_streams(cam_id, main_url, sub_url)
     fr_ok = add_frigate_camera(cam_id, main_url, sub_url, record)
+
+    # Restart is best-effort – config is already written even if restart fails
     restart_ok = restart_frigate() if fr_ok else False
+
+    success = go2_ok and fr_ok   # we no longer require restart_ok to be True
 
     return {
         "event": "cameraAddResult",
-        "status": "ok" if (go2_ok and fr_ok and restart_ok) else "error",
-        "message": f"Camera {cam_id} added (main+sub)",
+        "status": "ok" if success else "error",
+        "message": f"Camera {cam_id} added (main+sub)" + (" – restart skipped (no Docker)" if not restart_ok else ""),
         "go2rtc": go2_ok,
         "frigate_restart": restart_ok
     }
