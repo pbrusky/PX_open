@@ -140,6 +140,51 @@ Item {
         }
     }
 
+    // Clear EVERY tile before system remove (Frigate/go2rtc restart kills streams)
+    function clearAllTiles() {
+        console.log("CameraGrid: clearAllTiles — removing", cameraNames.length, "cameras from grid")
+
+        if (fullscreenName !== "") {
+            var fsName = fullscreenName
+            fullscreenLoader.visible = false
+            fullscreenName = ""
+            fullscreenSubQueue = null
+            fullscreenMainQueue = null
+            fullscreenLocked = false
+            if (frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
+                try {
+                    frigateRef.stopFullscreenStream(fsName)
+                } catch (e) {
+                    console.log("CameraGrid clearAllTiles stopFullscreenStream error", e)
+                }
+            }
+        }
+
+        var names = cameraNames.slice()
+        cameraNames = []
+        updateGridSize()
+        hoverIndex = -1
+        hoverCameraName = ""
+
+        if (!frigateRef)
+            return
+
+        var ref = frigateRef
+        for (var i = 0; i < names.length; ++i) {
+            var n = names[i]
+            if (!n)
+                continue
+            try {
+                if (typeof ref.stopStream === "function")
+                    ref.stopStream(n)
+                if (typeof ref.stopFullscreenStream === "function")
+                    ref.stopFullscreenStream(n)
+            } catch (e) {
+                console.log("CameraGrid clearAllTiles stop error", n, e)
+            }
+        }
+    }
+
     function pruneMissingCameras(list) {
         if (!list)
             list = []

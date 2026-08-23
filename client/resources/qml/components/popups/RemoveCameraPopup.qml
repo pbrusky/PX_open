@@ -32,16 +32,22 @@ Item {
         })
     }
 
-    function removeFromGridFirst() {
-        if (!cameraId)
-            return
+    // Remove ALL cameras from the grid first — remove script restarts
+    // Frigate + go2rtc so any tile left in the grid will not play again.
+    function clearGridBeforeRemove() {
         try {
-            if (gridHost && typeof gridHost.removeFromGrid === "function") {
-                console.log("RemoveCameraPopup: removing from grid first", cameraId)
+            if (gridHost && typeof gridHost.clearAllFromGrid === "function") {
+                console.log("RemoveCameraPopup: clearing entire camera grid before server remove")
+                gridHost.clearAllFromGrid()
+                return
+            }
+            // Fallback: at least remove the camera being deleted
+            if (gridHost && typeof gridHost.removeFromGrid === "function" && cameraId) {
+                console.log("RemoveCameraPopup: fallback removeFromGrid", cameraId)
                 gridHost.removeFromGrid(cameraId)
             }
         } catch (e) {
-            console.log("RemoveCameraPopup: grid remove error", e)
+            console.log("RemoveCameraPopup: grid clear error", e)
         }
     }
 
@@ -109,10 +115,10 @@ Item {
                         statusText.color = "yellow"
                         removeBtn.enabled = false
 
-                        // 1) Grid first
-                        removeFromGridFirst()
+                        // 1) Clear ALL tiles from grid first
+                        clearGridBeforeRemove()
 
-                        // 2) Then server script
+                        // 2) Then server remove (restarts Frigate + go2rtc)
                         if (frigateRef)
                             frigateRef.removeCamera(removePopup.cameraId)
                         else {

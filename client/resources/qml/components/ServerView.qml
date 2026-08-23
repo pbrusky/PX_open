@@ -128,4 +128,14 @@ Item {
         if (typeof cameraGrid.removeCameraByName === "function")
             cameraGrid.removeCameraByName(cameraId)
     }
+
+    // Clear entire grid before system remove (restart kills remaining streams)
+    function clearAllFromGrid() {
+        if (!cameraGrid)
+            return
+        if (typeof cameraGrid.clearAllTiles === "function") {
+            console.log("ServerView: clearAllFromGrid")
+            cameraGrid.clearAllTiles()
+        }
+    }
 }
