@@ -32,12 +32,15 @@ Item {
         if (!mainWindow || !mainWindow.popupManager)
             return
 
+        mainWindow.pendingRemoveCameraId = cameraId
+
         mainWindow.popupManager.openPopup(
             "qrc:/app/resources/qml/components/popups/RemoveCameraPopup.qml",
             {
                 frigateRef: root.frigateRef,
                 cameraId: cameraId,
-                popupManager: mainWindow.popupManager
+                popupManager: mainWindow.popupManager,
+                gridHost: root
             }
         )
     }
@@ -69,7 +72,6 @@ Item {
             if (!item)
                 return
 
-            // Assign after creation — avoids "non-existent property" on partial types
             item.width = Qt.binding(function() { return gridLoader.width })
             item.height = Qt.binding(function() { return gridLoader.height })
             item.mainWindow = root.mainWindow
@@ -113,7 +115,17 @@ Item {
 
     function updateCameras(list) {
         camerasLoadedToMain(list)
-        if (cameraGrid)
+        if (cameraGrid) {
             cameraGrid.cameraList = list
+            if (typeof cameraGrid.pruneMissingCameras === "function")
+                cameraGrid.pruneMissingCameras(list)
+        }
+    }
+
+    function removeFromGrid(cameraId) {
+        if (!cameraId || !cameraGrid)
+            return
+        if (typeof cameraGrid.removeCameraByName === "function")
+            cameraGrid.removeCameraByName(cameraId)
     }
 }

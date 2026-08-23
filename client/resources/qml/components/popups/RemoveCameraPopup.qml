@@ -16,25 +16,33 @@ Item {
     property var frigateRef: null
     property string cameraId: ""
     property bool closing: false
+    property var gridHost: null
 
     function forceClose() {
         if (closing)
             return
         closing = true
-
-        // Preferred: PopupManager connection
         closeRequested()
-
-        // Fallback: call manager directly
         if (popupManager && typeof popupManager.closePopup === "function")
             popupManager.closePopup()
-
-        // Last resort: hide + destroy self
         visible = false
         Qt.callLater(function() {
             if (removePopup)
                 removePopup.destroy()
         })
+    }
+
+    function removeFromGridFirst() {
+        if (!cameraId)
+            return
+        try {
+            if (gridHost && typeof gridHost.removeFromGrid === "function") {
+                console.log("RemoveCameraPopup: removing from grid first", cameraId)
+                gridHost.removeFromGrid(cameraId)
+            }
+        } catch (e) {
+            console.log("RemoveCameraPopup: grid remove error", e)
+        }
     }
 
     Rectangle {
@@ -48,7 +56,6 @@ Item {
         height: 280
         radius: 8
         color: "#000000"
-
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
         anchors.verticalCenterOffset: -80
@@ -74,7 +81,6 @@ Item {
             }
 
             Text {
-                id: camLabel
                 text: removePopup.cameraId
                 color: "orange"
                 font.pixelSize: 18
@@ -103,6 +109,10 @@ Item {
                         statusText.color = "yellow"
                         removeBtn.enabled = false
 
+                        // 1) Grid first
+                        removeFromGridFirst()
+
+                        // 2) Then server script
                         if (frigateRef)
                             frigateRef.removeCamera(removePopup.cameraId)
                         else {
@@ -126,12 +136,9 @@ Item {
     Connections {
         target: frigateRef
         ignoreUnknownSignals: true
-
         function onCameraRemoveResult(ok, message) {
             statusText.text = message
             statusText.color = ok ? "lightgreen" : "red"
-
-            // ALWAYS close this popup when the server answers
             forceClose()
             cameraRemoved()
         }

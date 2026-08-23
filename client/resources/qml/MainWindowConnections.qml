@@ -38,7 +38,6 @@ Item {
                 restartPopup.visible = true
         }
 
-        // Hard cap so popup can never stick forever (0 cameras is valid)
         restartMaxTimer.restart()
         pollDelayTimer.restart()
     }
@@ -103,7 +102,6 @@ Item {
             if (!list)
                 list = []
 
-            // Always apply list (including empty / 0 cameras)
             mainWindow.cameraList = list
             if (sidebarWrapper)
                 sidebarWrapper.cameraList = list
@@ -118,7 +116,6 @@ Item {
 
             if (restartInProgress) {
                 var elapsed = Date.now() - restartStartedAt
-                // Close when Frigate answers — 0 cameras is valid
                 if (elapsed >= 2500) {
                     console.log("MainWindowConnections: Frigate responded — closing restart overlay, cameras=", list.length)
                     stopRestartFlow()
@@ -175,6 +172,9 @@ Item {
 
         function onCameraRemoveResult(ok, message) {
             console.log("MainWindowConnections cameraRemoveResult", ok, message)
+            // Grid already cleared in RemoveCameraPopup before the API call
+            if (mainWindow)
+                mainWindow.pendingRemoveCameraId = ""
             if (ok)
                 startRestartFlow()
             else
