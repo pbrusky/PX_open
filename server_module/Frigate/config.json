@@ -1,0 +1,22 @@
+{
+    "http_port": 8001,
+    "https_port": 8002,
+    "system_id": "{11111111-2222-3333-4444-555555555555}",
+    "module_id": "{66666666-7777-8888-9999-000000000000}",
+    "system_name": "Frigate System .18 Bata3",
+    "progress_file": "C:\\PX\\onvif_progress.log",
+    "lan_ip": "",
+    "subnet_mask": "",
+    "broadcast_ip": "",
+    "auto_detect_frigate_container": true,
+    "auto_detect_go2rtc_container": true,
+    "frigate_container_name": "frigate-frigate-1",
+    "go2rtc_container_name": "go2rtc",
+    "frigate_service_name": "frigate",
+    "frigate_version": "0.17",
+    "frigate_api_enabled": true,
+    "frigate_media_path": "C:\\frigate\\media",
+    "frigate_cache_path": "C:\\frigate\\cache",
+    "frigate_config_path": "C:\\frigate\\config\\config.yml",
+    "go2rtc_config_path": "C:\\frigate\\go2rtc.yaml"
+}
