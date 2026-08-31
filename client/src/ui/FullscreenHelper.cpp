@@ -7,7 +7,7 @@
 #include <QQuickItem>
 
 #ifdef Q_OS_WIN
-#include <windows.h>
+#  include <windows.h>
 #endif
 
 FullscreenHelper::FullscreenHelper(QObject* parent)
@@ -32,38 +32,43 @@ QQuickWindow* FullscreenHelper::openFullscreen(QQmlEngine* engine,
             item->setParentItem(win->contentItem());
     }
 
-    win->setFlags(Qt::Window | Qt::FramelessWindowHint);
+    win->setFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
 
     QRect screenRect = QGuiApplication::primaryScreen()->geometry();
     win->setGeometry(screenRect);
-    win->show();
 
 #ifdef Q_OS_WIN
-    HWND hwnd = (HWND)win->winId();
+    win->show();
 
-    // ⭐ Make it a true fullscreen popup window
-    LONG style = GetWindowLong(hwnd, GWL_STYLE);
-    style &= ~WS_OVERLAPPEDWINDOW;
-    style |= WS_POPUP;                 // <‑‑ THIS is the magic
-    SetWindowLong(hwnd, GWL_STYLE, style);
+    HWND hwnd = reinterpret_cast<HWND>(win->winId());
+    if (hwnd) {
+        // True fullscreen popup (covers taskbar)
+        LONG style = GetWindowLong(hwnd, GWL_STYLE);
+        style &= ~WS_OVERLAPPEDWINDOW;
+        style |= WS_POPUP;
+        SetWindowLong(hwnd, GWL_STYLE, style);
 
-    LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-    exStyle |= WS_EX_TOPMOST;
-    exStyle |= WS_EX_TOOLWINDOW;
-    SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
+        LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+        exStyle |= WS_EX_TOPMOST;
+        exStyle |= WS_EX_TOOLWINDOW;
+        SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
 
-    // ⭐ Force activation + foreground
-    SetForegroundWindow(hwnd);
-    SetActiveWindow(hwnd);
-    SetFocus(hwnd);
+        SetForegroundWindow(hwnd);
+        SetActiveWindow(hwnd);
+        SetFocus(hwnd);
 
-    // ⭐ Force topmost above taskbar
-    SetWindowPos(hwnd, HWND_TOPMOST,
-                 screenRect.x(),
-                 screenRect.y(),
-                 screenRect.width(),
-                 screenRect.height(),
-                 SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+        SetWindowPos(hwnd, HWND_TOPMOST,
+                     screenRect.x(),
+                     screenRect.y(),
+                     screenRect.width(),
+                     screenRect.height(),
+                     SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+    }
+#else
+    // Linux / macOS: Qt fullscreen is reliable; no Win32 needed
+    win->showFullScreen();
+    win->raise();
+    win->requestActivate();
 #endif
 
     return win;

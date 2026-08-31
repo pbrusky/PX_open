@@ -3,7 +3,10 @@
 #include <QObject>
 #include <QWindow>
 #include <QTimer>
-#include <windows.h>
+
+#ifdef Q_OS_WIN
+#  include <windows.h>
+#endif
 
 class WindowActivator : public QObject
 {
@@ -20,11 +23,17 @@ public:
             return;
 
         QTimer::singleShot(0, [window]() {
+#ifdef Q_OS_WIN
             HWND hwnd = reinterpret_cast<HWND>(window->winId());
-            SetForegroundWindow(hwnd);
-            SetActiveWindow(hwnd);
-            BringWindowToTop(hwnd);
+            if (hwnd) {
+                SetForegroundWindow(hwnd);
+                SetActiveWindow(hwnd);
+                BringWindowToTop(hwnd);
+            }
+#endif
+            // Works on Windows and Linux (Qt handles focus where the OS allows)
             window->requestActivate();
+            window->raise();
         });
     }
 };

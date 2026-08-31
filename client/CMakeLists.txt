@@ -13,7 +13,57 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
 
 qt_standard_project_setup()
 
-link_directories(C:/ffmpeg/lib)
+# ---------------------------------------------------------------------------
+# FFmpeg — Windows keeps C:/ffmpeg default; Linux uses pkg-config / system
+# Override either side with:
+#   cmake -DFFMPEG_ROOT=C:/ffmpeg ...
+#   cmake -DFFMPEG_ROOT=/usr ...
+# ---------------------------------------------------------------------------
+set(FFMPEG_ROOT "C:/ffmpeg" CACHE PATH "FFmpeg install prefix (Windows default C:/ffmpeg)")
+
+set(FFMPEG_INCLUDE_DIR "")
+set(FFMPEG_LIB_DIR "")
+set(FFMPEG_LIBRARIES avcodec avformat avutil swscale)
+
+if(WIN32)
+    set(FFMPEG_INCLUDE_DIR "${FFMPEG_ROOT}/include")
+    set(FFMPEG_LIB_DIR "${FFMPEG_ROOT}/lib")
+    if(EXISTS "${FFMPEG_LIB_DIR}")
+        link_directories("${FFMPEG_LIB_DIR}")
+    endif()
+else()
+    # Linux / macOS: prefer pkg-config
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(FFMPEG QUIET libavcodec libavformat libavutil libswscale)
+    endif()
+
+    if(FFMPEG_FOUND)
+        set(FFMPEG_INCLUDE_DIR ${FFMPEG_INCLUDE_DIRS})
+        set(FFMPEG_LIBRARIES ${FFMPEG_LIBRARIES})
+        link_directories(${FFMPEG_LIBRARY_DIRS})
+        message(STATUS "FFmpeg via pkg-config: ${FFMPEG_LIBRARIES}")
+    else()
+        # Fallback: FFMPEG_ROOT or common system paths
+        find_path(FFMPEG_INCLUDE_DIR
+            NAMES libavcodec/avcodec.h
+            HINTS "${FFMPEG_ROOT}/include" /usr/include /usr/local/include
+        )
+        find_library(AVCODEC_LIB  NAMES avcodec  HINTS "${FFMPEG_ROOT}/lib" /usr/lib /usr/local/lib)
+        find_library(AVFORMAT_LIB NAMES avformat HINTS "${FFMPEG_ROOT}/lib" /usr/lib /usr/local/lib)
+        find_library(AVUTIL_LIB   NAMES avutil   HINTS "${FFMPEG_ROOT}/lib" /usr/lib /usr/local/lib)
+        find_library(SWSCALE_LIB  NAMES swscale  HINTS "${FFMPEG_ROOT}/lib" /usr/lib /usr/local/lib)
+
+        if(NOT FFMPEG_INCLUDE_DIR OR NOT AVCODEC_LIB)
+            message(FATAL_ERROR
+                "FFmpeg not found. Install libavcodec-dev (and related) or set -DFFMPEG_ROOT=...")
+        endif()
+
+        set(FFMPEG_LIBRARIES ${AVCODEC_LIB} ${AVFORMAT_LIB} ${AVUTIL_LIB} ${SWSCALE_LIB})
+        message(STATUS "FFmpeg includes: ${FFMPEG_INCLUDE_DIR}")
+        message(STATUS "FFmpeg libs: ${FFMPEG_LIBRARIES}")
+    endif()
+endif()
 
 qt_add_resources(APP_RESOURCES resources.qrc)
 
@@ -41,7 +91,7 @@ qt_add_executable(px_open
     ${APP_RESOURCES}
 )
 
-if (WIN32)
+if(WIN32)
     target_sources(px_open PRIVATE appicon.rc)
 endif()
 
@@ -52,7 +102,7 @@ target_include_directories(px_open PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/stream
     ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/frigate
     ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/render
-    C:/ffmpeg/include
+    ${FFMPEG_INCLUDE_DIR}
 )
 
 add_library(frigate_backend
@@ -68,7 +118,7 @@ add_library(frigate_backend
 target_include_directories(frigate_backend PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/backend/stream
-    C:/ffmpeg/include
+    ${FFMPEG_INCLUDE_DIR}
 )
 
 target_link_libraries(frigate_backend PRIVATE
@@ -83,5 +133,5 @@ target_link_libraries(px_open PRIVATE
 
     frigate_backend
 
-    avcodec avformat avutil swscale
+    ${FFMPEG_LIBRARIES}
 )
