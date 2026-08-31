@@ -2,6 +2,8 @@
 #include "FrameQueue.h"
 
 #include <QDateTime>
+#include <QDebug>
+#include <QFileInfo>
 #include <QThread>
 
 extern "C" {
@@ -158,6 +160,8 @@ void FFmpegWorker::decodeLoop()
 
     const bool isHttp = m_url.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive)
                      || m_url.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive);
+    const bool isRtsp = m_url.startsWith(QStringLiteral("rtsp://"), Qt::CaseInsensitive);
+    const bool isLocalFile = !isHttp && !isRtsp;
 
     AVFormatContext* fmtCtx = avformat_alloc_context();
     if (!fmtCtx) {
@@ -171,12 +175,17 @@ void FFmpegWorker::decodeLoop()
 
     AVDictionary* opts = nullptr;
     if (isHttp) {
-        av_dict_set(&opts, "rw_timeout", "8000000", 0);
-        av_dict_set(&opts, "timeout", "8000000", 0);
-        av_dict_set(&opts, "reconnect", "0", 0);
-        av_dict_set(&opts, "probesize", "1000000", 0);
-        av_dict_set(&opts, "analyzeduration", "1000000", 0);
-    } else {
+        // Long timeouts: Frigate may take a while to mux clip.mp4
+        av_dict_set(&opts, "rw_timeout", "60000000", 0);
+        av_dict_set(&opts, "timeout", "60000000", 0);
+        av_dict_set(&opts, "reconnect", "1", 0);
+        av_dict_set(&opts, "reconnect_streamed", "1", 0);
+        av_dict_set(&opts, "reconnect_delay_max", "5", 0);
+        av_dict_set(&opts, "probesize", "5000000", 0);
+        av_dict_set(&opts, "analyzeduration", "5000000", 0);
+        av_dict_set(&opts, "fflags", "+genpts", 0);
+        av_dict_set(&opts, "user_agent", "PX_Open/1.0", 0);
+    } else if (isRtsp) {
         av_dict_set(&opts, "rtsp_transport", "tcp", 0);
         av_dict_set(&opts, "stimeout", "5000000", 0);
         av_dict_set(&opts, "rw_timeout", "5000000", 0);
@@ -185,6 +194,10 @@ void FFmpegWorker::decodeLoop()
         av_dict_set(&opts, "fflags", "nobuffer", 0);
         av_dict_set(&opts, "flags", "low_delay", 0);
         av_dict_set(&opts, "max_delay", "0", 0);
+    } else {
+        av_dict_set(&opts, "probesize", "5000000", 0);
+        av_dict_set(&opts, "analyzeduration", "5000000", 0);
+        av_dict_set(&opts, "fflags", "+genpts", 0);
     }
 
     const QByteArray urlBytes = m_url.toUtf8();
@@ -203,7 +216,7 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
-    emit openInputOk();
+    // Do NOT emit openInputOk here — connection open is not "ready to play"
 
     if (avformat_find_stream_info(fmtCtx, nullptr) < 0 || m_abort.load()) {
         avformat_close_input(&fmtCtx);
@@ -246,6 +259,8 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
+    // Ready only after codec is open
+    emit openInputOk();
     emit streamStarted();
 
     AVFrame* frame = av_frame_alloc();
@@ -255,25 +270,45 @@ void FFmpegWorker::decodeLoop()
     int lastSrcW = 0, lastSrcH = 0, lastDstW = 0, lastDstH = 0;
     qint64 lastStatsMs = 0;
     bool statsSent = false;
+    int frameLogCount = 0;
 
-    // Real-time pace for HTTP/file clips only (not live RTSP)
     qint64 playStartPtsMs = -1;
     qint64 playStartWallMs = 0;
 
     const int kMaxOutW = m_highQuality ? 3840 : 1280;
     const int kMaxOutH = m_highQuality ? 2160 : 720;
 
+    qint64 lastDataMs = QDateTime::currentMSecsSinceEpoch();
+    qint64 lastFileSize = isLocalFile ? QFileInfo(m_url).size() : 0;
+
     while (!m_abort.load()) {
         ret = av_read_frame(fmtCtx, packet);
         if (ret < 0) {
-            if (ret == AVERROR_EOF)
-                break;
             if (ret == AVERROR(EAGAIN)) {
                 QThread::msleep(5);
                 continue;
             }
+
+            if (isLocalFile && (ret == AVERROR_EOF || ret == AVERROR(EIO))) {
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                const qint64 sizeNow = QFileInfo(m_url).size();
+                if (sizeNow > lastFileSize) {
+                    lastFileSize = sizeNow;
+                    lastDataMs = now;
+                    QThread::msleep(50);
+                    continue;
+                }
+                if (now - lastDataMs < 5000) {
+                    QThread::msleep(200);
+                    continue;
+                }
+            }
             break;
         }
+
+        lastDataMs = QDateTime::currentMSecsSinceEpoch();
+        if (isLocalFile)
+            lastFileSize = QFileInfo(m_url).size();
 
         if (packet->stream_index != videoIndex) {
             av_packet_unref(packet);
@@ -360,8 +395,8 @@ void FFmpegWorker::decodeLoop()
                       dest,
                       destStride);
 
-            // Pace HTTP/file playback to wall-clock time (fixes fast-forward)
-            if (isHttp && !m_abort.load()) {
+            // Pace clip playback (HTTP and local file), not live RTSP
+            if (!isRtsp && !m_abort.load()) {
                 int64_t pts = frame->best_effort_timestamp;
                 if (pts == AV_NOPTS_VALUE)
                     pts = frame->pts;
@@ -374,14 +409,18 @@ void FFmpegWorker::decodeLoop()
                     } else {
                         const qint64 targetWall = playStartWallMs + (ptsMs - playStartPtsMs);
                         const qint64 delay = targetWall - QDateTime::currentMSecsSinceEpoch();
-                        // Clamp: ignore tiny/jitter and huge jumps (gaps in recording)
                         if (delay > 2 && delay < 1500)
                             QThread::msleep(static_cast<unsigned long>(delay));
                     }
                 } else {
-                    // No PTS: ~30 fps fallback
                     QThread::msleep(33);
                 }
+            }
+
+            if (frameLogCount < 3) {
+                ++frameLogCount;
+                qInfo() << "[FFmpegWorker] frame" << frameLogCount
+                        << dstW << "x" << dstH << m_url;
             }
 
             if (m_queue && img.width() > 16 && img.height() > 16)

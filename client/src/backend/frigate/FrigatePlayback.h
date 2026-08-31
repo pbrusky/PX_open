@@ -6,6 +6,8 @@
 #include <QHash>
 #include <QMutex>
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QFile>
 
 class FrameQueue;
 class FFmpegWorker;
@@ -41,8 +43,11 @@ signals:
 
 private:
     void stopWorkerAsync(const QString& cameraId);
-    void openClip(const QString& cameraId, int gen, qint64 startSec, qint64 endSec);
-    void resolveAndOpen(const QString& cameraId, int gen, qint64 seekSec);
+    void cancelDownload(const QString& cameraId);
+    void startUrlWorker(const QString& cameraId, int gen, const QString& url);
+    void startLocalWorker(const QString& cameraId, int gen, const QString& localPath);
+    void downloadThenPlay(const QString& cameraId, int gen, const QString& remoteUrl);
+    void cleanupTempFile(const QString& cameraId);
 
     QString m_server;
     QString m_moduleServer;
@@ -58,6 +63,10 @@ private:
     QHash<QString, FrameQueue*> m_playbackQueues;
     QHash<QString, FFmpegWorker*> m_playbackWorkers;
     QHash<QString, QThread*> m_playbackThreads;
+
+    QHash<QString, QNetworkReply*> m_downloadReplies;
+    QHash<QString, QString> m_tempFiles;
+    QHash<QString, QFile*> m_downloadFiles;
 };
 
 #endif
