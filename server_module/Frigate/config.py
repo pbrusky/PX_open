@@ -1,26 +1,34 @@
+"""
+config.py — single config.json for Windows and Linux.
+
+On first run, writes config.json next to this module with OS-appropriate
+defaults. Docker mount detection overrides paths when containers are found.
+Env vars always win for a given key when set.
+"""
 import os
 import sys
 import socket
 import struct
 import json
+import platform
 import psutil
 from pathlib import Path
 import subprocess
 
 # ---------------------------------------------------------
-# APP DIRECTORY (works both from source and frozen .exe)
+# APP DIRECTORY (source or frozen binary)
 # ---------------------------------------------------------
 
 def get_app_dir() -> Path:
     if getattr(sys, "frozen", False):
-        # Running as PyInstaller .exe → folder that contains the .exe
         return Path(sys.executable).resolve().parent
-    # Running from source
     return Path(__file__).resolve().parent
 
 
 APP_DIR = get_app_dir()
 CONFIG_FILE = APP_DIR / "config.json"
+IS_WINDOWS = platform.system() == "Windows"
+
 
 # ---------------------------------------------------------
 # NETWORK DETECTION
@@ -42,8 +50,9 @@ def get_local_ip() -> str:
         pass
 
     try:
+        skip = ("Virtual", "VMware", "Hyper-V", "Loopback", "Docker", "vEthernet", "VPN", "veth", "br-")
         for iface, addrs in psutil.net_if_addrs().items():
-            if any(x in iface for x in ["Virtual", "VMware", "Hyper-V", "Loopback", "Docker", "vEthernet", "VPN"]):
+            if any(x in iface for x in skip):
                 continue
             for addr in addrs:
                 if addr.family == socket.AF_INET and not addr.address.startswith("169.254"):
@@ -55,8 +64,9 @@ def get_local_ip() -> str:
 
 
 def get_ip_and_mask():
+    skip = ("Virtual", "VMware", "Hyper-V", "Loopback", "Docker", "vEthernet", "VPN", "veth", "br-")
     for iface, addrs in psutil.net_if_addrs().items():
-        if any(x in iface for x in ["Virtual", "VMware", "Hyper-V", "Loopback", "Docker", "vEthernet", "VPN"]):
+        if any(x in iface for x in skip):
             continue
         for addr in addrs:
             if addr.family == socket.AF_INET:
@@ -68,10 +78,8 @@ def compute_broadcast(ip: str, mask: str):
     try:
         ip_packed = struct.unpack("!I", socket.inet_aton(ip))[0]
         mask_packed = struct.unpack("!I", socket.inet_aton(mask))[0]
-
         if mask_packed in (0xFFFFFFFF, 0xFFFFFFFE):
             return None
-
         broadcast_packed = ip_packed | (~mask_packed & 0xFFFFFFFF)
         return socket.inet_ntoa(struct.pack("!I", broadcast_packed))
     except Exception:
@@ -87,8 +95,11 @@ def detect_paths_from_docker(container_name):
         result = subprocess.run(
             ["docker", "inspect", container_name],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=15,
         )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None, None, None
         data = json.loads(result.stdout)[0]
         mounts = data.get("Mounts", [])
 
@@ -99,10 +110,11 @@ def detect_paths_from_docker(container_name):
         for m in mounts:
             dest = m.get("Destination", "")
             src = m.get("Source", "")
-
-            if dest == "/media/frigate":
+            if not src:
+                continue
+            if dest in ("/media/frigate", "/media"):
                 media_path = Path(src)
-            if dest == "/tmp/cache":
+            if dest in ("/tmp/cache", "/cache"):
                 cache_path = Path(src)
             if dest == "/config":
                 config_path = Path(src) / "config.yml"
@@ -118,7 +130,8 @@ def auto_detect_container(name_hint: str):
         result = subprocess.run(
             ["docker", "ps", "-a", "--format", "{{.Names}}|{{.Image}}"],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=15,
         )
         entries = result.stdout.strip().splitlines()
         hint = name_hint.lower()
@@ -146,7 +159,8 @@ def detect_install_type():
         result = subprocess.run(
             ["docker", "ps", "-a", "--format", "{{.Names}}|{{.Image}}"],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=15,
         )
         for line in result.stdout.splitlines():
             if "frigate" in line.lower() or "go2rtc" in line.lower():
@@ -158,7 +172,8 @@ def detect_install_type():
         result = subprocess.run(
             ["systemctl", "status", "frigate"],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=10,
         )
         if "Loaded:" in result.stdout:
             return "baremetal"
@@ -168,8 +183,67 @@ def detect_install_type():
     return "unknown"
 
 
+def platform_path_defaults() -> dict:
+    """OS-specific fallback paths when Docker does not reveal mounts."""
+    if IS_WINDOWS:
+        return {
+            "frigate_media_path": r"C:\frigate\media",
+            "frigate_cache_path": r"C:\frigate\cache",
+            "frigate_config_path": r"C:\frigate\config\config.yml",
+            "go2rtc_config_path": r"C:\frigate\go2rtc.yaml",
+            "progress_file": str(APP_DIR / "onvif_progress.log"),
+        }
+
+    candidates_config = [
+        Path("/config/config.yml"),
+        Path("/opt/frigate/config/config.yml"),
+        Path.home() / "frigate" / "config" / "config.yml",
+        Path("/etc/frigate/config.yml"),
+    ]
+    candidates_go2rtc = [
+        Path("/config/go2rtc.yaml"),
+        Path("/opt/frigate/go2rtc.yaml"),
+        Path.home() / "frigate" / "go2rtc.yaml",
+        Path("/etc/go2rtc/go2rtc.yaml"),
+    ]
+    candidates_media = [
+        Path("/media/frigate"),
+        Path("/opt/frigate/media"),
+        Path.home() / "frigate" / "media",
+    ]
+    candidates_cache = [
+        Path("/tmp/cache"),
+        Path("/opt/frigate/cache"),
+        Path.home() / "frigate" / "cache",
+    ]
+
+    def first_existing(paths, fallback: Path) -> str:
+        for p in paths:
+            if p.exists():
+                return str(p)
+        return str(fallback)
+
+    return {
+        "frigate_media_path": first_existing(candidates_media, Path("/media/frigate")),
+        "frigate_cache_path": first_existing(candidates_cache, Path("/tmp/cache")),
+        "frigate_config_path": first_existing(candidates_config, Path("/config/config.yml")),
+        "go2rtc_config_path": first_existing(candidates_go2rtc, Path("/config/go2rtc.yaml")),
+        "progress_file": str(APP_DIR / "onvif_progress.log"),
+    }
+
+
+def path_looks_foreign(path_str: str) -> bool:
+    """True if path is clearly for the other OS (e.g. C:\\ on Linux)."""
+    if not path_str:
+        return False
+    s = str(path_str)
+    if IS_WINDOWS:
+        return s.startswith("/") and not s.startswith("//")
+    return len(s) >= 2 and s[1] == ":" and s[0].isalpha()
+
+
 # ---------------------------------------------------------
-# BUILD DEFAULTS (auto-detection)
+# BUILD DEFAULTS
 # ---------------------------------------------------------
 
 def build_defaults() -> dict:
@@ -193,6 +267,17 @@ def build_defaults() -> dict:
         go2rtc_container = detected_go2rtc
 
     media, cache, config = detect_paths_from_docker(frigate_container)
+    os_paths = platform_path_defaults()
+
+    media_path = str(media) if media else os_paths["frigate_media_path"]
+    cache_path = str(cache) if cache else os_paths["frigate_cache_path"]
+    config_path = str(config) if config else os_paths["frigate_config_path"]
+
+    go2rtc_path = os_paths["go2rtc_config_path"]
+    if config:
+        sibling = Path(config).parent / "go2rtc.yaml"
+        if sibling.exists():
+            go2rtc_path = str(sibling)
 
     return {
         "http_port": int(os.getenv("HTTP_PORT", 8001)),
@@ -200,9 +285,8 @@ def build_defaults() -> dict:
         "system_id": "{11111111-2222-3333-4444-555555555555}",
         "module_id": "{66666666-7777-8888-9999-000000000000}",
         "system_name": "Frigate System",
-        "progress_file": r"C:\PX\onvif_progress.log",
+        "progress_file": os_paths["progress_file"],
 
-        # Network overrides (empty string = auto-detect)
         "lan_ip": "",
         "subnet_mask": "",
         "broadcast_ip": "",
@@ -216,27 +300,26 @@ def build_defaults() -> dict:
         "frigate_version": os.getenv("FRIGATE_VERSION", "0.17"),
         "frigate_api_enabled": True,
 
-        # Paths – auto-detected values used as defaults
-        "frigate_media_path": str(media) if media else r"C:\frigate\media",
-        "frigate_cache_path": str(cache) if cache else r"C:\frigate\cache",
-        "frigate_config_path": str(config) if config else r"C:\frigate\config\config.yml",
-        "go2rtc_config_path": r"C:\frigate\go2rtc.yaml",
+        "frigate_media_path": media_path,
+        "frigate_cache_path": cache_path,
+        "frigate_config_path": config_path,
+        "go2rtc_config_path": go2rtc_path,
     }
 
 
 # ---------------------------------------------------------
-# LOAD / CREATE USER CONFIG
+# LOAD / CREATE USER CONFIG (one file both OS)
 # ---------------------------------------------------------
 
 def load_user_config() -> dict:
     defaults = build_defaults()
 
     if not CONFIG_FILE.exists():
-        # First run → write a nice template for the user
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(defaults, f, indent=4)
             print(f"[CONFIG] Created default config → {CONFIG_FILE}")
+            print(f"[CONFIG] Platform: {platform.system()}")
         except Exception as e:
             print(f"[CONFIG] Could not write default config: {e}")
         return defaults
@@ -244,8 +327,35 @@ def load_user_config() -> dict:
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             user = json.load(f)
-        # Merge: user values win, missing keys keep defaults
+        if not isinstance(user, dict):
+            print("[CONFIG] config.json is not an object — using defaults")
+            return defaults
+
         merged = {**defaults, **user}
+
+        path_keys = (
+            "frigate_media_path",
+            "frigate_cache_path",
+            "frigate_config_path",
+            "go2rtc_config_path",
+            "progress_file",
+        )
+        fixed = False
+        for key in path_keys:
+            val = str(merged.get(key, ""))
+            if path_looks_foreign(val):
+                print(f"[CONFIG] {key} looks wrong for {platform.system()} ({val}) — using default")
+                merged[key] = defaults[key]
+                fixed = True
+
+        if fixed:
+            try:
+                with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                    json.dump(merged, f, indent=4)
+                print(f"[CONFIG] Updated path(s) in {CONFIG_FILE} for this OS")
+            except Exception as e:
+                print(f"[CONFIG] Could not rewrite config.json: {e}")
+
         return merged
     except Exception as e:
         print(f"[CONFIG] Failed to read {CONFIG_FILE}: {e}")
@@ -254,20 +364,17 @@ def load_user_config() -> dict:
 
 
 # ---------------------------------------------------------
-# FINAL VALUES (what the rest of the code imports)
+# FINAL VALUES
 # ---------------------------------------------------------
 
 _cfg = load_user_config()
 
-# --- Network (same logic as original working config) ---
 LAN_IP = get_local_ip()
 if LAN_IP == "127.0.0.1":
     LAN_IP, SUBNET_MASK = get_ip_and_mask()
 else:
-    # Original behaviour: always assume /24 when we already have a good IP
     SUBNET_MASK = "255.255.255.0"
 
-# Optional overrides from config.json
 if _cfg.get("lan_ip"):
     LAN_IP = str(_cfg["lan_ip"]).strip()
 if _cfg.get("subnet_mask"):
@@ -300,11 +407,17 @@ FRIGATE_CACHE_PATH = Path(_cfg["frigate_cache_path"])
 FRIGATE_CONFIG_PATH = Path(_cfg["frigate_config_path"])
 GO2RTC_CONFIG_PATH = Path(_cfg["go2rtc_config_path"])
 
-# ---------------------------------------------------------
-# STARTUP LOG
-# ---------------------------------------------------------
+if os.getenv("FRIGATE_CONFIG_PATH"):
+    FRIGATE_CONFIG_PATH = Path(os.getenv("FRIGATE_CONFIG_PATH"))
+if os.getenv("GO2RTC_CONFIG_PATH"):
+    GO2RTC_CONFIG_PATH = Path(os.getenv("GO2RTC_CONFIG_PATH"))
+if os.getenv("FRIGATE_MEDIA_PATH"):
+    FRIGATE_MEDIA_PATH = Path(os.getenv("FRIGATE_MEDIA_PATH"))
+if os.getenv("FRIGATE_CACHE_PATH"):
+    FRIGATE_CACHE_PATH = Path(os.getenv("FRIGATE_CACHE_PATH"))
 
 print(f"[CONFIG] Config file : {CONFIG_FILE}")
+print(f"[CONFIG] Platform    : {platform.system()}")
 print(f"[CONFIG] LAN IP      : {LAN_IP} | Mask: {SUBNET_MASK} | Broadcast: {BROADCAST_IP}")
 print(f"[CONFIG] HTTP/HTTPS  : {HTTP_PORT} / {HTTPS_PORT}")
 print(f"[CONFIG] Frigate ctr : {FRIGATE_CONTAINER_NAME}")
