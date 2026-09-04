@@ -1,8 +1,17 @@
+"""
+remove_camera.py — match original client flow:
+
+Client closes "Frigate Restarting" only when:
+  loadCameras() returns list.length > 0 AND elapsed >= 3000ms
+
+So docker restart must finish and Frigate API must be up BEFORE HTTP returns.
+"""
 import yaml
 import os
 import shutil
 import time
 import subprocess
+import shutil as _shutil
 from pathlib import Path
 
 from config import (
@@ -13,269 +22,261 @@ from config import (
     FRIGATE_SERVICE_NAME,
     GO2RTC_CONTAINER_NAME,
     FRIGATE_MEDIA_PATH,
-    FRIGATE_CACHE_PATH
+    FRIGATE_CACHE_PATH,
 )
 
-# ---------------------------------------------------------
-# UTILITIES
-# ---------------------------------------------------------
+try:
+    from config import FRIGATE_API_BASE
+except Exception:
+    FRIGATE_API_BASE = os.environ.get("FRIGATE_API_BASE", "http://127.0.0.1:5000")
+
 
 def backup_file(path):
-    if not os.path.exists(path):
+    if not path or not os.path.exists(str(path)):
         return
     try:
-        backup_path = f"{path}.bak_{int(time.time())}"
-        shutil.copy2(path, backup_path)
-        print(f"[backup] Created {backup_path}")
+        shutil.copy2(str(path), f"{path}.bak_{int(time.time())}")
     except Exception as e:
         print("[backup] ERROR:", e)
 
+
 def load_yaml(path):
     try:
+        path = str(path)
+        if not os.path.exists(path):
+            return {}, False
         with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+            raw = f.read()
+        if not raw.strip():
+            return {}, False
+        data = yaml.safe_load(raw)
+        if not isinstance(data, dict):
+            return {}, False
+        return data, True
     except Exception as e:
-        print("[remove_camera] load_yaml ERROR:", e)
-        return {}
+        print("[load_yaml] ERROR:", e)
+        return {}, False
+
 
 def save_yaml(path, data):
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+        with open(str(path), "w", encoding="utf-8") as f:
+            yaml.safe_dump(
+                data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
+            )
         return True
     except Exception as e:
-        print("[remove_camera] save_yaml ERROR:", e)
+        print("[save_yaml] ERROR:", e)
         return False
 
-# ---------------------------------------------------------
-# SAFE DOCKER / RESTART HELPERS
-# ---------------------------------------------------------
 
-def safe_docker(cmd, *args):
-    """Run a docker command safely. Never crashes if docker is missing."""
+def stream_keys(cam_id):
+    cam_id = (cam_id or "").strip()
+    return {
+        cam_id,
+        f"{cam_id}_main",
+        f"{cam_id}_sub",
+        cam_id.replace(" ", "_"),
+        f"{cam_id.replace(' ', '_')}_main",
+    }
+
+
+def delete_stream_keys(streams, cam_id):
+    if not isinstance(streams, dict):
+        return {}, []
+    wanted = {k.casefold() for k in stream_keys(cam_id)}
+    removed = []
+    for key in list(streams.keys()):
+        if str(key).casefold() in wanted:
+            del streams[key]
+            removed.append(str(key))
+    return streams, removed
+
+
+def find_docker():
+    exe = _shutil.which("docker")
+    if exe:
+        return exe
+    for c in (
+        r"C:\Program Files\Docker\Docker\resources\bin\docker.exe",
+        r"C:\Program Files\Docker\Docker\resources\docker.exe",
+        r"C:\ProgramData\DockerDesktop\version-bin\docker.exe",
+    ):
+        if os.path.isfile(c):
+            return c
+    return "docker"
+
+
+DOCKER = find_docker()
+print(f"[remove_camera] docker={DOCKER}")
+
+
+def docker_cmd(*args, timeout=180):
+    cmd_list = [DOCKER] + list(args)
+    print(f"[docker] {' '.join(str(a) for a in cmd_list)}")
     try:
-        print(f"[docker] {cmd} {' '.join(args)}")
-        result = subprocess.run(
-            ["docker", cmd, *args],
-            capture_output=True,
-            text=True
+        r = subprocess.run(
+            cmd_list, capture_output=True, text=True, timeout=timeout, shell=False
         )
-        if result.returncode != 0:
-            print(f"[docker] warning: {result.stderr.strip() or result.stdout.strip()}")
-            return False
-        return True
-    except FileNotFoundError:
-        print(f"[docker] not found – skipping '{cmd}' (config will still be updated)")
+        out = (r.stdout or "").strip()
+        err = (r.stderr or "").strip()
+        if r.returncode == 0:
+            if out:
+                print(f"[docker] ok: {out[:300]}")
+            return True
+        print(f"[docker] rc={r.returncode}: {err or out}")
         return False
     except Exception as e:
         print(f"[docker] ERROR: {e}")
         return False
 
-def restart_docker(container):
-    return safe_docker("restart", container)
 
-def restart_systemd(service):
-    try:
-        print(f"[restart] systemctl restart → {service}")
-        result = subprocess.run(
-            ["systemctl", "restart", service],
-            capture_output=True,
-            text=True
-        )
-        return result.returncode == 0
-    except FileNotFoundError:
-        print("[restart] systemctl not found – skipping")
+def restart_named(name):
+    if not name:
         return False
-    except Exception as e:
-        print("[restart] systemd ERROR:", e)
-        return False
-
-def restart_frigate():
-    print(f"[frigate] Restart requested (install type: {FRIGATE_INSTALL_TYPE})")
-
-    if FRIGATE_INSTALL_TYPE == "docker":
-        return restart_docker(FRIGATE_CONTAINER_NAME)
-
-    if FRIGATE_INSTALL_TYPE == "baremetal":
-        return restart_systemd(FRIGATE_SERVICE_NAME)
-
-    print("[frigate] Unknown install type → trying Docker (will skip if not available)")
-    return restart_docker(FRIGATE_CONTAINER_NAME)
-
-def restart_go2rtc():
-    print("[go2rtc] Restart requested")
-    return restart_docker(GO2RTC_CONTAINER_NAME)
-
-# ---------------------------------------------------------
-# REMOVE FROM CONFIG FILES
-# ---------------------------------------------------------
-
-def remove_go2rtc_streams(cam_id):
-    backup_file(GO2RTC_CONFIG_PATH)
-    cfg = load_yaml(GO2RTC_CONFIG_PATH)
-
-    removed = False
-    if "streams" in cfg:
-        if cam_id in cfg["streams"]:
-            del cfg["streams"][cam_id]
-            removed = True
-            print(f"[go2rtc] Removed stream {cam_id}")
-
-        main_key = f"{cam_id}_main"
-        if main_key in cfg["streams"]:
-            del cfg["streams"][main_key]
-            removed = True
-            print(f"[go2rtc] Removed stream {main_key}")
-
-    if save_yaml(GO2RTC_CONFIG_PATH, cfg):
-        if removed:
-            restart_go2rtc()
+    if docker_cmd("restart", name):
+        print(f"[docker] RESTARTED: {name}")
+        return True
+    if docker_cmd("start", name):
+        print(f"[docker] STARTED: {name}")
         return True
     return False
 
+
+def wait_frigate_api(timeout_sec=90):
+    """Block until Frigate answers so client loadCameras() can get cameras."""
+    import urllib.request
+    url = str(FRIGATE_API_BASE).rstrip("/") + "/api/config"
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=3) as resp:
+                if resp.status == 200:
+                    print(f"[frigate] API ready ({url})")
+                    return True
+        except Exception:
+            pass
+        time.sleep(2)
+    print("[frigate] API wait timed out")
+    return False
+
+
+def force_restart_and_wait():
+    print("========== RESTART Frigate + go2rtc (blocking) ==========")
+    go2 = GO2RTC_CONTAINER_NAME or "go2rtc"
+    fr = FRIGATE_CONTAINER_NAME or "frigate-frigate-1"
+
+    restart_named(go2)
+    time.sleep(2)
+    restart_named(fr)
+
+    ready = wait_frigate_api(timeout_sec=90)
+    # Extra settle so /api/cameras is populated for the client
+    time.sleep(3)
+    print(f"========== RESTART done api_ready={ready} ==========")
+    return ready
+
+
+def remove_go2rtc_streams(cam_id):
+    cfg, ok = load_yaml(GO2RTC_CONFIG_PATH)
+    if not ok:
+        print("[go2rtc] load failed — skip write")
+        return False
+    streams = cfg.get("streams")
+    if not isinstance(streams, dict):
+        print("[go2rtc] no streams dict")
+        return True
+    streams, removed = delete_stream_keys(streams, cam_id)
+    cfg["streams"] = streams
+    if not removed:
+        print(f"[go2rtc] nothing to remove for {cam_id}")
+        return True
+    backup_file(GO2RTC_CONFIG_PATH)
+    if save_yaml(GO2RTC_CONFIG_PATH, cfg):
+        print(f"[go2rtc] removed {removed}")
+        return True
+    return False
+
+
 def remove_frigate_camera(cam_id):
+    cfg, ok = load_yaml(FRIGATE_CONFIG_PATH)
+    if not ok:
+        print("[frigate] load failed — skip write")
+        return False
+    changed = False
+    cameras = cfg.get("cameras")
+    for key in (cam_id, cam_id.replace(" ", "_")):
+        if isinstance(cameras, dict) and key in cameras:
+            del cameras[key]
+            cfg["cameras"] = cameras
+            changed = True
+            print(f"[frigate] removed camera {key}")
+            break
+    go2 = cfg.get("go2rtc")
+    if isinstance(go2, dict) and isinstance(go2.get("streams"), dict):
+        streams, removed = delete_stream_keys(go2["streams"], cam_id)
+        go2["streams"] = streams
+        cfg["go2rtc"] = go2
+        if removed:
+            changed = True
+            print(f"[frigate] removed embedded streams {removed}")
+    if not changed:
+        return True
     backup_file(FRIGATE_CONFIG_PATH)
-    cfg = load_yaml(FRIGATE_CONFIG_PATH)
-
-    if "cameras" in cfg and cam_id in cfg["cameras"]:
-        del cfg["cameras"][cam_id]
-        print(f"[frigate] Removed camera {cam_id}")
-
     return save_yaml(FRIGATE_CONFIG_PATH, cfg)
 
-# ---------------------------------------------------------
-# FILE / FOLDER CLEANUP
-# ---------------------------------------------------------
-
-def delete_dir_if_exists(path):
-    try:
-        if not path.exists():
-            return True
-        print(f"[frigate] Deleting folder: {path}")
-        shutil.rmtree(path, ignore_errors=False)
-        return not path.exists()
-    except Exception as e:
-        print(f"[frigate] Failed to delete folder {path}: {e}")
-        return False
-
-def delete_file_if_exists(path):
-    try:
-        if not path.exists():
-            return True
-        print(f"[frigate] Deleting file: {path}")
-        path.unlink(missing_ok=True)
-        return not path.exists()
-    except Exception as e:
-        print(f"[frigate] Failed to delete file {path}: {e}")
-        return False
-
-def purge_cache_root():
-    try:
-        if not FRIGATE_CACHE_PATH.exists():
-            return True
-
-        print(f"[frigate] Purging cache root: {FRIGATE_CACHE_PATH}")
-        success = True
-
-        for child in sorted(FRIGATE_CACHE_PATH.iterdir(), key=lambda p: (len(p.parts), str(p)), reverse=True):
-            if child.is_dir():
-                if not delete_dir_if_exists(child):
-                    success = False
-            elif child.is_file():
-                if not delete_file_if_exists(child):
-                    success = False
-
-        return success
-    except Exception as e:
-        print(f"[frigate] Failed to purge cache root {FRIGATE_CACHE_PATH}: {e}")
-        return False
-
-def _matches_camera_name(path, cam_id):
-    target = cam_id.casefold()
-    target_main = f"{cam_id}_main".casefold()
-
-    if path.name.casefold() == target or path.name.casefold() == target_main:
-        return True
-
-    if path.stem.casefold() == target or path.stem.casefold() == target_main:
-        return True
-
-    parts = [part.casefold() for part in path.parts]
-    return target in parts or target_main in parts
 
 def delete_camera_files(cam_id):
-    success = True
-    delete_roots = []
-
     for root in (FRIGATE_MEDIA_PATH, FRIGATE_CACHE_PATH):
-        if root and root.exists() and root not in delete_roots:
-            delete_roots.append(root)
+        try:
+            root = Path(root)
+            if not root.exists():
+                continue
+            for name in (cam_id, cam_id.replace(" ", "_"), f"{cam_id}_main"):
+                folder = root / name
+                if folder.is_dir():
+                    print(f"[media] delete {folder}")
+                    shutil.rmtree(folder, ignore_errors=True)
+        except Exception as e:
+            print(f"[media] ERROR: {e}")
 
-    parent_media = getattr(FRIGATE_MEDIA_PATH, "parent", None)
-    if parent_media and parent_media.exists() and parent_media not in delete_roots:
-        delete_roots.append(parent_media)
-
-    parent_cache = getattr(FRIGATE_CACHE_PATH, "parent", None)
-    if parent_cache and parent_cache.exists() and parent_cache not in delete_roots:
-        delete_roots.append(parent_cache)
-
-    for root in delete_roots:
-        print(f"[frigate] Scanning delete root: {root}")
-        candidates = sorted(root.rglob('*'), key=lambda p: (len(p.parts), str(p)), reverse=True)
-        for path in candidates:
-            if _matches_camera_name(path, cam_id):
-                if path.is_dir():
-                    if not delete_dir_if_exists(path):
-                        success = False
-                elif path.is_file():
-                    if not delete_file_if_exists(path):
-                        success = False
-
-    direct_media_folder = FRIGATE_MEDIA_PATH / cam_id
-    if not delete_dir_if_exists(direct_media_folder):
-        success = False
-
-    direct_cache_folder = FRIGATE_CACHE_PATH / cam_id
-    if not delete_dir_if_exists(direct_cache_folder):
-        success = False
-
-    if not purge_cache_root():
-        success = False
-
-    return success
-
-# ---------------------------------------------------------
-# PUBLIC API
-# ---------------------------------------------------------
 
 def remove_camera(cam_id):
-    print(f"[remove_camera] Removing {cam_id}")
-
+    print(f"[remove_camera] ===== Removing {cam_id!r} =====")
+    cam_id = (cam_id or "").strip()
     if not cam_id:
         return {
             "event": "cameraRemoveResult",
             "status": "error",
             "ok": False,
-            "message": "Invalid camera name"
+            "message": "Invalid camera name",
         }
-
-    # Try to stop Frigate (safe – will skip if Docker is missing)
-    print("[frigate] Stopping Frigate before deletion...")
-    safe_docker("stop", FRIGATE_CONTAINER_NAME)
 
     go2_ok = remove_go2rtc_streams(cam_id)
     fr_ok = remove_frigate_camera(cam_id)
-    delete_ok = delete_camera_files(cam_id)
+    if not (go2_ok and fr_ok):
+        return {
+            "event": "cameraRemoveResult",
+            "status": "error",
+            "ok": False,
+            "message": f"Failed to update config for {cam_id}",
+        }
 
-    # Restart is best-effort
-    restart_ok = restart_frigate()
+    # Blocking restart — required for existing PX popup logic
+    try:
+        force_restart_and_wait()
+    except Exception as e:
+        print(f"[remove_camera] restart ERROR: {e}")
 
-    # We consider success if the config files were updated
-    ok = go2_ok and fr_ok
+    try:
+        delete_camera_files(cam_id)
+    except Exception as e:
+        print(f"[remove_camera] media ERROR: {e}")
 
+    print("[remove_camera] ===== done ok=True =====")
     return {
         "event": "cameraRemoveResult",
-        "status": "ok" if ok else "error",
-        "ok": ok,
-        "message": f"Camera {cam_id} removed" + (" – restart skipped (no Docker)" if not restart_ok else "")
+        "status": "ok",
+        "ok": True,
+        "message": f"Camera {cam_id} removed",
     }

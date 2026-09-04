@@ -19,6 +19,7 @@ ApplicationWindow {
     property var frigateRef: frigate
     property var cameraList: []
     property string selectedCameraId: ""
+    property string pendingRemoveCameraId: ""
     property string serverName: ""
     property string _fullscreenCameraKey: ""
 
@@ -172,12 +173,17 @@ ApplicationWindow {
         }
 
         onRequestRemoveCamera: function(id) {
+            mainWindow.pendingRemoveCameraId = id
+            var host = null
+            if (contentLoader.item && contentLoader.item.objectName === "ServerView")
+                host = contentLoader.item
             popupManager.openPopup(
                 "qrc:/app/resources/qml/components/popups/RemoveCameraPopup.qml",
                 {
                     frigateRef: frigateRef,
                     cameraId: id,
-                    popupManager: popupManager
+                    popupManager: popupManager,
+                    gridHost: host
                 }
             )
         }
@@ -276,9 +282,6 @@ ApplicationWindow {
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
     }
 
-    //
-    // PART 2 — CONTENT LOADER
-    //
     Loader {
         id: contentLoader
         anchors.fill: parent
@@ -330,18 +333,12 @@ ApplicationWindow {
         }
     }
 
-    //
-    // PopupManager FIRST (lower z) — hosts Remove/Add/Edit dialogs
-    //
     PopupManager {
         id: popupManager
         anchors.fill: parent
         z: 999999
     }
 
-    //
-    // Restart overlay LAST (higher z) — always above PopupManager
-    //
     RestartPopup {
         id: restartPopup
         anchors.fill: parent
@@ -365,7 +362,7 @@ ApplicationWindow {
             c.contentLoader = contentLoader
             c.restartPopup = restartPopup
             c.frigatePollTimer = frigatePollTimer
-            c.popupManager = popupManager   // ⭐ required for closePopup
+            c.popupManager = popupManager
         }
     }
 }

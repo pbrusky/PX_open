@@ -24,6 +24,7 @@ Item {
     property bool fullscreenLocked: false
 
     property var cameraOnlineMap: ({})
+    property bool _skipStreamStopOnRemove: false
 
     function cameraOnline(name) {
         cameraOnlineMap[name] = true
@@ -88,12 +89,127 @@ Item {
         cameraNames.splice(index, 1)
         cameraNames = cameraNames.slice()
         updateGridSize()
-        if (name !== "" && frigateRef) {
-            if (typeof frigateRef.stopStream === "function")
-                frigateRef.stopStream(name)
-            if (typeof frigateRef.stopFullscreenStream === "function")
-                frigateRef.stopFullscreenStream(name)
+        if (name !== "" && frigateRef && !gridContainer._skipStreamStopOnRemove) {
+            var n = name
+            var ref = frigateRef
+            Qt.callLater(function() {
+                if (!ref)
+                    return
+                try {
+                    if (typeof ref.stopStream === "function")
+                        ref.stopStream(n)
+                } catch (e) {
+                    console.log("CameraGrid stopStream error", e)
+                }
+            })
         }
+    }
+
+    function removeCameraByName(cameraName) {
+        if (!cameraName)
+            return
+        var target = String(cameraName)
+        var targetAlt = target.replace(/ /g, "_")
+        var idx = -1
+        for (var i = 0; i < cameraNames.length; ++i) {
+            var n = String(cameraNames[i] || "")
+            if (n === target || n === targetAlt || n.replace(/ /g, "_") === targetAlt) {
+                idx = i
+                break
+            }
+        }
+        if (idx < 0)
+            return
+
+        console.log("CameraGrid: removing tile for deleted camera", target)
+
+        if (fullscreenName === target || fullscreenName === targetAlt ||
+            String(fullscreenName).replace(/ /g, "_") === targetAlt) {
+            fullscreenLoader.visible = false
+            fullscreenName = ""
+            fullscreenSubQueue = null
+            fullscreenMainQueue = null
+            fullscreenLocked = false
+        }
+
+        _skipStreamStopOnRemove = true
+        try {
+            removeTile(idx)
+        } finally {
+            _skipStreamStopOnRemove = false
+        }
+    }
+
+    // Clear EVERY tile before system remove (Frigate/go2rtc restart kills streams)
+    function clearAllTiles() {
+        console.log("CameraGrid: clearAllTiles — removing", cameraNames.length, "cameras from grid")
+
+        if (fullscreenName !== "") {
+            var fsName = fullscreenName
+            fullscreenLoader.visible = false
+            fullscreenName = ""
+            fullscreenSubQueue = null
+            fullscreenMainQueue = null
+            fullscreenLocked = false
+            if (frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
+                try {
+                    frigateRef.stopFullscreenStream(fsName)
+                } catch (e) {
+                    console.log("CameraGrid clearAllTiles stopFullscreenStream error", e)
+                }
+            }
+        }
+
+        var names = cameraNames.slice()
+        cameraNames = []
+        updateGridSize()
+        hoverIndex = -1
+        hoverCameraName = ""
+
+        if (!frigateRef)
+            return
+
+        var ref = frigateRef
+        for (var i = 0; i < names.length; ++i) {
+            var n = names[i]
+            if (!n)
+                continue
+            try {
+                if (typeof ref.stopStream === "function")
+                    ref.stopStream(n)
+                if (typeof ref.stopFullscreenStream === "function")
+                    ref.stopFullscreenStream(n)
+            } catch (e) {
+                console.log("CameraGrid clearAllTiles stop error", n, e)
+            }
+        }
+    }
+
+    function pruneMissingCameras(list) {
+        if (!list)
+            list = []
+        var valid = ({})
+        for (var i = 0; i < list.length; ++i) {
+            var c = list[i]
+            var id = ""
+            if (typeof c === "string")
+                id = c
+            else if (c)
+                id = String(c.id || c.name || "")
+            if (id) {
+                valid[id] = true
+                valid[id.replace(/ /g, "_")] = true
+                valid[id.replace(/_/g, " ")] = true
+            }
+        }
+        var toRemove = []
+        for (var j = 0; j < cameraNames.length; ++j) {
+            var n = String(cameraNames[j] || "")
+            if (!valid[n] && !valid[n.replace(/ /g, "_")] && !valid[n.replace(/_/g, " ")])
+                toRemove.push(n)
+        }
+        for (var k = 0; k < toRemove.length; ++k)
+            removeCameraByName(toRemove[k])
     }
 
     function updateHoverIndex(x, y, cameraName) {

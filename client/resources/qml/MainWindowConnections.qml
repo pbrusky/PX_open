@@ -10,7 +10,7 @@ Item {
     property var contentLoader
     property var restartPopup
     property var frigatePollTimer
-    property var popupManager   // ⭐ set from MainWindow
+    property var popupManager
 
     property bool restartInProgress: false
     property real restartStartedAt: 0
@@ -25,7 +25,6 @@ Item {
     }
 
     function showRestartOverlay() {
-        // Make sure remove is gone again
         dismissCurrentPopup()
 
         restartInProgress = true
@@ -39,17 +38,22 @@ Item {
                 restartPopup.visible = true
         }
 
+        restartMaxTimer.restart()
         pollDelayTimer.restart()
     }
 
     function startRestartFlow() {
         dismissCurrentPopup()
-        // Wait a tick so destroy finishes, then show restart only
         Qt.callLater(showRestartOverlay)
     }
 
     function stopRestartFlow() {
         restartInProgress = false
+
+        if (pollDelayTimer.running)
+            pollDelayTimer.stop()
+        if (restartMaxTimer.running)
+            restartMaxTimer.stop()
 
         if (frigatePollTimer && frigatePollTimer.running)
             frigatePollTimer.stop()
@@ -76,32 +80,46 @@ Item {
         }
     }
 
+    Timer {
+        id: restartMaxTimer
+        interval: 20000
+        repeat: false
+        onTriggered: {
+            if (restartInProgress) {
+                console.log("MainWindowConnections: restart max timeout — closing overlay")
+                if (frigateRef)
+                    frigateRef.loadCameras()
+                stopRestartFlow()
+            }
+        }
+    }
+
     Connections {
         target: frigateRef
         ignoreUnknownSignals: true
 
         function onCamerasLoaded(list) {
             if (!list)
-                return
+                list = []
 
-            if (list.length > 0) {
-                mainWindow.cameraList = list
-                if (sidebarWrapper)
-                    sidebarWrapper.cameraList = list
+            mainWindow.cameraList = list
+            if (sidebarWrapper)
+                sidebarWrapper.cameraList = list
 
-                if (contentLoader.item &&
-                    contentLoader.item.objectName === "ServerView" &&
-                    contentLoader.item.updateCameras) {
-                    contentLoader.item.updateCameras(list)
-                }
-
-                mainWindow.camerasLoaded(list)
+            if (contentLoader.item &&
+                contentLoader.item.objectName === "ServerView" &&
+                contentLoader.item.updateCameras) {
+                contentLoader.item.updateCameras(list)
             }
+
+            mainWindow.camerasLoaded(list)
 
             if (restartInProgress) {
                 var elapsed = Date.now() - restartStartedAt
-                if (list.length > 0 && elapsed >= 3000)
+                if (elapsed >= 2500) {
+                    console.log("MainWindowConnections: Frigate responded — closing restart overlay, cameras=", list.length)
                     stopRestartFlow()
+                }
                 return
             }
 
@@ -137,16 +155,30 @@ Item {
         }
 
         function onCameraAddResult(ok, message) {
-            startRestartFlow()
+            console.log("MainWindowConnections cameraAddResult", ok, message)
+            if (ok)
+                startRestartFlow()
+            else
+                dismissCurrentPopup()
         }
 
         function onCameraEditResult(ok, message) {
-            startRestartFlow()
+            console.log("MainWindowConnections cameraEditResult", ok, message)
+            if (ok)
+                startRestartFlow()
+            else
+                dismissCurrentPopup()
         }
 
         function onCameraRemoveResult(ok, message) {
             console.log("MainWindowConnections cameraRemoveResult", ok, message)
-            startRestartFlow()
+            // Grid already cleared in RemoveCameraPopup before the API call
+            if (mainWindow)
+                mainWindow.pendingRemoveCameraId = ""
+            if (ok)
+                startRestartFlow()
+            else
+                dismissCurrentPopup()
         }
     }
 

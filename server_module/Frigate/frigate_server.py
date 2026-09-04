@@ -1,5 +1,4 @@
 import http.server
-import ssl
 import json
 import socket
 import threading
@@ -12,7 +11,8 @@ from config import (
     LAN_IP, HTTP_PORT, HTTPS_PORT, BROADCAST_IP,
     PROGRESS_FILE, MODULE_ID, SYSTEM_ID, SYSTEM_NAME,
     FRIGATE_CONFIG_PATH, FRIGATE_MEDIA_PATH, FRIGATE_CACHE_PATH,
-    GO2RTC_CONFIG_PATH
+    GO2RTC_CONFIG_PATH,
+    CONFIG_FILE,
 )
 
 from https_server import start_https_server
@@ -23,6 +23,39 @@ from remove_camera import remove_camera
 
 HOST = "0.0.0.0"
 DISCOVERY_PORT = 3666
+
+
+def get_onvif_scan_prefix() -> str:
+    """
+    Subnet prefix for onvif_scan.py, e.g. "10.36.24."
+
+    Priority:
+      1) config.json key "scan_subnet" (e.g. "10.36.24" or "10.36.24.")
+      2) Derived from LAN_IP from config (auto-detected or lan_ip override)
+    """
+    try:
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f) or {}
+            raw = str(cfg.get("scan_subnet") or "").strip()
+            if raw:
+                raw = raw.rstrip(".")
+                parts = raw.split(".")
+                if len(parts) >= 3:
+                    return ".".join(parts[:3]) + "."
+                return raw + "."
+    except Exception as e:
+        print(f"[ONVIF] Could not read scan_subnet from config: {e}")
+
+    try:
+        parts = str(LAN_IP).strip().split(".")
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            return ".".join(parts[:3]) + "."
+    except Exception:
+        pass
+
+    print(f"[ONVIF] WARN: could not derive subnet from LAN_IP={LAN_IP!r}, using 192.168.1.")
+    return "192.168.1."
 
 
 def broadcast_discovery():
@@ -49,7 +82,6 @@ def broadcast_discovery():
             if BROADCAST_IP:
                 targets.add(BROADCAST_IP)
 
-            # Always try common fallbacks (helps on Windows / weird masks)
             try:
                 base = LAN_IP.rsplit(".", 1)[0]
                 targets.update([
@@ -90,30 +122,36 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length) if length > 0 else b''
+            body = self.rfile.read(length) if length > 0 else b""
             data = json.loads(body) if body else {}
 
             if self.path == "/api/onvifDiscover":
                 username = data.get("username", "")
                 password = data.get("password", "")
 
-                print(f"[ONVIF] Discovery requested with user: '{username}'")
+                req_subnet = str(data.get("subnet") or data.get("scan_subnet") or "").strip()
+                if req_subnet:
+                    prefix = req_subnet.rstrip(".") + "."
+                else:
+                    prefix = get_onvif_scan_prefix()
+
+                print(f"[ONVIF] Discovery requested user='{username}' subnet={prefix}")
 
                 try:
                     script_path = Path(__file__).with_name("onvif_scan.py")
                     result = subprocess.run(
-                        [sys.executable, str(script_path), "10.36.24.", username, password],
+                        [sys.executable, str(script_path), prefix, username, password],
                         capture_output=True,
                         text=True,
                         timeout=40,
                         stdin=subprocess.DEVNULL,
-                        cwd=str(Path(__file__).resolve().parent)
+                        cwd=str(Path(__file__).resolve().parent),
                     )
 
                     if result.stderr.strip():
                         print("[ONVIF Scanner] Stderr:", result.stderr.strip())
 
-                    devices = json.loads(result.stdout.strip())
+                    devices = json.loads(result.stdout.strip() or "[]")
                     print(f"[ONVIF] Found {len(devices)} device(s)")
                     return self.send_json({"devices": devices})
 
@@ -172,7 +210,10 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                                     rtsp = uri.text.strip()
                                     print(f"[RTSP] SUCCESS with token '{token}'")
                                     if username and password:
-                                        rtsp = rtsp.replace("rtsp://", f"rtsp://{username}:{password}@")
+                                        rtsp = rtsp.replace(
+                                            "rtsp://",
+                                            f"rtsp://{username}:{password}@",
+                                        )
                                     return self.send_json({"rtsp": rtsp})
 
                         except Exception:
@@ -181,9 +222,14 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     print(f"[RTSP] ONVIF failed for {ip}, using fallback")
 
                     if username:
-                        fallback = f"rtsp://{username}:{password}@{ip}:554/Streaming/Channels/101"
+                        fallback = (
+                            f"rtsp://{username}:{password}@{ip}:554/"
+                            f"Streaming/Channels/101"
+                        )
                     else:
-                        fallback = f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
+                        fallback = (
+                            f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
+                        )
 
                     return self.send_json({"rtsp": fallback})
 
@@ -196,7 +242,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     data.get("id"),
                     data.get("rtsp"),
                     bool(data.get("record", True)),
-                    data.get("rtsp_sub")
+                    data.get("rtsp_sub"),
                 ))
 
             if self.path == "/api/editCamera":
@@ -204,7 +250,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     data.get("id"),
                     data.get("rtsp"),
                     data.get("rtsp_sub"),
-                    bool(data.get("record", True))
+                    bool(data.get("record", True)),
                 ))
 
             if self.path == "/api/removeCamera":
@@ -234,7 +280,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     "version": "1.0",
                     "status": "online",
                     "httpPort": HTTP_PORT,
-                    "httpsPort": HTTPS_PORT
+                    "httpsPort": HTTPS_PORT,
                 }
             })
 
@@ -251,6 +297,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"[*] Starting Frigate Integration Module on {LAN_IP}")
+    print(f"[*] ONVIF scan subnet prefix: {get_onvif_scan_prefix()}")
 
     threading.Thread(target=broadcast_discovery, daemon=True).start()
 

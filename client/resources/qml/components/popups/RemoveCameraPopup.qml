@@ -16,25 +16,39 @@ Item {
     property var frigateRef: null
     property string cameraId: ""
     property bool closing: false
+    property var gridHost: null
 
     function forceClose() {
         if (closing)
             return
         closing = true
-
-        // Preferred: PopupManager connection
         closeRequested()
-
-        // Fallback: call manager directly
         if (popupManager && typeof popupManager.closePopup === "function")
             popupManager.closePopup()
-
-        // Last resort: hide + destroy self
         visible = false
         Qt.callLater(function() {
             if (removePopup)
                 removePopup.destroy()
         })
+    }
+
+    // Remove ALL cameras from the grid first — remove script restarts
+    // Frigate + go2rtc so any tile left in the grid will not play again.
+    function clearGridBeforeRemove() {
+        try {
+            if (gridHost && typeof gridHost.clearAllFromGrid === "function") {
+                console.log("RemoveCameraPopup: clearing entire camera grid before server remove")
+                gridHost.clearAllFromGrid()
+                return
+            }
+            // Fallback: at least remove the camera being deleted
+            if (gridHost && typeof gridHost.removeFromGrid === "function" && cameraId) {
+                console.log("RemoveCameraPopup: fallback removeFromGrid", cameraId)
+                gridHost.removeFromGrid(cameraId)
+            }
+        } catch (e) {
+            console.log("RemoveCameraPopup: grid clear error", e)
+        }
     }
 
     Rectangle {
@@ -48,7 +62,6 @@ Item {
         height: 280
         radius: 8
         color: "#000000"
-
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
         anchors.verticalCenterOffset: -80
@@ -74,7 +87,6 @@ Item {
             }
 
             Text {
-                id: camLabel
                 text: removePopup.cameraId
                 color: "orange"
                 font.pixelSize: 18
@@ -103,6 +115,10 @@ Item {
                         statusText.color = "yellow"
                         removeBtn.enabled = false
 
+                        // 1) Clear ALL tiles from grid first
+                        clearGridBeforeRemove()
+
+                        // 2) Then server remove (restarts Frigate + go2rtc)
                         if (frigateRef)
                             frigateRef.removeCamera(removePopup.cameraId)
                         else {
@@ -126,12 +142,9 @@ Item {
     Connections {
         target: frigateRef
         ignoreUnknownSignals: true
-
         function onCameraRemoveResult(ok, message) {
             statusText.text = message
             statusText.color = ok ? "lightgreen" : "red"
-
-            // ALWAYS close this popup when the server answers
             forceClose()
             cameraRemoved()
         }
