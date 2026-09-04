@@ -125,6 +125,68 @@ def detect_paths_from_docker(container_name):
         return None, None, None
 
 
+def detect_go2rtc_config_from_docker(container_name):
+    """
+    Resolve host path to go2rtc.yaml from the go2rtc container mounts.
+    Handles file mounts (.../go2rtc.yaml) and directory mounts (.../config).
+    """
+    if not container_name:
+        return None
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", container_name],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            print(f"[CONFIG] go2rtc inspect failed for '{container_name}' (container missing?)")
+            return None
+        data = json.loads(result.stdout)[0]
+        mounts = data.get("Mounts", []) or []
+
+        file_hits = []
+        dir_hits = []
+
+        for m in mounts:
+            src = (m.get("Source") or "").strip()
+            dest = (m.get("Destination") or "").strip()
+            if not src:
+                continue
+            src_path = Path(src)
+            dest_l = dest.lower()
+
+            if src_path.name == "go2rtc.yaml" or dest_l.endswith("go2rtc.yaml"):
+                file_hits.append(src_path)
+                continue
+
+            if dest_l in ("/config", "/etc/go2rtc", "/etc/config") or dest_l.rstrip("/").endswith("/config"):
+                dir_hits.append(src_path / "go2rtc.yaml")
+                continue
+
+            if src_path.is_dir():
+                candidate = src_path / "go2rtc.yaml"
+                if candidate.exists():
+                    dir_hits.append(candidate)
+
+        if file_hits:
+            chosen = file_hits[0]
+            print(f"[CONFIG] go2rtc yaml from file mount: {chosen}")
+            return chosen
+        if dir_hits:
+            chosen = dir_hits[0]
+            print(f"[CONFIG] go2rtc yaml from dir mount: {chosen}")
+            return chosen
+
+        print(f"[CONFIG] go2rtc container '{container_name}' has no usable go2rtc.yaml mount")
+        for m in mounts:
+            print(f"[CONFIG]   mount: {m.get('Source')} -> {m.get('Destination')}")
+        return None
+    except Exception as e:
+        print("[CONFIG] go2rtc docker inspect error:", e)
+        return None
+
+
 def auto_detect_container(name_hint: str):
     try:
         result = subprocess.run(
@@ -195,16 +257,16 @@ def platform_path_defaults() -> dict:
         }
 
     candidates_config = [
+        Path("/etc/frigate/config.yml"),
         Path("/config/config.yml"),
         Path("/opt/frigate/config/config.yml"),
         Path.home() / "frigate" / "config" / "config.yml",
-        Path("/etc/frigate/config.yml"),
     ]
     candidates_go2rtc = [
-        Path("/config/go2rtc.yaml"),
+        Path("/etc/go2rtc/go2rtc.yaml"),
         Path("/opt/frigate/go2rtc.yaml"),
         Path.home() / "frigate" / "go2rtc.yaml",
-        Path("/etc/go2rtc/go2rtc.yaml"),
+        Path("/config/go2rtc.yaml"),
     ]
     candidates_media = [
         Path("/media/frigate"),
@@ -226,14 +288,13 @@ def platform_path_defaults() -> dict:
     return {
         "frigate_media_path": first_existing(candidates_media, Path("/media/frigate")),
         "frigate_cache_path": first_existing(candidates_cache, Path("/tmp/cache")),
-        "frigate_config_path": first_existing(candidates_config, Path("/config/config.yml")),
-        "go2rtc_config_path": first_existing(candidates_go2rtc, Path("/config/go2rtc.yaml")),
+        "frigate_config_path": first_existing(candidates_config, Path("/etc/frigate/config.yml")),
+        "go2rtc_config_path": first_existing(candidates_go2rtc, Path("/etc/go2rtc/go2rtc.yaml")),
         "progress_file": str(APP_DIR / "onvif_progress.log"),
     }
 
 
 def path_looks_foreign(path_str: str) -> bool:
-    """True if path is clearly for the other OS (e.g. C:\\ on Linux)."""
     if not path_str:
         return False
     s = str(path_str)
@@ -273,11 +334,20 @@ def build_defaults() -> dict:
     cache_path = str(cache) if cache else os_paths["frigate_cache_path"]
     config_path = str(config) if config else os_paths["frigate_config_path"]
 
+    # go2rtc: container mounts first, then Frigate sibling, then defaults
     go2rtc_path = os_paths["go2rtc_config_path"]
-    if config:
+    from_go2rtc = detect_go2rtc_config_from_docker(go2rtc_container)
+    if from_go2rtc:
+        go2rtc_path = str(from_go2rtc)
+    elif config:
         sibling = Path(config).parent / "go2rtc.yaml"
         if sibling.exists():
             go2rtc_path = str(sibling)
+            print(f"[CONFIG] go2rtc yaml sibling of Frigate config: {go2rtc_path}")
+        else:
+            print(f"[CONFIG] go2rtc path fallback default: {go2rtc_path}")
+    else:
+        print(f"[CONFIG] go2rtc path fallback default: {go2rtc_path}")
 
     return {
         "http_port": int(os.getenv("HTTP_PORT", 8001)),
@@ -308,7 +378,7 @@ def build_defaults() -> dict:
 
 
 # ---------------------------------------------------------
-# LOAD / CREATE USER CONFIG (one file both OS)
+# LOAD / CREATE USER CONFIG
 # ---------------------------------------------------------
 
 def load_user_config() -> dict:
