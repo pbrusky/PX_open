@@ -270,7 +270,6 @@ void FFmpegWorker::decodeLoop()
     int lastSrcW = 0, lastSrcH = 0, lastDstW = 0, lastDstH = 0;
     qint64 lastStatsMs = 0;
     bool statsSent = false;
-    int frameLogCount = 0;
 
     qint64 playStartPtsMs = -1;
     qint64 playStartWallMs = 0;
@@ -415,12 +414,6 @@ void FFmpegWorker::decodeLoop()
                 } else {
                     QThread::msleep(33);
                 }
-            }
-
-            if (frameLogCount < 3) {
-                ++frameLogCount;
-                qInfo() << "[FFmpegWorker] frame" << frameLogCount
-                        << dstW << "x" << dstH << m_url;
             }
 
             if (m_queue && img.width() > 16 && img.height() > 16)
