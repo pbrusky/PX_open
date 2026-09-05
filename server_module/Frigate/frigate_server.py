@@ -20,6 +20,7 @@ from https_server import start_https_server
 from add_camera import add_camera, restart_frigate, restart_go2rtc
 from edit_camera import edit_camera
 from remove_camera import remove_camera
+from config_file import get_frigate_config, save_frigate_config, get_go2rtc_config, save_go2rtc_config
 
 HOST = "0.0.0.0"
 DISCOVERY_PORT = 3666
@@ -256,6 +257,18 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
             if self.path == "/api/removeCamera":
                 return self.send_json(remove_camera(data.get("id")))
 
+            if self.path == "/api/saveFrigateConfig":
+                return self.send_json(save_frigate_config(
+                    data.get("content"),
+                    restart=bool(data.get("restart", True)),
+                ))
+
+            if self.path == "/api/saveGo2rtcConfig":
+                return self.send_json(save_go2rtc_config(
+                    data.get("content"),
+                    restart=bool(data.get("restart", True)),
+                ))
+
             if self.path == "/api/restartFrigate":
                 return self.send_json({"success": restart_frigate()})
 
@@ -283,6 +296,12 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     "httpsPort": HTTPS_PORT,
                 }
             })
+
+        if self.path.startswith("/api/getFrigateConfig"):
+            return self.send_json(get_frigate_config())
+
+        if self.path.startswith("/api/getGo2rtcConfig"):
+            return self.send_json(get_go2rtc_config())
 
         if self.path.startswith("/api/onvifProgress"):
             try:
