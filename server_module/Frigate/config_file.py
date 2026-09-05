@@ -2,11 +2,14 @@
 config_file.py — read / write Frigate and go2rtc config files for the PX editor.
 
 Uses paths from config.py. Always creates a timestamped backup before overwrite.
+Restart runs in a background thread so the HTTP response returns quickly and
+the client can show the RestartPopup while Frigate comes back up.
 """
 from __future__ import annotations
 
 import time
 import shutil
+import threading
 from pathlib import Path
 
 from config import (
@@ -89,6 +92,19 @@ def _restart_named(name: str) -> bool:
         return False
 
 
+def _restart_async(names: list) -> None:
+    """Restart containers after the HTTP response has been sent."""
+    def worker():
+        time.sleep(0.5)
+        for name in names:
+            if not name:
+                continue
+            print(f"[config_file] background restart: {name}")
+            _restart_named(name)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def get_frigate_config() -> dict:
     path = Path(FRIGATE_CONFIG_PATH)
     ok, content, err = _read_text(path)
@@ -159,22 +175,28 @@ def save_frigate_config(content, restart: bool = True) -> dict:
             "message": f"Write failed: {werr}",
         }
 
-    restart_ok = True
     if restart:
-        restart_ok = _restart_named(FRIGATE_CONTAINER_NAME)
+        names = []
+        go = str(GO2RTC_CONTAINER_NAME or "").strip()
+        fr = str(FRIGATE_CONTAINER_NAME or "").strip()
+        if go:
+            names.append(go)
+        if fr:
+            names.append(fr)
+        _restart_async(names)
 
     msg = f"Saved {path}"
     if backup:
         msg += f" (backup {backup})"
-    if restart and not restart_ok:
-        msg += " — restart Frigate failed (config was written)"
+    if restart:
+        msg += " — restart started in background"
 
     return {
         "ok": True,
         "event": "saveFrigateConfig",
         "path": str(path),
         "backup": backup,
-        "restarted": bool(restart and restart_ok),
+        "restarted": bool(restart),
         "message": msg,
     }
 
@@ -217,25 +239,26 @@ def save_go2rtc_config(content, restart: bool = True) -> dict:
             "message": f"Write failed: {werr}",
         }
 
-    restart_ok = True
     if restart:
         name = str(GO2RTC_CONTAINER_NAME or "").strip()
         if name:
-            restart_ok = _restart_named(name)
+            _restart_async([name])
         else:
-            restart_ok = _restart_named(FRIGATE_CONTAINER_NAME)
+            fr = str(FRIGATE_CONTAINER_NAME or "").strip()
+            if fr:
+                _restart_async([fr])
 
     msg = f"Saved {path}"
     if backup:
         msg += f" (backup {backup})"
-    if restart and not restart_ok:
-        msg += " — restart failed (config was written)"
+    if restart:
+        msg += " — restart started in background"
 
     return {
         "ok": True,
         "event": "saveGo2rtcConfig",
         "path": str(path),
         "backup": backup,
-        "restarted": bool(restart and restart_ok),
+        "restarted": bool(restart),
         "message": msg,
     }

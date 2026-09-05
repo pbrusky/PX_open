@@ -48,6 +48,14 @@ FrigateAPI::FrigateAPI(QObject* parent)
             this, &FrigateAPI::cameraEditResult);
     connect(m_cameraManager, &FrigateCameraManager::cameraRemoveResult,
             this, &FrigateAPI::cameraRemoveResult);
+    connect(m_cameraManager, &FrigateCameraManager::frigateConfigLoaded,
+            this, &FrigateAPI::frigateConfigLoaded);
+    connect(m_cameraManager, &FrigateCameraManager::frigateConfigSaved,
+            this, &FrigateAPI::frigateConfigSaved);
+    connect(m_cameraManager, &FrigateCameraManager::go2rtcConfigLoaded,
+            this, &FrigateAPI::go2rtcConfigLoaded);
+    connect(m_cameraManager, &FrigateCameraManager::go2rtcConfigSaved,
+            this, &FrigateAPI::go2rtcConfigSaved);
 
     connect(m_onvif, &FrigateOnvif::onvifDevicesDiscovered,
             this, &FrigateAPI::onvifDevicesDiscovered);
@@ -155,6 +163,26 @@ void FrigateAPI::editCamera(QString id, QString url)
 void FrigateAPI::removeCamera(QString id)
 {
     m_cameraManager->removeCamera(id);
+}
+
+void FrigateAPI::loadFrigateConfig()
+{
+    m_cameraManager->loadFrigateConfig();
+}
+
+void FrigateAPI::saveFrigateConfig(const QString& content, bool restart)
+{
+    m_cameraManager->saveFrigateConfig(content, restart);
+}
+
+void FrigateAPI::loadGo2rtcConfig()
+{
+    m_cameraManager->loadGo2rtcConfig();
+}
+
+void FrigateAPI::saveGo2rtcConfig(const QString& content, bool restart)
+{
+    m_cameraManager->saveGo2rtcConfig(content, restart);
 }
 
 bool FrigateAPI::isCameraOnline(const QString& id) const

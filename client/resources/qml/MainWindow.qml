@@ -217,6 +217,30 @@ ApplicationWindow {
                 return
             }
 
+            if (page === "editFrigateConfig") {
+                popupManager.openPopup(
+                    "qrc:/app/resources/qml/components/popups/ConfigEditorPopup.qml",
+                    {
+                        frigateRef: frigateRef,
+                        popupManager: popupManager,
+                        configType: "frigate"
+                    }
+                )
+                return
+            }
+
+            if (page === "editGo2rtcConfig") {
+                popupManager.openPopup(
+                    "qrc:/app/resources/qml/components/popups/ConfigEditorPopup.qml",
+                    {
+                        frigateRef: frigateRef,
+                        popupManager: popupManager,
+                        configType: "go2rtc"
+                    }
+                )
+                return
+            }
+
             if (page === "reloadCameras") {
                 frigateRef.loadCameras()
                 return

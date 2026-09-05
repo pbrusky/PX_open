@@ -68,13 +68,15 @@ Item {
 
     Timer {
         id: pollDelayTimer
-        interval: 2500
+        interval: 3000
         repeat: false
         onTriggered: {
             if (!restartInProgress)
                 return
-            if (frigatePollTimer)
+            if (frigatePollTimer) {
+                frigatePollTimer.interval = 2000
                 frigatePollTimer.start()
+            }
             if (frigateRef)
                 frigateRef.loadCameras()
         }
@@ -82,7 +84,7 @@ Item {
 
     Timer {
         id: restartMaxTimer
-        interval: 20000
+        interval: 90000
         repeat: false
         onTriggered: {
             if (restartInProgress) {
@@ -116,9 +118,16 @@ Item {
 
             if (restartInProgress) {
                 var elapsed = Date.now() - restartStartedAt
-                if (elapsed >= 2500) {
-                    console.log("MainWindowConnections: Frigate responded — closing restart overlay, cameras=", list.length)
+                // Wait until Frigate is actually back with cameras.
+                // Empty list means Frigate is still down — keep polling.
+                if (list.length > 0 && elapsed >= 4000) {
+                    console.log("MainWindowConnections: Frigate up — closing restart overlay, cameras=", list.length)
                     stopRestartFlow()
+                } else if (elapsed >= 90000) {
+                    console.log("MainWindowConnections: restart timeout — closing overlay, cameras=", list.length)
+                    stopRestartFlow()
+                } else {
+                    console.log("MainWindowConnections: still waiting for Frigate… elapsed=", elapsed, "cameras=", list.length)
                 }
                 return
             }
@@ -172,9 +181,24 @@ Item {
 
         function onCameraRemoveResult(ok, message) {
             console.log("MainWindowConnections cameraRemoveResult", ok, message)
-            // Grid already cleared in RemoveCameraPopup before the API call
             if (mainWindow)
                 mainWindow.pendingRemoveCameraId = ""
+            if (ok)
+                startRestartFlow()
+            else
+                dismissCurrentPopup()
+        }
+
+        function onFrigateConfigSaved(ok, message) {
+            console.log("MainWindowConnections frigateConfigSaved", ok, message)
+            if (ok)
+                startRestartFlow()
+            else
+                dismissCurrentPopup()
+        }
+
+        function onGo2rtcConfigSaved(ok, message) {
+            console.log("MainWindowConnections go2rtcConfigSaved", ok, message)
             if (ok)
                 startRestartFlow()
             else
