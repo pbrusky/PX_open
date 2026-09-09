@@ -203,12 +203,35 @@ Item {
         function onDisconnectRequested() {
             stopRestartFlow()
 
+            if (frigateRef) {
+                if (typeof frigateRef.stopAllFullscreenStreams === "function")
+                    frigateRef.stopAllFullscreenStreams()
+                if (typeof frigateRef.stopAllStreams === "function")
+                    frigateRef.stopAllStreams()
+
+                if (typeof frigateRef.setModuleServer === "function")
+                    frigateRef.setModuleServer("")
+                if (typeof frigateRef.setServer === "function")
+                    frigateRef.setServer("")
+                else
+                    frigateRef.server = ""
+                if (typeof frigateRef.setServerIp === "function")
+                    frigateRef.setServerIp("")
+                else
+                    frigateRef.serverIp = ""
+            }
+
+            if (mainWindow) {
+                mainWindow.cameraList = []
+                mainWindow.selectedCameraId = ""
+                mainWindow.serverName = ""
+                mainWindow.pendingRemoveCameraId = ""
+            }
+            if (sidebarWrapper)
+                sidebarWrapper.cameraList = []
+
             contentLoader.startupDone = false
             contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
-
-            mainWindow.serverName = ""
-            frigateRef.server = ""
-            frigateRef.serverIp = ""
 
             mainWindow.showNormal()
 

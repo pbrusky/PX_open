@@ -119,9 +119,8 @@ ApplicationWindow {
             )
         }
 
+        // Full cleanup is handled in MainWindowConnections.onDisconnectRequested
         onDisconnectRequested: {
-            contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
-            mainWindow.serverName = ""
         }
 
         onExitRequested: Qt.quit()
@@ -273,8 +272,6 @@ ApplicationWindow {
                             popupManager: popupManager
                         }
                     )
-                } else {
-                    console.log("EditCamera: Camera not found:", camId)
                 }
                 return
             }
@@ -328,10 +325,31 @@ ApplicationWindow {
                 item.frigateRef = frigateRef
 
                 item.serverSelected.connect(function(name, ip, apiPort, modulePort) {
+                    // Tear down previous server completely
+                    if (frigateRef) {
+                        if (typeof frigateRef.stopAllFullscreenStreams === "function")
+                            frigateRef.stopAllFullscreenStreams()
+                        if (typeof frigateRef.stopAllStreams === "function")
+                            frigateRef.stopAllStreams()
+                    }
+
+                    mainWindow.cameraList = []
+                    mainWindow.selectedCameraId = ""
+                    if (sidebarWrapper)
+                        sidebarWrapper.cameraList = []
+
                     mainWindow.serverName = name
 
-                    frigateRef.serverIp = ip
-                    frigateRef.server = "http://" + ip + ":" + apiPort
+                    if (typeof frigateRef.setServerIp === "function")
+                        frigateRef.setServerIp(ip)
+                    else
+                        frigateRef.serverIp = ip
+
+                    if (typeof frigateRef.setServer === "function")
+                        frigateRef.setServer("http://" + ip + ":" + apiPort)
+                    else
+                        frigateRef.server = "http://" + ip + ":" + apiPort
+
                     frigateRef.setModuleServer("http://" + ip + ":" + modulePort)
 
                     contentLoader.startupDone = true
@@ -346,13 +364,14 @@ ApplicationWindow {
                 item.frigateRef = frigateRef
                 item.mainWindow = mainWindow
 
-                item.initializeGrid()
-                frigateRef.loadCameras()
-
+                // Connect before loadCameras so we never miss the first list
                 item.camerasLoadedToMain.connect(function(list) {
                     mainWindow.cameraList = list
                     sidebarWrapper.cameraList = list
                 })
+
+                item.initializeGrid()
+                frigateRef.loadCameras()
             }
         }
     }
