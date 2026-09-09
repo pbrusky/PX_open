@@ -57,6 +57,14 @@ Item {
                     onTriggered: sidebar.navigate("addCamera")
                 }
                 MenuItem {
+                    text: "Edit Frigate Config"
+                    onTriggered: sidebar.navigate("editFrigateConfig")
+                }
+                MenuItem {
+                    text: "Edit go2rtc Config"
+                    onTriggered: sidebar.navigate("editGo2rtcConfig")
+                }
+                MenuItem {
                     text: "Disconnect"
                     onTriggered: sidebar.navigate("disconnect")
                 }
@@ -195,7 +203,6 @@ Item {
                     }
                 }
 
-                // Click = select (does not steal drag)
                 TapHandler {
                     acceptedButtons: Qt.LeftButton
                     onTapped: {
@@ -204,7 +211,6 @@ Item {
                     }
                 }
 
-                // Drag to grid — tracks pointer even outside the row
                 DragHandler {
                     id: rowDrag
                     target: null
@@ -218,7 +224,6 @@ Item {
                         var scene = rowDrag.centroid.scenePosition
                         if (!scene)
                             return
-                        // scene → sidebar local (ghost is child of sidebar)
                         var loc = sidebar.mapFromItem(null, scene.x, scene.y)
                         sidebar.ghostX = loc.x + 10
                         sidebar.ghostY = loc.y + 10
@@ -231,7 +236,6 @@ Item {
                             sidebar.draggingCameraName = cameraName
                             syncGhost()
                         } else if (sidebar.draggingCameraId === cameraId) {
-                            // Drop using screen coords for mapFromGlobal in CameraDropHandler
                             var scene = rowDrag.centroid ? rowDrag.centroid.scenePosition : null
                             if (scene) {
                                 var loc = sidebar.mapFromItem(null, scene.x, scene.y)
@@ -250,7 +254,6 @@ Item {
                     }
                 }
 
-                // Right-click menu only
                 MouseArea {
                     anchors.fill: parent
                     acceptedButtons: Qt.RightButton
@@ -261,7 +264,6 @@ Item {
         }
     }
 
-    // Drag ghost — follows cursor
     Rectangle {
         id: dragGhost
         visible: sidebar.dragging

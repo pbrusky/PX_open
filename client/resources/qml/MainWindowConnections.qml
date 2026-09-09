@@ -68,13 +68,15 @@ Item {
 
     Timer {
         id: pollDelayTimer
-        interval: 2500
+        interval: 3000
         repeat: false
         onTriggered: {
             if (!restartInProgress)
                 return
-            if (frigatePollTimer)
+            if (frigatePollTimer) {
+                frigatePollTimer.interval = 2000
                 frigatePollTimer.start()
+            }
             if (frigateRef)
                 frigateRef.loadCameras()
         }
@@ -82,11 +84,10 @@ Item {
 
     Timer {
         id: restartMaxTimer
-        interval: 20000
+        interval: 90000
         repeat: false
         onTriggered: {
             if (restartInProgress) {
-                console.log("MainWindowConnections: restart max timeout — closing overlay")
                 if (frigateRef)
                     frigateRef.loadCameras()
                 stopRestartFlow()
@@ -116,8 +117,11 @@ Item {
 
             if (restartInProgress) {
                 var elapsed = Date.now() - restartStartedAt
-                if (elapsed >= 2500) {
-                    console.log("MainWindowConnections: Frigate responded — closing restart overlay, cameras=", list.length)
+                // Wait until Frigate is actually back with cameras.
+                // Empty list means Frigate is still down — keep polling.
+                if (list.length > 0 && elapsed >= 4000) {
+                    stopRestartFlow()
+                } else if (elapsed >= 90000) {
                     stopRestartFlow()
                 }
                 return
@@ -155,7 +159,6 @@ Item {
         }
 
         function onCameraAddResult(ok, message) {
-            console.log("MainWindowConnections cameraAddResult", ok, message)
             if (ok)
                 startRestartFlow()
             else
@@ -163,7 +166,6 @@ Item {
         }
 
         function onCameraEditResult(ok, message) {
-            console.log("MainWindowConnections cameraEditResult", ok, message)
             if (ok)
                 startRestartFlow()
             else
@@ -171,10 +173,22 @@ Item {
         }
 
         function onCameraRemoveResult(ok, message) {
-            console.log("MainWindowConnections cameraRemoveResult", ok, message)
-            // Grid already cleared in RemoveCameraPopup before the API call
             if (mainWindow)
                 mainWindow.pendingRemoveCameraId = ""
+            if (ok)
+                startRestartFlow()
+            else
+                dismissCurrentPopup()
+        }
+
+        function onFrigateConfigSaved(ok, message) {
+            if (ok)
+                startRestartFlow()
+            else
+                dismissCurrentPopup()
+        }
+
+        function onGo2rtcConfigSaved(ok, message) {
             if (ok)
                 startRestartFlow()
             else
@@ -189,12 +203,35 @@ Item {
         function onDisconnectRequested() {
             stopRestartFlow()
 
+            if (frigateRef) {
+                if (typeof frigateRef.stopAllFullscreenStreams === "function")
+                    frigateRef.stopAllFullscreenStreams()
+                if (typeof frigateRef.stopAllStreams === "function")
+                    frigateRef.stopAllStreams()
+
+                if (typeof frigateRef.setModuleServer === "function")
+                    frigateRef.setModuleServer("")
+                if (typeof frigateRef.setServer === "function")
+                    frigateRef.setServer("")
+                else
+                    frigateRef.server = ""
+                if (typeof frigateRef.setServerIp === "function")
+                    frigateRef.setServerIp("")
+                else
+                    frigateRef.serverIp = ""
+            }
+
+            if (mainWindow) {
+                mainWindow.cameraList = []
+                mainWindow.selectedCameraId = ""
+                mainWindow.serverName = ""
+                mainWindow.pendingRemoveCameraId = ""
+            }
+            if (sidebarWrapper)
+                sidebarWrapper.cameraList = []
+
             contentLoader.startupDone = false
             contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
-
-            mainWindow.serverName = ""
-            frigateRef.server = ""
-            frigateRef.serverIp = ""
 
             mainWindow.showNormal()
 

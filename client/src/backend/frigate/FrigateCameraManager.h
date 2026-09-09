@@ -36,6 +36,11 @@ public:
     QVariantMap getCameraMetadata(const QString& id) const;
     void loadModuleInformation();
 
+    void loadFrigateConfig();
+    void saveFrigateConfig(const QString& content, bool restart = true);
+    void loadGo2rtcConfig();
+    void saveGo2rtcConfig(const QString& content, bool restart = true);
+
 signals:
     void camerasLoaded(QVariantList cameras);
     void cameraAddResult(bool ok, QString message);
@@ -48,6 +53,11 @@ signals:
                                    QString status,
                                    QString systemId,
                                    QString moduleId);
+
+    void frigateConfigLoaded(bool ok, QString content, QString path, QString message);
+    void frigateConfigSaved(bool ok, QString message);
+    void go2rtcConfigLoaded(bool ok, QString content, QString path, QString message);
+    void go2rtcConfigSaved(bool ok, QString message);
 
 private:
     void refreshCameraStats();

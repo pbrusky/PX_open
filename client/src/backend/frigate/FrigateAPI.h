@@ -83,6 +83,11 @@ public:
     Q_INVOKABLE void loadModuleInformation();
     Q_INVOKABLE void testRtsp(const QString& url);
 
+    Q_INVOKABLE void loadFrigateConfig();
+    Q_INVOKABLE void saveFrigateConfig(const QString& content, bool restart = true);
+    Q_INVOKABLE void loadGo2rtcConfig();
+    Q_INVOKABLE void saveGo2rtcConfig(const QString& content, bool restart = true);
+
 signals:
     void serverChanged();
     void moduleServerChanged();
@@ -125,6 +130,11 @@ signals:
                                    QString moduleId);
 
     void rtspTestResult(bool ok, QString message);
+
+    void frigateConfigLoaded(bool ok, QString content, QString path, QString message);
+    void frigateConfigSaved(bool ok, QString message);
+    void go2rtcConfigLoaded(bool ok, QString content, QString path, QString message);
+    void go2rtcConfigSaved(bool ok, QString message);
 
 private:
     QString m_server;

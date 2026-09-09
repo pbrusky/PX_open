@@ -5,6 +5,8 @@
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QSet>
+#include <QUrl>
 
 FrigateCameraManager::FrigateCameraManager(QObject* parent)
     : QObject(parent),
@@ -87,7 +89,6 @@ void FrigateCameraManager::applyStatsPayload(const QByteArray& data)
     if (cams.isEmpty())
         return;
 
-    // Known camera ids from last loadCameras
     QSet<QString> known;
     for (const QVariant& v : m_cameraList) {
         const QString id = v.toMap().value(QStringLiteral("id")).toString();
@@ -102,7 +103,6 @@ void FrigateCameraManager::applyStatsPayload(const QByteArray& data)
 
         const QJsonObject cam = it.value().toObject();
 
-        // Frigate marks a camera as producing frames when these are > 0
         const double cameraFps  = cam.value(QStringLiteral("camera_fps")).toDouble(0.0);
         const double processFps = cam.value(QStringLiteral("process_fps")).toDouble(0.0);
         const double detection  = cam.value(QStringLiteral("detection_fps")).toDouble(0.0);
@@ -253,7 +253,6 @@ void FrigateCameraManager::loadCameras()
 
         emit camerasLoaded(m_cameraList);
 
-        // Immediately + periodically refresh online from Frigate stats
         refreshCameraStats();
         if (!m_statsTimer->isActive())
             m_statsTimer->start();
@@ -442,5 +441,135 @@ void FrigateCameraManager::loadModuleInformation()
             root.value("systemId").toString(),
             root.value("moduleId").toString()
         );
+    });
+}
+
+void FrigateCameraManager::loadFrigateConfig()
+{
+    if (m_moduleServer.isEmpty()) {
+        emit frigateConfigLoaded(false, QString(), QString(),
+                                 QStringLiteral("No module server"));
+        return;
+    }
+
+    QUrl endpoint(m_moduleServer + QStringLiteral("/api/getFrigateConfig"));
+    QNetworkRequest req(endpoint);
+    QNetworkReply* reply = m_net->get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray data = reply->readAll();
+        const auto err = reply->error();
+        reply->deleteLater();
+
+        if (err != QNetworkReply::NoError) {
+            emit frigateConfigLoaded(false, QString(), QString(),
+                                     QStringLiteral("Network error"));
+            return;
+        }
+
+        const QJsonObject root = QJsonDocument::fromJson(data).object();
+        const bool ok = root.value(QStringLiteral("ok")).toBool(false);
+        emit frigateConfigLoaded(
+            ok,
+            root.value(QStringLiteral("content")).toString(),
+            root.value(QStringLiteral("path")).toString(),
+            root.value(QStringLiteral("message")).toString());
+    });
+}
+
+void FrigateCameraManager::saveFrigateConfig(const QString& content, bool restart)
+{
+    if (m_moduleServer.isEmpty()) {
+        emit frigateConfigSaved(false, QStringLiteral("No module server"));
+        return;
+    }
+
+    QUrl endpoint(m_moduleServer + QStringLiteral("/api/saveFrigateConfig"));
+    QNetworkRequest req(endpoint);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    QJsonObject obj;
+    obj.insert(QStringLiteral("content"), content);
+    obj.insert(QStringLiteral("restart"), restart);
+
+    QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray data = reply->readAll();
+        const auto err = reply->error();
+        reply->deleteLater();
+
+        if (err != QNetworkReply::NoError) {
+            emit frigateConfigSaved(false, QStringLiteral("Network error"));
+            return;
+        }
+
+        const QJsonObject root = QJsonDocument::fromJson(data).object();
+        const bool ok = root.value(QStringLiteral("ok")).toBool(false);
+        emit frigateConfigSaved(ok, root.value(QStringLiteral("message")).toString());
+    });
+}
+
+void FrigateCameraManager::loadGo2rtcConfig()
+{
+    if (m_moduleServer.isEmpty()) {
+        emit go2rtcConfigLoaded(false, QString(), QString(),
+                                QStringLiteral("No module server"));
+        return;
+    }
+
+    QUrl endpoint(m_moduleServer + QStringLiteral("/api/getGo2rtcConfig"));
+    QNetworkRequest req(endpoint);
+    QNetworkReply* reply = m_net->get(req);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray data = reply->readAll();
+        const auto err = reply->error();
+        reply->deleteLater();
+
+        if (err != QNetworkReply::NoError) {
+            emit go2rtcConfigLoaded(false, QString(), QString(),
+                                    QStringLiteral("Network error"));
+            return;
+        }
+
+        const QJsonObject root = QJsonDocument::fromJson(data).object();
+        const bool ok = root.value(QStringLiteral("ok")).toBool(false);
+        emit go2rtcConfigLoaded(
+            ok,
+            root.value(QStringLiteral("content")).toString(),
+            root.value(QStringLiteral("path")).toString(),
+            root.value(QStringLiteral("message")).toString());
+    });
+}
+
+void FrigateCameraManager::saveGo2rtcConfig(const QString& content, bool restart)
+{
+    if (m_moduleServer.isEmpty()) {
+        emit go2rtcConfigSaved(false, QStringLiteral("No module server"));
+        return;
+    }
+
+    QUrl endpoint(m_moduleServer + QStringLiteral("/api/saveGo2rtcConfig"));
+    QNetworkRequest req(endpoint);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    QJsonObject obj;
+    obj.insert(QStringLiteral("content"), content);
+    obj.insert(QStringLiteral("restart"), restart);
+
+    QNetworkReply* reply = m_net->post(req, QJsonDocument(obj).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray data = reply->readAll();
+        const auto err = reply->error();
+        reply->deleteLater();
+
+        if (err != QNetworkReply::NoError) {
+            emit go2rtcConfigSaved(false, QStringLiteral("Network error"));
+            return;
+        }
+
+        const QJsonObject root = QJsonDocument::fromJson(data).object();
+        const bool ok = root.value(QStringLiteral("ok")).toBool(false);
+        emit go2rtcConfigSaved(ok, root.value(QStringLiteral("message")).toString());
     });
 }
