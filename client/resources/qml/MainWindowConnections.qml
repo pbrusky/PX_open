@@ -88,7 +88,6 @@ Item {
         repeat: false
         onTriggered: {
             if (restartInProgress) {
-                console.log("MainWindowConnections: restart max timeout — closing overlay")
                 if (frigateRef)
                     frigateRef.loadCameras()
                 stopRestartFlow()
@@ -121,13 +120,9 @@ Item {
                 // Wait until Frigate is actually back with cameras.
                 // Empty list means Frigate is still down — keep polling.
                 if (list.length > 0 && elapsed >= 4000) {
-                    console.log("MainWindowConnections: Frigate up — closing restart overlay, cameras=", list.length)
                     stopRestartFlow()
                 } else if (elapsed >= 90000) {
-                    console.log("MainWindowConnections: restart timeout — closing overlay, cameras=", list.length)
                     stopRestartFlow()
-                } else {
-                    console.log("MainWindowConnections: still waiting for Frigate… elapsed=", elapsed, "cameras=", list.length)
                 }
                 return
             }
@@ -164,7 +159,6 @@ Item {
         }
 
         function onCameraAddResult(ok, message) {
-            console.log("MainWindowConnections cameraAddResult", ok, message)
             if (ok)
                 startRestartFlow()
             else
@@ -172,7 +166,6 @@ Item {
         }
 
         function onCameraEditResult(ok, message) {
-            console.log("MainWindowConnections cameraEditResult", ok, message)
             if (ok)
                 startRestartFlow()
             else
@@ -180,7 +173,6 @@ Item {
         }
 
         function onCameraRemoveResult(ok, message) {
-            console.log("MainWindowConnections cameraRemoveResult", ok, message)
             if (mainWindow)
                 mainWindow.pendingRemoveCameraId = ""
             if (ok)
@@ -190,7 +182,6 @@ Item {
         }
 
         function onFrigateConfigSaved(ok, message) {
-            console.log("MainWindowConnections frigateConfigSaved", ok, message)
             if (ok)
                 startRestartFlow()
             else
@@ -198,7 +189,6 @@ Item {
         }
 
         function onGo2rtcConfigSaved(ok, message) {
-            console.log("MainWindowConnections go2rtcConfigSaved", ok, message)
             if (ok)
                 startRestartFlow()
             else
