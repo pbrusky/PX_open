@@ -11,6 +11,8 @@
 
 #ifdef Q_OS_WIN
 #  include <windows.h>
+#else
+#  include <unistd.h>
 #endif
 
 AboutInfo::AboutInfo(QObject* parent)
@@ -44,7 +46,6 @@ void AboutInfo::detectGpus()
             line = line.trimmed();
         lines.removeAll(QString());
 #else
-        // Linux: parse VGA/3D lines from lspci
         QProcess p;
         p.start(QStringLiteral("lspci"), QStringList());
         if (p.waitForFinished(3000)) {
@@ -55,7 +56,6 @@ void AboutInfo::detectGpus()
                 if (lower.contains(QStringLiteral("vga")) ||
                     lower.contains(QStringLiteral("3d")) ||
                     lower.contains(QStringLiteral("display"))) {
-                    // "00:02.0 VGA compatible controller: Intel ..."
                     const int colon = line.indexOf(QLatin1Char(':'));
                     QString name = (colon >= 0) ? line.mid(colon + 1).trimmed() : line.trimmed();
                     if (!name.isEmpty())
@@ -97,20 +97,51 @@ void AboutInfo::detectCpu()
         if (name.isEmpty())
             name = QStringLiteral("Unknown");
 #else
-        // Linux: /proc/cpuinfo "model name"
-        QFile f(QStringLiteral("/proc/cpuinfo"));
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QTextStream in(&f);
-            while (!in.atEnd()) {
-                const QString line = in.readLine();
+        auto readCpuFromProc = []() -> QString {
+            QFile f(QStringLiteral("/proc/cpuinfo"));
+            if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+                return {};
+            const QString all = QString::fromUtf8(f.readAll());
+            QString fallback;
+            for (const QString& raw : all.split(QLatin1Char('\n'))) {
+                const QString line = raw.trimmed();
                 if (line.startsWith(QStringLiteral("model name"))) {
-                    const int colon = line.indexOf(QLatin1Char(':'));
-                    if (colon >= 0)
-                        name = line.mid(colon + 1).trimmed();
-                    break;
+                    const int c = line.indexOf(QLatin1Char(':'));
+                    if (c >= 0) {
+                        const QString v = line.mid(c + 1).trimmed();
+                        if (!v.isEmpty())
+                            return v;
+                    }
+                }
+                if (line.startsWith(QStringLiteral("Hardware")) ||
+                    line.startsWith(QStringLiteral("Processor"))) {
+                    const int c = line.indexOf(QLatin1Char(':'));
+                    if (c >= 0) {
+                        const QString v = line.mid(c + 1).trimmed();
+                        if (!v.isEmpty())
+                            fallback = v;
+                    }
+                }
+            }
+            return fallback;
+        };
+
+        name = readCpuFromProc();
+        if (name.isEmpty()) {
+            QProcess p;
+            p.start(QStringLiteral("lscpu"), QStringList());
+            if (p.waitForFinished(3000)) {
+                const QString out = QString::fromLocal8Bit(p.readAllStandardOutput());
+                for (const QString& raw : out.split(QLatin1Char('\n'))) {
+                    if (raw.startsWith(QStringLiteral("Model name:"))) {
+                        name = raw.mid(QStringLiteral("Model name:").size()).trimmed();
+                        break;
+                    }
                 }
             }
         }
+        if (name.isEmpty())
+            name = QStringLiteral("Unknown");
 #endif
 
         QMetaObject::invokeMethod(this, [this, name]() {
@@ -143,29 +174,52 @@ void AboutInfo::detectMemory()
                        .arg(availGb, 0, 'f', 1);
         }
 #else
-        // Linux: /proc/meminfo MemTotal / MemAvailable (kB)
-        qint64 totalKb = 0;
-        qint64 availKb = 0;
-        QFile f(QStringLiteral("/proc/meminfo"));
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QTextStream in(&f);
-            while (!in.atEnd()) {
-                const QString line = in.readLine();
-                if (line.startsWith(QStringLiteral("MemTotal:"))) {
-                    const QStringList parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-                    if (parts.size() >= 2)
-                        totalKb = parts[1].toLongLong();
-                } else if (line.startsWith(QStringLiteral("MemAvailable:"))) {
-                    const QStringList parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-                    if (parts.size() >= 2)
-                        availKb = parts[1].toLongLong();
+        qint64 totalBytes = 0;
+        qint64 availBytes = 0;
+
+#if defined(_SC_PHYS_PAGES) && defined(_SC_PAGESIZE)
+        {
+            const long pages = sysconf(_SC_PHYS_PAGES);
+            const long pageSize = sysconf(_SC_PAGESIZE);
+            if (pages > 0 && pageSize > 0)
+                totalBytes = qint64(pages) * qint64(pageSize);
+        }
+#endif
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
+        {
+            const long pages = sysconf(_SC_AVPHYS_PAGES);
+            const long pageSize = sysconf(_SC_PAGESIZE);
+            if (pages > 0 && pageSize > 0)
+                availBytes = qint64(pages) * qint64(pageSize);
+        }
+#endif
+
+        if (totalBytes <= 0) {
+            QFile f(QStringLiteral("/proc/meminfo"));
+            if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                qint64 totalKb = 0;
+                qint64 availKb = 0;
+                const QString all = QString::fromUtf8(f.readAll());
+                for (const QString& raw : all.split(QLatin1Char('\n'))) {
+                    if (raw.startsWith(QStringLiteral("MemTotal:"))) {
+                        const QStringList parts = raw.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                        if (parts.size() >= 2)
+                            totalKb = parts[1].toLongLong();
+                    } else if (raw.startsWith(QStringLiteral("MemAvailable:"))) {
+                        const QStringList parts = raw.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                        if (parts.size() >= 2)
+                            availKb = parts[1].toLongLong();
+                    }
                 }
+                totalBytes = totalKb * 1024;
+                availBytes = availKb * 1024;
             }
         }
-        if (totalKb > 0) {
-            const double totalGb = double(totalKb) / (1024.0 * 1024.0);
-            const double availGb = double(availKb) / (1024.0 * 1024.0);
-            const double usedGb  = totalGb - availGb;
+
+        if (totalBytes > 0) {
+            const double totalGb = double(totalBytes) / (1024.0 * 1024.0 * 1024.0);
+            const double availGb = double(availBytes) / (1024.0 * 1024.0 * 1024.0);
+            const double usedGb  = qMax(0.0, totalGb - availGb);
             info = QStringLiteral("%1 GB total  ·  %2 GB used  ·  %3 GB free")
                        .arg(totalGb, 0, 'f', 1)
                        .arg(usedGb, 0, 'f', 1)
