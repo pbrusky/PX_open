@@ -110,6 +110,7 @@
         <file>assets/icons/nx/audio-off.svg</file>
         <file>assets/icons/nx/play.svg</file>
         <file>assets/icons/nx/pause.svg</file>
+        <file>assets/icons/nx/calendar.svg</file>
 
     </qresource>
 </RCC>
