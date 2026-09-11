@@ -59,7 +59,7 @@ Rectangle {
             font.pixelSize: 12
         }
 
-        // Calendar button — emoji icon (no "Cal" text)
+        // Calendar button — SVG (works on Windows + Linux)
         Rectangle {
             width: 30
             height: 22
@@ -68,10 +68,14 @@ Rectangle {
             border.color: root.calendarOpen ? "#FFC107" : "#666"
             border.width: 1
 
-            Text {
+            Image {
                 anchors.centerIn: parent
-                text: "📅"
-                font.pixelSize: 14
+                width: 14
+                height: 14
+                source: "qrc:/app/assets/icons/nx/calendar.svg"
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
             }
 
             MouseArea {
