@@ -38,6 +38,7 @@ signals:
     void playbackPositionChanged(const QString& cameraId, qint64 positionMs);
     void playbackStarted(const QString& cameraId);
     void playbackStopped(const QString& cameraId);
+    void playbackError(const QString& cameraId, const QString& message);
     void cameraOnline(QString id);
     void cameraOffline(QString id);
 

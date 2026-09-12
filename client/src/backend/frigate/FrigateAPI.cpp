@@ -81,6 +81,8 @@ FrigateAPI::FrigateAPI(QObject* parent)
             this, &FrigateAPI::playbackStarted);
     connect(m_playback, &FrigatePlayback::playbackStopped,
             this, &FrigateAPI::playbackStopped);
+    connect(m_playback, &FrigatePlayback::playbackError,
+            this, &FrigateAPI::playbackError);
 
     connect(m_streamManager, &FrigateStreamManager::cameraOnline,
             this, [this](const QString& id) {
