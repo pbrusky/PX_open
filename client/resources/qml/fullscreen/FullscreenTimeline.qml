@@ -60,17 +60,26 @@ Rectangle {
     property bool isPlayback: false
     property real hoverTsMs: -1
     property real currentTimeMs: Date.now()
-    readonly property real playheadTsMs: {
+
+    // Safer playhead – no complex expression that can re-enter
+    property real playheadTsMs: 0
+
+    function updatePlayhead() {
         if (isPlayback && playbackPositionMs > 0)
-            return playbackPositionMs
-        return currentTimeMs
+            playheadTsMs = playbackPositionMs
+        else
+            playheadTsMs = currentTimeMs
     }
 
     Timer {
         interval: 1000
         running: true
         repeat: true
-        onTriggered: currentTimeMs = Date.now()
+        onTriggered: {
+            currentTimeMs = Date.now()
+            if (!isPlayback)
+                updatePlayhead()
+        }
     }
 
     Timer {
@@ -82,7 +91,12 @@ Rectangle {
             var endMs = dataEndBound() * 1000
             if (endMs > 0 && next > endMs)
                 next = endMs
-            playbackPositionMs = next
+
+            // Prevent feedback loop
+            if (Math.abs(next - playbackPositionMs) > 1) {
+                playbackPositionMs = next
+                updatePlayhead()
+            }
         }
     }
 
@@ -135,7 +149,10 @@ Rectangle {
         function onPlaybackPositionChanged(id, posMs) {
             if (id !== cameraId && id !== cameraName)
                 return
-            playbackPositionMs = posMs
+            if (Math.abs(posMs - playbackPositionMs) > 1) {
+                playbackPositionMs = posMs
+                updatePlayhead()
+            }
         }
     }
 
@@ -174,8 +191,13 @@ Rectangle {
         var start = end - defaultViewSpan
         if (start < ds)
             start = ds
-        viewStartTs = start
-        viewEndTs = end
+
+        // Only write if actually changed
+        if (Math.abs(viewStartTs - start) > 0.1)
+            viewStartTs = start
+        if (Math.abs(viewEndTs - end) > 0.1)
+            viewEndTs = end
+
         if (viewEndTs <= viewStartTs)
             viewEndTs = viewStartTs + minViewSpan
 
@@ -218,6 +240,7 @@ Rectangle {
         if (ne <= ns)
             ne = ns + minViewSpan
 
+        // Critical: only assign when value really changed
         if (Math.abs(ns - viewStartTs) > 0.05)
             viewStartTs = ns
         if (Math.abs(ne - viewEndTs) > 0.05)
@@ -227,6 +250,9 @@ Rectangle {
     }
 
     function setDataRange(s, e) {
+        if (_viewLock)
+            return
+
         s = normalizeSec(s)
         e = normalizeSec(e)
         if (!(e > s))
@@ -237,14 +263,19 @@ Rectangle {
             return
         }
 
-        if (dataStartTs <= 0 || s < dataStartTs)
+        var changed = false
+        if (dataStartTs <= 0 || s < dataStartTs) {
             dataStartTs = s
-        if (e > dataEndTs)
+            changed = true
+        }
+        if (e > dataEndTs) {
             dataEndTs = e
+            changed = true
+        }
 
         if (viewEndTs <= viewStartTs)
             applyDefaultView()
-        else
+        else if (changed)
             clampView()
     }
 
@@ -394,6 +425,9 @@ Rectangle {
         }
     }
 
+    // Initialize playhead once
+    Component.onCompleted: updatePlayhead()
+
     TimelineStatusBar {
         id: statusBar
         anchors.left: parent.left
@@ -446,6 +480,7 @@ Rectangle {
         minMotion: timeline.minMotion
         onSeekRequested: function(tsMs) {
             timeline.playbackPositionMs = tsMs
+            timeline.updatePlayhead()
             timeline.seekRequested(tsMs)
         }
         onHoverTimeChanged: function(tsMs) {

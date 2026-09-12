@@ -19,8 +19,18 @@ Item {
         interval: autoHideDelay
         repeat: false
         onTriggered: {
-            if (!forceVisible)
-                timeline.collapsed = true
+            // Do not auto-hide while the calendar is open or forceVisible is true
+            if (forceVisible)
+                return
+
+            if (timeline && timeline.calendarPopup && timeline.calendarPopup.visible)
+                return
+
+            // Also keep open if user is actively interacting with the timeline
+            if (timeline && timeline.pointerInside)
+                return
+
+            timeline.collapsed = true
         }
     }
 
