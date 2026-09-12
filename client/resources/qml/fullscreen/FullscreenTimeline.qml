@@ -9,6 +9,7 @@ Rectangle {
     property bool collapsed: true
     property bool allowAutoReveal: false
     property bool pointerInside: false
+    property bool calendarOpen: calendarPopup.visible
     property real minMotion: 15
 
     property real dataStartTs: 0
@@ -436,7 +437,7 @@ Rectangle {
         visible: !collapsed
         z: 20
         timeline: timeline
-        calendarOpen: calendarPopup.visible
+        calendarOpen: timeline.calendarOpen
         onCalendarToggled: {
             if (!calendarPopup.visible) {
                 var d = new Date(effectiveStartTs() * 1000)
@@ -536,6 +537,7 @@ Rectangle {
         anchors.bottomMargin: 28
         z: 200
         timeline: timeline
+        onVisibleChanged: timeline.hoverActiveChanged(visible || timeline.pointerInside)
         onDaySelected: function(y, m, d) {
             jumpToDay(y, m, d)
         }

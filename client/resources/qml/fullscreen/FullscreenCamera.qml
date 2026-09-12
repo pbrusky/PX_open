@@ -258,6 +258,10 @@ Item {
                 return
             if (root.timelinePointerInside || bottomEdge.containsMouse)
                 return
+            // Calendar is taller than the timeline bar, so hover can leave the
+            // 150px strip while the popup is still in use.
+            if (timelineLoader.item.calendarOpen)
+                return
             if (typeof timelineLoader.item.hideTimeline === "function")
                 timelineLoader.item.hideTimeline()
             else
@@ -452,9 +456,10 @@ Item {
 
     function onTimelineHoverActive(active) {
         root.timelinePointerInside = active
-        if (active) {
+        if (active || (timelineLoader.item && timelineLoader.item.calendarOpen)) {
             timelineHideTimer.stop()
-            showTimelineBar()
+            if (active)
+                showTimelineBar()
         } else {
             timelineHideTimer.restart()
         }
