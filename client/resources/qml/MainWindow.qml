@@ -32,14 +32,9 @@ ApplicationWindow {
     signal camerasLoaded(var list)
 
     property bool isFullscreen: false
-
-    // True while a camera is open in the fullscreen overlay (hide topbar/sidebar)
     property bool cameraFullscreenActive: false
-
-    // After Disconnect, skip one auto-connect so user can stay on StartupPage
     property bool skipNextAutoConnect: false
 
-    // ── Persist “restore last view in fullscreen” + last session ──
     Settings {
         id: appSettings
         category: "general"
@@ -76,7 +71,6 @@ ApplicationWindow {
         }
     }
 
-    /** Collapse topbar + sidebar; user can reopen with the arrows. */
     function collapseChrome() {
         topbar.collapsed = true
         sidebarWrapper.collapsed = true
@@ -86,7 +80,6 @@ ApplicationWindow {
         FullscreenHelper.noteUserActivity()
     }
 
-    /** Called by CameraGrid when a camera enters fullscreen. */
     function rememberFullscreenCamera(cameraName) {
         if (!cameraName || cameraName === "")
             return
@@ -94,10 +87,12 @@ ApplicationWindow {
             appSettings.lastServerIp = "" + frigateRef.serverIp
     }
 
-    /**
-     * Connect using saved server and jump straight to ServerView.
-     * Returns true if auto-connect was started (StartupPage can be skipped).
-     */
+    function syncSidebarLayouts() {
+        if (contentLoader.item && contentLoader.item.objectName === "ServerView") {
+            sidebarWrapper.layoutList = contentLoader.item.savedLayouts || []
+        }
+    }
+
     function performAutoConnect() {
         if (!appSettings.restoreLastFullscreen)
             return false
@@ -146,14 +141,11 @@ ApplicationWindow {
 
         mainWindow.enterTrueFullscreen()
         topbar.isMaximized = true
-
-        // Auto-collapse so grid uses full screen; arrows still expand chrome
         collapseChrome()
 
         return true
     }
 
-    /** Leave Settings: back to Startup if not connected, else camera grid. */
     function leaveSettings() {
         if (contentLoader.startupDone)
             goToServerView()
@@ -172,16 +164,17 @@ ApplicationWindow {
         mainWindow.serverName = ""
         mainWindow.cameraList = []
         mainWindow.selectedCameraId = ""
-        if (sidebarWrapper)
+        if (sidebarWrapper) {
             sidebarWrapper.cameraList = []
-        // Expand chrome again on disconnect / startup page
+            sidebarWrapper.layoutList = []
+            sidebarWrapper.selectedLayoutName = ""
+        }
         topbar.collapsed = false
         sidebarWrapper.collapsed = false
         contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
     }
 
     function disconnectFromServer() {
-        // User left on purpose — do not auto-reconnect this time
         skipNextAutoConnect = true
         mainWindow.cameraFullscreenActive = false
 
@@ -403,10 +396,50 @@ ApplicationWindow {
                 return
             }
 
+            // Multi named layouts
+            if (page.indexOf("saveLayoutAs:") === 0) {
+                var saveName = page.substring("saveLayoutAs:".length)
+                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
+                        && typeof contentLoader.item.saveLayoutAs === "function") {
+                    contentLoader.item.saveLayoutAs(saveName)
+                    if (typeof contentLoader.item.refreshLayouts === "function")
+                        contentLoader.item.refreshLayouts()
+                    mainWindow.syncSidebarLayouts()
+                    sidebarWrapper.selectedLayoutName = saveName
+                }
+                return
+            }
+
+            if (page.indexOf("loadLayout:") === 0) {
+                var loadName = page.substring("loadLayout:".length)
+                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
+                        && typeof contentLoader.item.loadLayoutByName === "function") {
+                    contentLoader.item.loadLayoutByName(loadName)
+                    sidebarWrapper.selectedLayoutName = loadName
+                }
+                return
+            }
+
+            if (page.indexOf("deleteLayout:") === 0) {
+                var delName = page.substring("deleteLayout:".length)
+                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
+                        && typeof contentLoader.item.deleteLayout === "function") {
+                    contentLoader.item.deleteLayout(delName)
+                    mainWindow.syncSidebarLayouts()
+                    if (sidebarWrapper.selectedLayoutName === delName)
+                        sidebarWrapper.selectedLayoutName = ""
+                }
+                return
+            }
+
+            // Legacy single-slot (still ok)
             if (page === "saveLayout") {
                 if (contentLoader.item && contentLoader.item.objectName === "ServerView"
                         && typeof contentLoader.item.saveLayout === "function") {
                     contentLoader.item.saveLayout()
+                    if (typeof contentLoader.item.refreshLayouts === "function")
+                        contentLoader.item.refreshLayouts()
+                    mainWindow.syncSidebarLayouts()
                 }
                 return
             }
@@ -525,8 +558,11 @@ ApplicationWindow {
 
                     mainWindow.cameraList = []
                     mainWindow.selectedCameraId = ""
-                    if (sidebarWrapper)
+                    if (sidebarWrapper) {
                         sidebarWrapper.cameraList = []
+                        sidebarWrapper.layoutList = []
+                        sidebarWrapper.selectedLayoutName = ""
+                    }
 
                     mainWindow.serverName = name
 
@@ -564,8 +600,20 @@ ApplicationWindow {
                     sidebarWrapper.cameraList = list
                 })
 
+                if (item.layoutsChanged) {
+                    item.layoutsChanged.connect(function() {
+                        mainWindow.syncSidebarLayouts()
+                    })
+                }
+
                 item.initializeGrid()
                 frigateRef.loadCameras()
+
+                Qt.callLater(function() {
+                    if (typeof item.refreshLayouts === "function")
+                        item.refreshLayouts()
+                    mainWindow.syncSidebarLayouts()
+                })
             }
         }
     }

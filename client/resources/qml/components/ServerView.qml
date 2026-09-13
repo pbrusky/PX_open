@@ -13,8 +13,12 @@ Item {
     property var frigateRef
     property var cameraGrid
 
+    // [{ name: "…", cameras: ["id1", "id2"] }, ...]
+    property var savedLayouts: []
+
     signal camerasLoadedToMain(var list)
     signal gridReady()
+    signal layoutsChanged()
 
     Settings {
         id: layoutSettings
@@ -23,33 +27,137 @@ Item {
 
     function layoutStorageKey() {
         if (frigateRef && frigateRef.serverIp && ("" + frigateRef.serverIp).length)
-            return "layout_" + frigateRef.serverIp
+            return "layouts_" + frigateRef.serverIp
         if (mainWindow && mainWindow.serverName && mainWindow.serverName.length)
-            return "layout_" + mainWindow.serverName
-        return "layout_default"
+            return "layouts_" + mainWindow.serverName
+        return "layouts_default"
     }
 
-    function saveLayout() {
+    // Migrate old single-layout key once
+    function migrateLegacyLayout() {
+        var oldKey = layoutStorageKey().replace("layouts_", "layout_")
+        var oldRaw = layoutSettings.value(oldKey, "")
+        if (!oldRaw || oldRaw === "")
+            return
+        try {
+            var cams = JSON.parse(oldRaw)
+            if (!(cams instanceof Array))
+                return
+            var list = readLayoutsRaw()
+            var hasDefault = false
+            for (var i = 0; i < list.length; i++) {
+                if (list[i].name === "Default")
+                    hasDefault = true
+            }
+            if (!hasDefault && cams.length) {
+                list.push({ name: "Default", cameras: cams })
+                writeLayoutsRaw(list)
+            }
+            layoutSettings.setValue(oldKey, "")
+        } catch (e) {}
+    }
+
+    function readLayoutsRaw() {
+        var raw = layoutSettings.value(layoutStorageKey(), "")
+        if (!raw || raw === "")
+            return []
+        try {
+            var list = JSON.parse(raw)
+            if (!(list instanceof Array))
+                return []
+            return list
+        } catch (e) {
+            return []
+        }
+    }
+
+    function writeLayoutsRaw(list) {
+        layoutSettings.setValue(layoutStorageKey(), JSON.stringify(list))
+        root.savedLayouts = list.slice()
+        root.layoutsChanged()
+    }
+
+    function refreshLayouts() {
+        migrateLegacyLayout()
+        root.savedLayouts = readLayoutsRaw()
+        root.layoutsChanged()
+        return root.savedLayouts
+    }
+
+    function getLayoutNames() {
+        var list = readLayoutsRaw()
+        var names = []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && list[i].name)
+                names.push(list[i].name)
+        }
+        return names
+    }
+
+    // Save current grid under a name (overwrite if same name)
+    function saveLayoutAs(layoutName) {
+        if (!layoutName || !("" + layoutName).length)
+            return false
         if (!cameraGrid || typeof cameraGrid.getLayoutNames !== "function")
             return false
-        var names = cameraGrid.getLayoutNames()
-        layoutSettings.setValue(layoutStorageKey(), JSON.stringify(names))
+
+        var name = ("" + layoutName).trim()
+        var cams = cameraGrid.getLayoutNames()
+        var list = readLayoutsRaw()
+        var found = false
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].name === name) {
+                list[i].cameras = cams
+                found = true
+                break
+            }
+        }
+        if (!found)
+            list.push({ name: name, cameras: cams })
+
+        writeLayoutsRaw(list)
         return true
     }
 
-    function loadLayout() {
-        if (!cameraGrid || typeof cameraGrid.applyLayoutNames !== "function")
+    // Back-compat: old "Save Layout" without a name
+    function saveLayout() {
+        return saveLayoutAs("Default")
+    }
+
+    function loadLayoutByName(layoutName) {
+        if (!layoutName || !cameraGrid || typeof cameraGrid.applyLayoutNames !== "function")
             return false
-        var raw = layoutSettings.value(layoutStorageKey(), "")
-        if (!raw || raw === "")
-            return false
-        try {
-            var names = JSON.parse(raw)
-            cameraGrid.applyLayoutNames(names)
-            return true
-        } catch (e) {
-            return false
+        var list = readLayoutsRaw()
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].name === layoutName) {
+                cameraGrid.applyLayoutNames(list[i].cameras || [])
+                return true
+            }
         }
+        return false
+    }
+
+    // Back-compat: load Default or first
+    function loadLayout() {
+        if (loadLayoutByName("Default"))
+            return true
+        var list = readLayoutsRaw()
+        if (list.length)
+            return loadLayoutByName(list[0].name)
+        return false
+    }
+
+    function deleteLayout(layoutName) {
+        if (!layoutName)
+            return false
+        var list = readLayoutsRaw()
+        var next = []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].name !== layoutName)
+                next.push(list[i])
+        }
+        writeLayoutsRaw(next)
+        return true
     }
 
     function openAddCameraPopup() {
@@ -138,6 +246,7 @@ Item {
             }
 
             Qt.callLater(function() {
+                root.refreshLayouts()
                 root.loadLayout()
             })
         }
@@ -161,6 +270,7 @@ Item {
             if (typeof cameraGrid.pruneMissingCameras === "function")
                 cameraGrid.pruneMissingCameras(list)
             Qt.callLater(function() {
+                root.refreshLayouts()
                 root.loadLayout()
             })
         }

@@ -26,6 +26,10 @@ Item {
     property string selectedCameraId: ""
     property string serverName: ""
 
+    // [{ name: "…", cameras: [...] }, ...] — filled from ServerView
+    property var layoutList: []
+    property string selectedLayoutName: ""
+
     property bool dragging: false
     property string draggingCameraId: ""
     property string draggingCameraName: ""
@@ -38,12 +42,15 @@ Item {
     }
 
     Column {
+        id: mainCol
         spacing: 8
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
+        anchors.bottom: parent.bottom
         anchors.margins: 8
 
+        // Server title
         Item {
             width: parent.width
             height: 28
@@ -63,14 +70,6 @@ Item {
                 MenuItem {
                     text: "Edit go2rtc Config"
                     onTriggered: sidebar.navigate("editGo2rtcConfig")
-                }
-                MenuItem {
-                    text: "Save Layout"
-                    onTriggered: sidebar.navigate("saveLayout")
-                }
-                MenuItem {
-                    text: "Load Layout"
-                    onTriggered: sidebar.navigate("loadLayout")
                 }
                 MenuItem {
                     text: "Disconnect"
@@ -99,62 +98,18 @@ Item {
             }
         }
 
-        // NX-style layout actions in the sidebar
-        Row {
-            width: parent.width
-            spacing: 6
-
-            Rectangle {
-                width: (parent.width - parent.spacing) / 2
-                height: 28
-                radius: 4
-                color: saveBtn.containsMouse ? "#3A3A50" : "#333333"
-                border.color: "#555555"
-                border.width: 1
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "Save Layout"
-                    color: "white"
-                    font.pixelSize: 12
-                }
-                MouseArea {
-                    id: saveBtn
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: sidebar.navigate("saveLayout")
-                }
-            }
-
-            Rectangle {
-                width: (parent.width - parent.spacing) / 2
-                height: 28
-                radius: 4
-                color: loadBtn.containsMouse ? "#3A3A50" : "#333333"
-                border.color: "#555555"
-                border.width: 1
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "Load Layout"
-                    color: "white"
-                    font.pixelSize: 12
-                }
-                MouseArea {
-                    id: loadBtn
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: sidebar.navigate("loadLayout")
-                }
-            }
+        // Cameras header
+        Text {
+            text: "Cameras"
+            color: "#AAAAAA"
+            font.pixelSize: 11
+            font.bold: true
         }
 
         ListView {
             id: cameraListView
             width: parent.width
-            height: sidebar.height - 100
+            height: Math.max(120, (mainCol.height - 220) * 0.55)
             clip: true
             model: sidebar.cameraList
 
@@ -239,12 +194,16 @@ Item {
                     MenuItem {
                         text: "Select"
                         enabled: cameraName !== ""
-                        onTriggered: sidebar.cameraSelected(cameraId)
+                        onTriggered: {
+                            sidebar.selectedCameraId = cameraId
+                            sidebar.cameraSelected(cameraId)
+                        }
                     }
                     MenuItem {
                         text: "Edit Camera"
                         enabled: cameraName !== ""
                         onTriggered: {
+                            sidebar.selectedCameraId = cameraId
                             sidebar.cameraSelected(cameraId)
                             sidebar.navigate("editCamera:" + cameraId)
                         }
@@ -261,7 +220,10 @@ Item {
 
                 TapHandler {
                     acceptedButtons: Qt.LeftButton
-                    onTapped: sidebar.cameraSelected(cameraId)
+                    onTapped: {
+                        sidebar.selectedCameraId = cameraId
+                        sidebar.cameraSelected(cameraId)
+                    }
                 }
 
                 DragHandler {
@@ -315,6 +277,176 @@ Item {
                 }
             }
         }
+
+        // Layouts header (NX: below cameras)
+        Text {
+            text: "Layouts"
+            color: "#AAAAAA"
+            font.pixelSize: 11
+            font.bold: true
+        }
+
+        ListView {
+            id: layoutListView
+            width: parent.width
+            height: Math.max(80, (mainCol.height - 220) * 0.35)
+            clip: true
+            model: sidebar.layoutList
+
+            delegate: Rectangle {
+                id: layoutRow
+                width: layoutListView.width
+                height: 32
+                radius: 4
+                color: (modelData.name === sidebar.selectedLayoutName) ? "#404060" : "#2A2A2A"
+
+                property string layoutName: modelData.name || ""
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    text: layoutRow.layoutName
+                    color: "white"
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: function(mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            layoutMenu.layoutName = layoutRow.layoutName
+                            layoutMenu.open()
+                            return
+                        }
+                        sidebar.selectedLayoutName = layoutRow.layoutName
+                        sidebar.navigate("loadLayout:" + layoutRow.layoutName)
+                    }
+                }
+
+                Menu {
+                    id: layoutMenu
+                    property string layoutName: ""
+                    MenuItem {
+                        text: "Load"
+                        onTriggered: {
+                            sidebar.selectedLayoutName = layoutMenu.layoutName
+                            sidebar.navigate("loadLayout:" + layoutMenu.layoutName)
+                        }
+                    }
+                    MenuItem {
+                        text: "Overwrite with current grid"
+                        onTriggered: sidebar.navigate("saveLayoutAs:" + layoutMenu.layoutName)
+                    }
+                    MenuItem {
+                        text: "Delete"
+                        onTriggered: sidebar.navigate("deleteLayout:" + layoutMenu.layoutName)
+                    }
+                }
+            }
+        }
+
+        // Save as…
+        Rectangle {
+            width: parent.width
+            height: 30
+            radius: 4
+            color: saveAsBtn.containsMouse ? "#3A3A50" : "#333333"
+            border.color: "#555555"
+            border.width: 1
+
+            Text {
+                anchors.centerIn: parent
+                text: "Save layout as…"
+                color: "white"
+                font.pixelSize: 12
+            }
+            MouseArea {
+                id: saveAsBtn
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: saveAsDialog.open()
+            }
+        }
+    }
+
+    // Name dialog
+    Popup {
+        id: saveAsDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(240, sidebar.width - 16)
+        height: 110
+        padding: 12
+        background: Rectangle {
+            color: "#2A2A2A"
+            border.color: "#555"
+            radius: 6
+        }
+
+        Column {
+            anchors.fill: parent
+            spacing: 10
+
+            Text {
+                text: "Layout name"
+                color: "#CCC"
+                font.pixelSize: 12
+            }
+            TextField {
+                id: layoutNameField
+                width: parent.width
+                placeholderText: "e.g. Front only"
+                color: "white"
+                selectedTextColor: "white"
+                selectionColor: "#4060A0"
+                background: Rectangle {
+                    color: "#1A1A1A"
+                    border.color: "#555"
+                    radius: 3
+                }
+            }
+            Row {
+                spacing: 8
+                anchors.right: parent.right
+                Rectangle {
+                    width: 70
+                    height: 26
+                    radius: 3
+                    color: "#444"
+                    Text { anchors.centerIn: parent; text: "Cancel"; color: "white"; font.pixelSize: 12 }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: saveAsDialog.close()
+                    }
+                }
+                Rectangle {
+                    width: 70
+                    height: 26
+                    radius: 3
+                    color: "#4060A0"
+                    Text { anchors.centerIn: parent; text: "Save"; color: "white"; font.pixelSize: 12 }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            var n = (layoutNameField.text || "").trim()
+                            if (n.length) {
+                                sidebar.navigate("saveLayoutAs:" + n)
+                                sidebar.selectedLayoutName = n
+                                layoutNameField.text = ""
+                                saveAsDialog.close()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        onOpened: layoutNameField.forceActiveFocus()
     }
 
     Rectangle {
