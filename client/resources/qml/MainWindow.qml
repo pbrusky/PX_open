@@ -33,6 +33,9 @@ ApplicationWindow {
 
     property bool isFullscreen: false
 
+    // True while a camera is open in the fullscreen overlay (hide topbar/sidebar)
+    property bool cameraFullscreenActive: false
+
     // After Disconnect, skip one auto-connect so user can stay on StartupPage
     property bool skipNextAutoConnect: false
 
@@ -79,6 +82,12 @@ ApplicationWindow {
         }
     }
 
+    /** Collapse topbar + sidebar; user can reopen with the arrows. */
+    function collapseChrome() {
+        topbar.collapsed = true
+        sidebarWrapper.collapsed = true
+    }
+
     /** Called by CameraGrid when a camera enters fullscreen. */
     function rememberFullscreenCamera(cameraName) {
         if (!cameraName || cameraName === "")
@@ -102,10 +111,71 @@ ApplicationWindow {
         if (!sv.cameraGrid || typeof sv.cameraGrid.enterFullscreen !== "function")
             return
 
+        collapseChrome()
+
         Qt.callLater(function() {
             if (sv.cameraGrid && typeof sv.cameraGrid.enterFullscreen === "function")
                 sv.cameraGrid.enterFullscreen(cam)
         })
+    }
+
+    /**
+     * Connect using saved server and jump straight to ServerView.
+     * Returns true if auto-connect was started (StartupPage can be skipped).
+     */
+    function performAutoConnect() {
+        if (!appSettings.restoreLastFullscreen)
+            return false
+        if (skipNextAutoConnect)
+            return false
+
+        var ip = appSettings.lastServerIp
+        if (!ip || ("" + ip).length === 0)
+            return false
+
+        var apiPort = appSettings.lastApiPort > 0 ? appSettings.lastApiPort : 5000
+        var modulePort = appSettings.lastModulePort > 0 ? appSettings.lastModulePort : 8001
+        var name = (appSettings.lastServerName && appSettings.lastServerName.length)
+                   ? appSettings.lastServerName
+                   : "Frigate System"
+
+        if (!frigateRef)
+            return false
+
+        if (typeof frigateRef.stopAllFullscreenStreams === "function")
+            frigateRef.stopAllFullscreenStreams()
+        if (typeof frigateRef.stopAllStreams === "function")
+            frigateRef.stopAllStreams()
+
+        mainWindow.cameraList = []
+        mainWindow.selectedCameraId = ""
+        if (sidebarWrapper)
+            sidebarWrapper.cameraList = []
+
+        mainWindow.serverName = name
+
+        if (typeof frigateRef.setServerIp === "function")
+            frigateRef.setServerIp(ip)
+        else
+            frigateRef.serverIp = ip
+
+        if (typeof frigateRef.setServer === "function")
+            frigateRef.setServer("http://" + ip + ":" + apiPort)
+        else
+            frigateRef.server = "http://" + ip + ":" + apiPort
+
+        frigateRef.setModuleServer("http://" + ip + ":" + modulePort)
+
+        contentLoader.startupDone = true
+        contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
+
+        mainWindow.enterTrueFullscreen()
+        topbar.isMaximized = true
+
+        // Auto-collapse so grid uses full screen; arrows still expand chrome
+        collapseChrome()
+
+        return true
     }
 
     /** Leave Settings: back to Startup if not connected, else camera grid. */
@@ -123,17 +193,22 @@ ApplicationWindow {
 
     function goToStartupPage() {
         contentLoader.startupDone = false
+        mainWindow.cameraFullscreenActive = false
         mainWindow.serverName = ""
         mainWindow.cameraList = []
         mainWindow.selectedCameraId = ""
         if (sidebarWrapper)
             sidebarWrapper.cameraList = []
+        // Expand chrome again on disconnect / startup page
+        topbar.collapsed = false
+        sidebarWrapper.collapsed = false
         contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
     }
 
     function disconnectFromServer() {
         // User left on purpose — do not auto-reconnect this time
         skipNextAutoConnect = true
+        mainWindow.cameraFullscreenActive = false
 
         if (frigateRef) {
             if (typeof frigateRef.stopAllFullscreenStreams === "function")
@@ -147,6 +222,12 @@ ApplicationWindow {
         if (mainWindow.isFullscreen)
             mainWindow.exitTrueFullscreen()
         topbar.isMaximized = false
+    }
+
+    Component.onCompleted: {
+        Qt.callLater(function() {
+            performAutoConnect()
+        })
     }
 
     Timer {
@@ -190,8 +271,10 @@ ApplicationWindow {
     TopBar {
         id: topbar
         width: parent.width
-        height: 48
+        height: mainWindow.cameraFullscreenActive ? 0 : 48
         z: 9999
+        visible: !mainWindow.cameraFullscreenActive
+        opacity: mainWindow.cameraFullscreenActive ? 0 : 1
 
         property bool collapsed: false
         property bool isMaximized: false
@@ -234,7 +317,7 @@ ApplicationWindow {
               ? "qrc:/app/assets/icons/nx/arrow-down.svg"
               : "qrc:/app/assets/icons/nx/arrow-up.svg"
 
-        visible: !topbar.isStartupPage
+        visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
         onClicked: topbar.collapsed = !topbar.collapsed
 
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
@@ -247,8 +330,8 @@ ApplicationWindow {
         frigateRef: mainWindow.frigateRef
 
         width: 260
-        height: mainWindow.height - topbar.height
-        y: topbar.height
+        height: mainWindow.height - (mainWindow.cameraFullscreenActive ? 0 : topbar.height)
+        y: mainWindow.cameraFullscreenActive ? 0 : topbar.height
         z: 9998
 
         property bool collapsed: false
@@ -257,6 +340,7 @@ ApplicationWindow {
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
         visible: contentLoader.item && contentLoader.item.objectName === "ServerView"
+                 && !mainWindow.cameraFullscreenActive
 
         cameraList: mainWindow.cameraList
         selectedCameraId: mainWindow.selectedCameraId
@@ -408,7 +492,7 @@ ApplicationWindow {
               ? "qrc:/app/assets/icons/nx/arrow-right.svg"
               : "qrc:/app/assets/icons/nx/arrow-left.svg"
 
-        visible: !topbar.isStartupPage
+        visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
         onClicked: sidebarWrapper.collapsed = !sidebarWrapper.collapsed
 
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
@@ -419,8 +503,9 @@ ApplicationWindow {
         anchors.fill: parent
         z: 2
 
-        anchors.topMargin: topbar.collapsed ? 0 : topbar.height
-        anchors.leftMargin: (sidebarWrapper.collapsed || topbar.isStartupPage) ? 0 : sidebarWrapper.width
+        anchors.topMargin: (topbar.collapsed || mainWindow.cameraFullscreenActive) ? 0 : topbar.height
+        anchors.leftMargin: (sidebarWrapper.collapsed || topbar.isStartupPage
+                             || mainWindow.cameraFullscreenActive) ? 0 : sidebarWrapper.width
 
         property bool startupDone: false
 
@@ -435,21 +520,15 @@ ApplicationWindow {
                 item.discovery = discovery
                 item.frigateRef = frigateRef
 
-                // Auto-connect only when setting is on AND user did not just Disconnect
                 if (appSettings.restoreLastFullscreen
                         && appSettings.lastServerIp
                         && appSettings.lastServerIp.length > 0
                         && !mainWindow.skipNextAutoConnect) {
                     Qt.callLater(function() {
-                        if (item && typeof item.connectToServer === "function") {
-                            item.connectToServer(
-                                appSettings.lastServerIp,
-                                appSettings.lastModulePort > 0 ? appSettings.lastModulePort : 8001
-                            )
-                        }
+                        if (!contentLoader.startupDone)
+                            mainWindow.performAutoConnect()
                     })
                 }
-                // Clear one-shot skip so a later real app launch can still auto-connect
                 mainWindow.skipNextAutoConnect = false
 
                 item.serverSelected.connect(function(name, ip, apiPort, modulePort) {
@@ -467,7 +546,6 @@ ApplicationWindow {
 
                     mainWindow.serverName = name
 
-                    // Persist last server for restore-on-startup
                     appSettings.lastServerName = name || ""
                     appSettings.lastServerIp = ip || ""
                     appSettings.lastApiPort = apiPort || 5000

@@ -26,6 +26,11 @@ Item {
     property var cameraOnlineMap: ({})
     property bool _skipStreamStopOnRemove: false
 
+    function setChromeHidden(hidden) {
+        if (mainWindow)
+            mainWindow.cameraFullscreenActive = !!hidden
+    }
+
     function cameraOnline(name) {
         cameraOnlineMap[name] = true
         cameraOnlineMap = cameraOnlineMap
@@ -202,6 +207,7 @@ Item {
             fullscreenSubQueue = null
             fullscreenMainQueue = null
             fullscreenLocked = false
+            setChromeHidden(false)
         }
 
         _skipStreamStopOnRemove = true
@@ -222,6 +228,7 @@ Item {
             fullscreenSubQueue = null
             fullscreenMainQueue = null
             fullscreenLocked = false
+            setChromeHidden(false)
             if (frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
                 try {
                     frigateRef.stopFullscreenStream(fsName)
@@ -335,9 +342,10 @@ Item {
         fullscreenLocked = true
         unlockTimer.restart()
 
-        // Persist last fullscreen camera for restore-on-startup
+        // Persist last fullscreen camera + hide topbar/sidebar
         if (mainWindow && typeof mainWindow.rememberFullscreenCamera === "function")
             mainWindow.rememberFullscreenCamera(cameraName)
+        setChromeHidden(true)
 
         if (mainWindow && mainWindow.contentItem) {
             fullscreenLoader.parent = mainWindow.contentItem
@@ -398,6 +406,8 @@ Item {
         fullscreenName = ""
         fullscreenSubQueue = null
         fullscreenMainQueue = null
+
+        setChromeHidden(false)
 
         if (name !== "" && frigateRef &&
             typeof frigateRef.stopFullscreenStream === "function") {
