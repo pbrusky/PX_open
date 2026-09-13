@@ -119,7 +119,6 @@ ApplicationWindow {
             )
         }
 
-        // Full cleanup is handled in MainWindowConnections.onDisconnectRequested
         onDisconnectRequested: {
         }
 
@@ -240,6 +239,22 @@ ApplicationWindow {
                 return
             }
 
+            if (page === "saveLayout") {
+                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
+                        && typeof contentLoader.item.saveLayout === "function") {
+                    contentLoader.item.saveLayout()
+                }
+                return
+            }
+
+            if (page === "loadLayout") {
+                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
+                        && typeof contentLoader.item.loadLayout === "function") {
+                    contentLoader.item.loadLayout()
+                }
+                return
+            }
+
             if (page === "reloadCameras") {
                 frigateRef.loadCameras()
                 return
@@ -325,7 +340,6 @@ ApplicationWindow {
                 item.frigateRef = frigateRef
 
                 item.serverSelected.connect(function(name, ip, apiPort, modulePort) {
-                    // Tear down previous server completely
                     if (frigateRef) {
                         if (typeof frigateRef.stopAllFullscreenStreams === "function")
                             frigateRef.stopAllFullscreenStreams()
@@ -364,7 +378,6 @@ ApplicationWindow {
                 item.frigateRef = frigateRef
                 item.mainWindow = mainWindow
 
-                // Connect before loadCameras so we never miss the first list
                 item.camerasLoadedToMain.connect(function(list) {
                     mainWindow.cameraList = list
                     sidebarWrapper.cameraList = list

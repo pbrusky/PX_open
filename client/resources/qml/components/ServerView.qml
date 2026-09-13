@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtCore
 
 Item {
     id: root
@@ -14,6 +15,42 @@ Item {
 
     signal camerasLoadedToMain(var list)
     signal gridReady()
+
+    Settings {
+        id: layoutSettings
+        category: "gridLayouts"
+    }
+
+    function layoutStorageKey() {
+        if (frigateRef && frigateRef.serverIp && ("" + frigateRef.serverIp).length)
+            return "layout_" + frigateRef.serverIp
+        if (mainWindow && mainWindow.serverName && mainWindow.serverName.length)
+            return "layout_" + mainWindow.serverName
+        return "layout_default"
+    }
+
+    function saveLayout() {
+        if (!cameraGrid || typeof cameraGrid.getLayoutNames !== "function")
+            return false
+        var names = cameraGrid.getLayoutNames()
+        layoutSettings.setValue(layoutStorageKey(), JSON.stringify(names))
+        return true
+    }
+
+    function loadLayout() {
+        if (!cameraGrid || typeof cameraGrid.applyLayoutNames !== "function")
+            return false
+        var raw = layoutSettings.value(layoutStorageKey(), "")
+        if (!raw || raw === "")
+            return false
+        try {
+            var names = JSON.parse(raw)
+            cameraGrid.applyLayoutNames(names)
+            return true
+        } catch (e) {
+            return false
+        }
+    }
 
     function openAddCameraPopup() {
         if (!mainWindow || !mainWindow.popupManager)
@@ -99,6 +136,10 @@ Item {
                     }
                 }
             }
+
+            Qt.callLater(function() {
+                root.loadLayout()
+            })
         }
     }
 
@@ -119,6 +160,9 @@ Item {
             cameraGrid.cameraList = list
             if (typeof cameraGrid.pruneMissingCameras === "function")
                 cameraGrid.pruneMissingCameras(list)
+            Qt.callLater(function() {
+                root.loadLayout()
+            })
         }
     }
 
@@ -129,7 +173,6 @@ Item {
             cameraGrid.removeCameraByName(cameraId)
     }
 
-    // Clear entire grid before system remove (restart kills remaining streams)
     function clearAllFromGrid() {
         if (!cameraGrid)
             return

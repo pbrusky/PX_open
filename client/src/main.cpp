@@ -63,7 +63,6 @@ int main(int argc, char *argv[])
         qputenv("QT_OPENGL", "software");
     }
 
-    // Graphics API: D3D11 on Windows, OpenGL elsewhere
 #ifdef Q_OS_WIN
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
 #else
@@ -74,6 +73,9 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle("Fusion");
 
     QGuiApplication app(argc, argv);
+    app.setOrganizationName(QStringLiteral("PXOpen"));
+    app.setOrganizationDomain(QStringLiteral("pxopen.local"));
+    app.setApplicationName(QStringLiteral("PX Open"));
     app.setWindowIcon(QIcon(":/assets/icon.ico"));
 
     av_log_set_level(AV_LOG_QUIET);
@@ -100,7 +102,6 @@ int main(int argc, char *argv[])
             return new FullscreenHelper();
         });
 
-    // version.txt — try several locations so Debug/cwd does not matter
     QString version = "unknown";
     const QStringList versionCandidates = {
         QDir(QCoreApplication::applicationDirPath()).filePath("version.txt"),
@@ -141,9 +142,6 @@ int main(int argc, char *argv[])
 
     discoveryThread->start();
 
-    // Cameras load only after the user selects a server (StartupPage / ServerView).
-    // Do not setServer/loadCameras here — a late reply can clear the list.
-
     engine.rootContext()->setContextProperty("frigate", frigateApi);
     engine.rootContext()->setContextProperty("discovery", discoveryProxy);
     engine.rootContext()->setContextProperty("frigateStream", frigateStream);
@@ -156,7 +154,6 @@ int main(int argc, char *argv[])
     QWindow* mainWindow = qobject_cast<QWindow*>(mainWindowObj);
 
 #ifdef Q_OS_WIN
-    // Taskbar / window icon + ensure app shows on taskbar (frameless windows)
     if (mainWindow) {
         const HWND hwnd = reinterpret_cast<HWND>(mainWindow->winId());
 

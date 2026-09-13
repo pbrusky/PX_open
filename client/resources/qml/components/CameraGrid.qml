@@ -70,6 +70,78 @@ Item {
         }
     }
 
+    function getLayoutNames() {
+        var out = []
+        for (var i = 0; i < cameraNames.length; i++) {
+            var n = nameAt(i)
+            if (n !== "")
+                out.push(n)
+        }
+        return out
+    }
+
+    function applyLayoutNames(names) {
+        if (!names || !(names instanceof Array))
+            return
+
+        var allowed = ({})
+        var list = cameraList
+        if ((!list || !list.length) && mainWindow && mainWindow.cameraList)
+            list = mainWindow.cameraList
+
+        if (list && list.length) {
+            for (var i = 0; i < list.length; i++) {
+                var cam = list[i]
+                var id = (typeof cam === "string") ? cam : (cam.id || cam.name || "")
+                var nm = (typeof cam === "string") ? cam : (cam.name || cam.id || "")
+                if (id) {
+                    allowed[String(id)] = true
+                    allowed[String(id).replace(/ /g, "_")] = true
+                    allowed[String(id).replace(/_/g, " ")] = true
+                }
+                if (nm) {
+                    allowed[String(nm)] = true
+                    allowed[String(nm).replace(/ /g, "_")] = true
+                    allowed[String(nm).replace(/_/g, " ")] = true
+                }
+            }
+        }
+
+        var next = []
+        for (var j = 0; j < names.length; j++) {
+            var n = String(names[j] || "")
+            if (!n)
+                continue
+            if (next.indexOf(n) !== -1)
+                continue
+            if (list && list.length) {
+                if (!allowed[n] && !allowed[n.replace(/ /g, "_")] && !allowed[n.replace(/_/g, " ")])
+                    continue
+            }
+            next.push(n)
+        }
+
+        var prev = cameraNames.slice()
+        for (var p = 0; p < prev.length; p++) {
+            var oldName = String(prev[p] || "")
+            if (!oldName)
+                continue
+            if (next.indexOf(oldName) === -1 && frigateRef
+                    && typeof frigateRef.stopStream === "function") {
+                try { frigateRef.stopStream(oldName) } catch (e) {}
+            }
+        }
+
+        cameraNames = next
+        updateGridSize()
+
+        for (var k = 0; k < cameraNames.length; k++) {
+            var cn = cameraNames[k]
+            if (frigateRef && typeof frigateRef.getQueue === "function")
+                frigateRef.getQueue(cn)
+        }
+    }
+
     function dropAt(x, y, cameraName) {
         if (!cameraName || cameraNames.indexOf(cameraName) !== -1)
             return
@@ -140,7 +212,6 @@ Item {
         }
     }
 
-    // Clear EVERY tile before system remove (Frigate/go2rtc restart kills streams)
     function clearAllTiles() {
         console.log("CameraGrid: clearAllTiles — removing", cameraNames.length, "cameras from grid")
 

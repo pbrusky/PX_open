@@ -65,6 +65,14 @@ Item {
                     onTriggered: sidebar.navigate("editGo2rtcConfig")
                 }
                 MenuItem {
+                    text: "Save Layout"
+                    onTriggered: sidebar.navigate("saveLayout")
+                }
+                MenuItem {
+                    text: "Load Layout"
+                    onTriggered: sidebar.navigate("loadLayout")
+                }
+                MenuItem {
                     text: "Disconnect"
                     onTriggered: sidebar.navigate("disconnect")
                 }
@@ -91,10 +99,62 @@ Item {
             }
         }
 
+        // NX-style layout actions in the sidebar
+        Row {
+            width: parent.width
+            spacing: 6
+
+            Rectangle {
+                width: (parent.width - parent.spacing) / 2
+                height: 28
+                radius: 4
+                color: saveBtn.containsMouse ? "#3A3A50" : "#333333"
+                border.color: "#555555"
+                border.width: 1
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Save Layout"
+                    color: "white"
+                    font.pixelSize: 12
+                }
+                MouseArea {
+                    id: saveBtn
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: sidebar.navigate("saveLayout")
+                }
+            }
+
+            Rectangle {
+                width: (parent.width - parent.spacing) / 2
+                height: 28
+                radius: 4
+                color: loadBtn.containsMouse ? "#3A3A50" : "#333333"
+                border.color: "#555555"
+                border.width: 1
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Load Layout"
+                    color: "white"
+                    font.pixelSize: 12
+                }
+                MouseArea {
+                    id: loadBtn
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: sidebar.navigate("loadLayout")
+                }
+            }
+        }
+
         ListView {
             id: cameraListView
             width: parent.width
-            height: sidebar.height - 60
+            height: sidebar.height - 100
             clip: true
             model: sidebar.cameraList
 
