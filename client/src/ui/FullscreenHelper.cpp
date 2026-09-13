@@ -5,6 +5,8 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QQuickItem>
+#include <QEvent>
+#include <QCursor>
 
 #ifdef Q_OS_WIN
 #  include <windows.h>
@@ -13,6 +15,68 @@
 FullscreenHelper::FullscreenHelper(QObject* parent)
     : QObject(parent)
 {
+    m_idleTimer.setSingleShot(true);
+    connect(&m_idleTimer, &QTimer::timeout, this, [this]() {
+        setCursorHidden(true);
+    });
+}
+
+void FullscreenHelper::startIdleCursor(int idleMs)
+{
+    if (!m_active) {
+        qApp->installEventFilter(this);
+        m_active = true;
+    }
+    m_idleTimer.setInterval(qMax(1000, idleMs));
+    noteUserActivity();
+}
+
+void FullscreenHelper::stopIdleCursor()
+{
+    if (m_active) {
+        qApp->removeEventFilter(this);
+        m_active = false;
+    }
+    m_idleTimer.stop();
+    setCursorHidden(false);
+}
+
+void FullscreenHelper::noteUserActivity()
+{
+    setCursorHidden(false);
+    if (m_active)
+        m_idleTimer.start();
+}
+
+void FullscreenHelper::setCursorHidden(bool hidden)
+{
+    if (m_cursorHidden == hidden)
+        return;
+    m_cursorHidden = hidden;
+    if (hidden)
+        QGuiApplication::setOverrideCursor(Qt::BlankCursor);
+    else
+        QGuiApplication::restoreOverrideCursor();
+    emit cursorHiddenChanged();
+}
+
+bool FullscreenHelper::eventFilter(QObject* watched, QEvent* event)
+{
+    Q_UNUSED(watched);
+    switch (event->type()) {
+    case QEvent::MouseMove:
+    case QEvent::HoverMove:
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonDblClick:
+    case QEvent::Wheel:
+    case QEvent::KeyPress:
+    case QEvent::TabletMove:
+        noteUserActivity();
+        break;
+    default:
+        break;
+    }
+    return false;
 }
 
 QQuickWindow* FullscreenHelper::openFullscreen(QQmlEngine* engine,

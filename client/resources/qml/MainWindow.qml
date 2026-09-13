@@ -39,9 +39,6 @@ ApplicationWindow {
     // After Disconnect, skip one auto-connect so user can stay on StartupPage
     property bool skipNextAutoConnect: false
 
-    // Hide mouse after idle (digital sign / wall monitor)
-    property bool idleCursorHidden: false
-
     // ── Persist “restore last view in fullscreen” + last session ──
     Settings {
         id: appSettings
@@ -86,9 +83,7 @@ ApplicationWindow {
     }
 
     function noteUserActivity() {
-        if (idleCursorHidden)
-            idleCursorHidden = false
-        cursorIdleTimer.restart()
+        FullscreenHelper.noteUserActivity()
     }
 
     /** Called by CameraGrid when a camera enters fullscreen. */
@@ -208,6 +203,7 @@ ApplicationWindow {
         Qt.callLater(function() {
             performAutoConnect()
         })
+        FullscreenHelper.startIdleCursor(10000)
     }
 
     Timer {
@@ -218,32 +214,6 @@ ApplicationWindow {
             if (frigateRef)
                 frigateRef.loadCameras()
         }
-    }
-
-    Timer {
-        id: cursorIdleTimer
-        interval: 10000
-        running: true
-        onTriggered: idleCursorHidden = true
-    }
-
-    // Idle-cursor tracking must not steal hover from camera tiles.
-    // A full-window hoverEnabled MouseArea blocks HoverHandler on the grid
-    // (info / remove buttons never appear).
-    HoverHandler {
-        acceptedButtons: Qt.NoButton
-        onPointChanged: mainWindow.noteUserActivity()
-    }
-
-    MouseArea {
-        anchors.fill: parent
-        z: 5000000
-        hoverEnabled: true
-        acceptedButtons: Qt.NoButton
-        enabled: mainWindow.idleCursorHidden
-        visible: mainWindow.idleCursorHidden
-        cursorShape: Qt.BlankCursor
-        onPositionChanged: mainWindow.noteUserActivity()
     }
 
     Loader {
