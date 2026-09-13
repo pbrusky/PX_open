@@ -342,7 +342,6 @@ Item {
         fullscreenLocked = true
         unlockTimer.restart()
 
-        // Persist last fullscreen camera + hide topbar/sidebar
         if (mainWindow && typeof mainWindow.rememberFullscreenCamera === "function")
             mainWindow.rememberFullscreenCamera(cameraName)
         setChromeHidden(true)

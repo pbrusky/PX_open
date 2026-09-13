@@ -53,12 +53,6 @@ ApplicationWindow {
         property int lastModulePort: 8001
     }
 
-    Settings {
-        id: sessionSettings
-        category: "session"
-        property string lastFullscreenCamera: ""
-    }
-
     function enterTrueFullscreen() {
         isFullscreen = true
         flags = Qt.FramelessWindowHint | Qt.Window
@@ -101,31 +95,8 @@ ApplicationWindow {
     function rememberFullscreenCamera(cameraName) {
         if (!cameraName || cameraName === "")
             return
-        sessionSettings.lastFullscreenCamera = cameraName
         if (frigateRef && frigateRef.serverIp)
             appSettings.lastServerIp = "" + frigateRef.serverIp
-    }
-
-    /** Called by CameraGrid / ServerView after grid is ready. */
-    function tryRestoreLastFullscreen() {
-        if (!appSettings.restoreLastFullscreen)
-            return
-        var cam = sessionSettings.lastFullscreenCamera
-        if (!cam || cam === "")
-            return
-
-        var sv = contentLoader.item
-        if (!sv || sv.objectName !== "ServerView")
-            return
-        if (!sv.cameraGrid || typeof sv.cameraGrid.enterFullscreen !== "function")
-            return
-
-        collapseChrome()
-
-        Qt.callLater(function() {
-            if (sv.cameraGrid && typeof sv.cameraGrid.enterFullscreen === "function")
-                sv.cameraGrid.enterFullscreen(cam)
-        })
     }
 
     /**
@@ -606,18 +577,8 @@ ApplicationWindow {
                     sidebarWrapper.cameraList = list
                 })
 
-                if (typeof item.gridReady !== "undefined") {
-                    item.gridReady.connect(function() {
-                        mainWindow.tryRestoreLastFullscreen()
-                    })
-                }
-
                 item.initializeGrid()
                 frigateRef.loadCameras()
-
-                Qt.callLater(function() {
-                    mainWindow.tryRestoreLastFullscreen()
-                })
             }
         }
     }
