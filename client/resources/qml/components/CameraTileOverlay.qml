@@ -95,8 +95,7 @@ Item {
         anchors.right: parent.right
         anchors.topMargin: 8
         anchors.rightMargin: 8
-        opacity: hovered ? 1.0 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
+        opacity: 1.0
         z: 10
 
         Rectangle {

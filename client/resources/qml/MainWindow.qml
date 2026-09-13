@@ -227,13 +227,22 @@ ApplicationWindow {
         onTriggered: idleCursorHidden = true
     }
 
-    // Tracks mouse without stealing clicks (digital sign: hide cursor after idle)
+    // Idle-cursor tracking must not steal hover from camera tiles.
+    // A full-window hoverEnabled MouseArea blocks HoverHandler on the grid
+    // (info / remove buttons never appear).
+    HoverHandler {
+        acceptedButtons: Qt.NoButton
+        onPointChanged: mainWindow.noteUserActivity()
+    }
+
     MouseArea {
         anchors.fill: parent
         z: 5000000
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
-        cursorShape: mainWindow.idleCursorHidden ? Qt.BlankCursor : Qt.ArrowCursor
+        enabled: mainWindow.idleCursorHidden
+        visible: mainWindow.idleCursorHidden
+        cursorShape: Qt.BlankCursor
         onPositionChanged: mainWindow.noteUserActivity()
     }
 
