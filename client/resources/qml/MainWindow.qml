@@ -3,10 +3,11 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
-import QtCore
 
 import "qrc:/app/resources/qml/components"
 import "qrc:/app/resources/qml/components/popups"
+import "qrc:/app/resources/qml/session"
+import "qrc:/app/resources/qml/navigation"
 
 ApplicationWindow {
     id: mainWindow
@@ -33,17 +34,10 @@ ApplicationWindow {
 
     property bool isFullscreen: false
     property bool cameraFullscreenActive: false
-    property bool skipNextAutoConnect: false
 
-    Settings {
-        id: appSettings
-        category: "general"
-        property bool restoreLastFullscreen: false
-        property string lastServerName: ""
-        property string lastServerIp: ""
-        property int lastApiPort: 5000
-        property int lastModulePort: 8001
-    }
+    // Forward session helpers used elsewhere
+    property alias skipNextAutoConnect: session.skipNextAutoConnect
+    property alias appSettings: session.settings
 
     function enterTrueFullscreen() {
         isFullscreen = true
@@ -56,146 +50,40 @@ ApplicationWindow {
         showNormal()
     }
 
-    function parseRtspCredentials(url) {
-        if (!url || !url.startsWith("rtsp://"))
-            return { user: "", pass: "" }
-
-        let authPart = url.split("rtsp://")[1].split("@")[0]
-        if (!authPart.includes(":"))
-            return { user: "", pass: "" }
-
-        let parts = authPart.split(":")
-        return {
-            user: parts[0],
-            pass: parts[1]
-        }
-    }
-
-    function collapseChrome() {
-        topbar.collapsed = true
-        sidebarWrapper.collapsed = true
-    }
-
     function noteUserActivity() {
         FullscreenHelper.noteUserActivity()
     }
 
-    function rememberFullscreenCamera(cameraName) {
-        if (!cameraName || cameraName === "")
-            return
-        if (frigateRef && frigateRef.serverIp)
-            appSettings.lastServerIp = "" + frigateRef.serverIp
+    function collapseChrome() { session.collapseChrome() }
+    function rememberFullscreenCamera(n) { session.rememberFullscreenCamera(n) }
+    function syncSidebarLayouts() { session.syncSidebarLayouts() }
+    function performAutoConnect() { return session.performAutoConnect() }
+    function leaveSettings() { session.leaveSettings() }
+    function goToServerView() { session.goToServerView() }
+    function goToStartupPage() { session.goToStartupPage() }
+    function disconnectFromServer() { session.disconnectFromServer() }
+
+    SessionManager {
+        id: session
+        mainWindow: mainWindow
+        frigateRef: mainWindow.frigateRef
+        contentLoader: contentLoader
+        sidebar: sidebarWrapper
+        topbar: topbar
     }
 
-    function syncSidebarLayouts() {
-        if (contentLoader.item && contentLoader.item.objectName === "ServerView") {
-            sidebarWrapper.layoutList = contentLoader.item.savedLayouts || []
-        }
-    }
-
-    function performAutoConnect() {
-        if (!appSettings.restoreLastFullscreen)
-            return false
-        if (skipNextAutoConnect)
-            return false
-
-        var ip = appSettings.lastServerIp
-        if (!ip || ("" + ip).length === 0)
-            return false
-
-        var apiPort = appSettings.lastApiPort > 0 ? appSettings.lastApiPort : 5000
-        var modulePort = appSettings.lastModulePort > 0 ? appSettings.lastModulePort : 8001
-        var name = (appSettings.lastServerName && appSettings.lastServerName.length)
-                   ? appSettings.lastServerName
-                   : "Frigate System"
-
-        if (!frigateRef)
-            return false
-
-        if (typeof frigateRef.stopAllFullscreenStreams === "function")
-            frigateRef.stopAllFullscreenStreams()
-        if (typeof frigateRef.stopAllStreams === "function")
-            frigateRef.stopAllStreams()
-
-        mainWindow.cameraList = []
-        mainWindow.selectedCameraId = ""
-        if (sidebarWrapper)
-            sidebarWrapper.cameraList = []
-
-        mainWindow.serverName = name
-
-        if (typeof frigateRef.setServerIp === "function")
-            frigateRef.setServerIp(ip)
-        else
-            frigateRef.serverIp = ip
-
-        if (typeof frigateRef.setServer === "function")
-            frigateRef.setServer("http://" + ip + ":" + apiPort)
-        else
-            frigateRef.server = "http://" + ip + ":" + apiPort
-
-        frigateRef.setModuleServer("http://" + ip + ":" + modulePort)
-
-        contentLoader.startupDone = true
-        contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
-
-        mainWindow.enterTrueFullscreen()
-        topbar.isMaximized = true
-        collapseChrome()
-
-        return true
-    }
-
-    function leaveSettings() {
-        if (contentLoader.startupDone)
-            goToServerView()
-        else
-            goToStartupPage()
-    }
-
-    function goToServerView() {
-        contentLoader.startupDone = true
-        contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
-    }
-
-    function goToStartupPage() {
-        contentLoader.startupDone = false
-        mainWindow.cameraFullscreenActive = false
-        mainWindow.serverName = ""
-        mainWindow.cameraList = []
-        mainWindow.selectedCameraId = ""
-        if (sidebarWrapper) {
-            sidebarWrapper.cameraList = []
-            sidebarWrapper.layoutList = []
-            sidebarWrapper.selectedLayoutName = ""
-        }
-        topbar.collapsed = false
-        sidebarWrapper.collapsed = false
-        contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
-    }
-
-    function disconnectFromServer() {
-        skipNextAutoConnect = true
-        mainWindow.cameraFullscreenActive = false
-
-        if (frigateRef) {
-            if (typeof frigateRef.stopAllFullscreenStreams === "function")
-                frigateRef.stopAllFullscreenStreams()
-            if (typeof frigateRef.stopAllStreams === "function")
-                frigateRef.stopAllStreams()
-        }
-
-        goToStartupPage()
-
-        if (mainWindow.isFullscreen)
-            mainWindow.exitTrueFullscreen()
-        topbar.isMaximized = false
+    NavigationRouter {
+        id: nav
+        mainWindow: mainWindow
+        frigateRef: mainWindow.frigateRef
+        contentLoader: contentLoader
+        sidebar: sidebarWrapper
+        popupManager: popupManager
+        session: session
     }
 
     Component.onCompleted: {
-        Qt.callLater(function() {
-            performAutoConnect()
-        })
+        Qt.callLater(function() { session.performAutoConnect() })
         FullscreenHelper.startIdleCursor(10000)
     }
 
@@ -222,7 +110,6 @@ ApplicationWindow {
         source: "qrc:/app/resources/qml/fullscreen/FullscreenManager.qml"
         asynchronous: false
         visible: false
-
         onLoaded: {
             var fm = fullscreenManagerLoader.item
             fm.mainWindow = mainWindow
@@ -236,7 +123,6 @@ ApplicationWindow {
         source: "qrc:/app/resources/qml/components/CameraDropHandler.qml"
         asynchronous: false
         visible: false
-
         onLoaded: {
             var dh = dropHandlerLoader.item
             dh.mainWindow = mainWindow
@@ -269,15 +155,10 @@ ApplicationWindow {
                 { mainWindow: mainWindow }
             )
         }
-
         onSettingsRequested: {
             contentLoader.source = "qrc:/app/resources/qml/generalSettings.qml"
         }
-
-        onDisconnectRequested: {
-            mainWindow.disconnectFromServer()
-        }
-
+        onDisconnectRequested: session.disconnectFromServer()
         onExitRequested: Qt.quit()
         onMinimizeRequested: mainWindow.showMinimized()
     }
@@ -289,30 +170,24 @@ ApplicationWindow {
         x: (mainWindow.width / 2) - (width / 2)
         y: topbar.collapsed ? 4 : topbar.height + 4
         z: 10000
-
         icon: topbar.collapsed
               ? "qrc:/app/assets/icons/nx/arrow-down.svg"
               : "qrc:/app/assets/icons/nx/arrow-up.svg"
-
         visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
         onClicked: topbar.collapsed = !topbar.collapsed
-
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
     }
 
     Sidebar {
         id: sidebarWrapper
         objectName: "Sidebar"
-
         frigateRef: mainWindow.frigateRef
-
         width: 260
         height: mainWindow.height - (mainWindow.cameraFullscreenActive ? 0 : topbar.height)
         y: mainWindow.cameraFullscreenActive ? 0 : topbar.height
         z: 9998
 
         property bool collapsed: false
-
         x: collapsed ? -width : 0
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
@@ -349,146 +224,7 @@ ApplicationWindow {
         }
 
         onNavigate: function(page) {
-
-            if (page === "qrc:/app/resources/qml/StartupPage.qml") {
-                contentLoader.startupDone = false
-                contentLoader.source = page
-                return
-            }
-
-            if (page === "disconnect") {
-                mainWindow.disconnectFromServer()
-                return
-            }
-
-            if (page === "addCamera") {
-                popupManager.openPopup(
-                    "qrc:/app/resources/qml/components/popups/AddCameraPopup.qml",
-                    {
-                        frigateRef: frigateRef,
-                        popupManager: popupManager
-                    }
-                )
-                return
-            }
-
-            if (page === "editFrigateConfig") {
-                popupManager.openPopup(
-                    "qrc:/app/resources/qml/components/popups/ConfigEditorPopup.qml",
-                    {
-                        frigateRef: frigateRef,
-                        popupManager: popupManager,
-                        configType: "frigate"
-                    }
-                )
-                return
-            }
-
-            if (page === "editGo2rtcConfig") {
-                popupManager.openPopup(
-                    "qrc:/app/resources/qml/components/popups/ConfigEditorPopup.qml",
-                    {
-                        frigateRef: frigateRef,
-                        popupManager: popupManager,
-                        configType: "go2rtc"
-                    }
-                )
-                return
-            }
-
-            // Multi named layouts
-            if (page.indexOf("saveLayoutAs:") === 0) {
-                var saveName = page.substring("saveLayoutAs:".length)
-                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
-                        && typeof contentLoader.item.saveLayoutAs === "function") {
-                    contentLoader.item.saveLayoutAs(saveName)
-                    if (typeof contentLoader.item.refreshLayouts === "function")
-                        contentLoader.item.refreshLayouts()
-                    mainWindow.syncSidebarLayouts()
-                    sidebarWrapper.selectedLayoutName = saveName
-                }
-                return
-            }
-
-            if (page.indexOf("loadLayout:") === 0) {
-                var loadName = page.substring("loadLayout:".length)
-                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
-                        && typeof contentLoader.item.loadLayoutByName === "function") {
-                    contentLoader.item.loadLayoutByName(loadName)
-                    sidebarWrapper.selectedLayoutName = loadName
-                }
-                return
-            }
-
-            if (page.indexOf("deleteLayout:") === 0) {
-                var delName = page.substring("deleteLayout:".length)
-                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
-                        && typeof contentLoader.item.deleteLayout === "function") {
-                    contentLoader.item.deleteLayout(delName)
-                    mainWindow.syncSidebarLayouts()
-                    if (sidebarWrapper.selectedLayoutName === delName)
-                        sidebarWrapper.selectedLayoutName = ""
-                }
-                return
-            }
-
-            // Legacy single-slot (still ok)
-            if (page === "saveLayout") {
-                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
-                        && typeof contentLoader.item.saveLayout === "function") {
-                    contentLoader.item.saveLayout()
-                    if (typeof contentLoader.item.refreshLayouts === "function")
-                        contentLoader.item.refreshLayouts()
-                    mainWindow.syncSidebarLayouts()
-                }
-                return
-            }
-
-            if (page === "loadLayout") {
-                if (contentLoader.item && contentLoader.item.objectName === "ServerView"
-                        && typeof contentLoader.item.loadLayout === "function") {
-                    contentLoader.item.loadLayout()
-                }
-                return
-            }
-
-            if (page === "reloadCameras") {
-                frigateRef.loadCameras()
-                return
-            }
-
-            if (page.startsWith("editCamera:")) {
-                let camId = page.split(":")[1]
-                let cam = mainWindow.cameraList.find(c => c.id === camId)
-
-                if (cam) {
-                    let rtsp = cam.rtsp || cam.streamUrl || ""
-                    let user = cam.username || ""
-                    let pass = cam.password || ""
-
-                    if ((!user || !pass) && rtsp) {
-                        let creds = parseRtspCredentials(rtsp)
-                        if (!user) user = creds.user
-                        if (!pass) pass = creds.pass
-                    }
-
-                    popupManager.openPopup(
-                        "qrc:/app/resources/qml/components/popups/EditCameraPopup.qml",
-                        {
-                            frigateRef: frigateRef,
-                            cameraId: cam.id,
-                            cameraName: cam.name || "",
-                            rtspUrl: rtsp,
-                            username: user,
-                            password: pass,
-                            popupManager: popupManager
-                        }
-                    )
-                }
-                return
-            }
-
-            contentLoader.source = page
+            nav.handle(page)
         }
     }
 
@@ -496,22 +232,16 @@ ApplicationWindow {
         id: sidebarReturnArrow
         width: 32
         height: 32
-
         x: sidebarWrapper.collapsed
             ? 4
             : sidebarWrapper.x + sidebarWrapper.width - 36
-
         y: topbar.height + (mainWindow.height - topbar.height) / 2 - height / 2
-
         z: 10001
-
         icon: sidebarWrapper.collapsed
               ? "qrc:/app/assets/icons/nx/arrow-right.svg"
               : "qrc:/app/assets/icons/nx/arrow-left.svg"
-
         visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
         onClicked: sidebarWrapper.collapsed = !sidebarWrapper.collapsed
-
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
     }
 
@@ -519,7 +249,6 @@ ApplicationWindow {
         id: contentLoader
         anchors.fill: parent
         z: 2
-
         anchors.topMargin: (topbar.collapsed || mainWindow.cameraFullscreenActive) ? 0 : topbar.height
         anchors.leftMargin: (sidebarWrapper.collapsed || topbar.isStartupPage
                              || mainWindow.cameraFullscreenActive) ? 0 : sidebarWrapper.width
@@ -531,90 +260,12 @@ ApplicationWindow {
                 : "qrc:/app/resources/qml/StartupPage.qml"
 
         onLoaded: {
-            if (!item) return
-
-            if (item.objectName === "StartupPage") {
-                item.discovery = discovery
-                item.frigateRef = frigateRef
-
-                if (appSettings.restoreLastFullscreen
-                        && appSettings.lastServerIp
-                        && appSettings.lastServerIp.length > 0
-                        && !mainWindow.skipNextAutoConnect) {
-                    Qt.callLater(function() {
-                        if (!contentLoader.startupDone)
-                            mainWindow.performAutoConnect()
-                    })
-                }
-                mainWindow.skipNextAutoConnect = false
-
-                item.serverSelected.connect(function(name, ip, apiPort, modulePort) {
-                    if (frigateRef) {
-                        if (typeof frigateRef.stopAllFullscreenStreams === "function")
-                            frigateRef.stopAllFullscreenStreams()
-                        if (typeof frigateRef.stopAllStreams === "function")
-                            frigateRef.stopAllStreams()
-                    }
-
-                    mainWindow.cameraList = []
-                    mainWindow.selectedCameraId = ""
-                    if (sidebarWrapper) {
-                        sidebarWrapper.cameraList = []
-                        sidebarWrapper.layoutList = []
-                        sidebarWrapper.selectedLayoutName = ""
-                    }
-
-                    mainWindow.serverName = name
-
-                    appSettings.lastServerName = name || ""
-                    appSettings.lastServerIp = ip || ""
-                    appSettings.lastApiPort = apiPort || 5000
-                    appSettings.lastModulePort = modulePort || 8001
-
-                    if (typeof frigateRef.setServerIp === "function")
-                        frigateRef.setServerIp(ip)
-                    else
-                        frigateRef.serverIp = ip
-
-                    if (typeof frigateRef.setServer === "function")
-                        frigateRef.setServer("http://" + ip + ":" + apiPort)
-                    else
-                        frigateRef.server = "http://" + ip + ":" + apiPort
-
-                    frigateRef.setModuleServer("http://" + ip + ":" + modulePort)
-
-                    contentLoader.startupDone = true
-                    contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
-
-                    mainWindow.enterTrueFullscreen()
-                    topbar.isMaximized = true
-                })
-            }
-
-            if (item.objectName === "ServerView") {
-                item.frigateRef = frigateRef
-                item.mainWindow = mainWindow
-
-                item.camerasLoadedToMain.connect(function(list) {
-                    mainWindow.cameraList = list
-                    sidebarWrapper.cameraList = list
-                })
-
-                if (item.layoutsChanged) {
-                    item.layoutsChanged.connect(function() {
-                        mainWindow.syncSidebarLayouts()
-                    })
-                }
-
-                item.initializeGrid()
-                frigateRef.loadCameras()
-
-                Qt.callLater(function() {
-                    if (typeof item.refreshLayouts === "function")
-                        item.refreshLayouts()
-                    mainWindow.syncSidebarLayouts()
-                })
-            }
+            if (!item)
+                return
+            if (item.objectName === "StartupPage")
+                session.bindStartupPage(item)
+            if (item.objectName === "ServerView")
+                session.bindServerView(item)
         }
     }
 
@@ -637,7 +288,6 @@ ApplicationWindow {
         source: "qrc:/app/resources/qml/MainWindowConnections.qml"
         asynchronous: false
         visible: false
-
         onLoaded: {
             var c = connectionsLoader.item
             c.mainWindow = mainWindow
