@@ -22,6 +22,7 @@ Item {
     signal maximizeRequested()
     signal addCameraRequested()
     signal aboutRequested()
+    signal settingsRequested()   // ← new
 
     //
     // Right‑click menu on server name
@@ -107,6 +108,11 @@ Item {
         id: menuPopup
         x: menuButton.x
         y: menuButton.y + menuButton.height + 4
+
+        MenuItem {
+            text: "Settings"
+            onTriggered: topbarWrapper.settingsRequested()
+        }
 
         MenuItem {
             text: "Disconnect"

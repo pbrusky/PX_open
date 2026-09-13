@@ -335,6 +335,10 @@ Item {
         fullscreenLocked = true
         unlockTimer.restart()
 
+        // Persist last fullscreen camera for restore-on-startup
+        if (mainWindow && typeof mainWindow.rememberFullscreenCamera === "function")
+            mainWindow.rememberFullscreenCamera(cameraName)
+
         if (mainWindow && mainWindow.contentItem) {
             fullscreenLoader.parent = mainWindow.contentItem
             fullscreenLoader.anchors.fill = mainWindow.contentItem

@@ -3,6 +3,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
+import QtCore
 
 import "qrc:/app/resources/qml/components"
 import "qrc:/app/resources/qml/components/popups"
@@ -32,6 +33,26 @@ ApplicationWindow {
 
     property bool isFullscreen: false
 
+    // After Disconnect, skip one auto-connect so user can stay on StartupPage
+    property bool skipNextAutoConnect: false
+
+    // ── Persist “restore last view in fullscreen” + last session ──
+    Settings {
+        id: appSettings
+        category: "general"
+        property bool restoreLastFullscreen: false
+        property string lastServerName: ""
+        property string lastServerIp: ""
+        property int lastApiPort: 5000
+        property int lastModulePort: 8001
+    }
+
+    Settings {
+        id: sessionSettings
+        category: "session"
+        property string lastFullscreenCamera: ""
+    }
+
     function enterTrueFullscreen() {
         isFullscreen = true
         flags = Qt.FramelessWindowHint | Qt.Window
@@ -56,6 +77,76 @@ ApplicationWindow {
             user: parts[0],
             pass: parts[1]
         }
+    }
+
+    /** Called by CameraGrid when a camera enters fullscreen. */
+    function rememberFullscreenCamera(cameraName) {
+        if (!cameraName || cameraName === "")
+            return
+        sessionSettings.lastFullscreenCamera = cameraName
+        if (frigateRef && frigateRef.serverIp)
+            appSettings.lastServerIp = "" + frigateRef.serverIp
+    }
+
+    /** Called by CameraGrid / ServerView after grid is ready. */
+    function tryRestoreLastFullscreen() {
+        if (!appSettings.restoreLastFullscreen)
+            return
+        var cam = sessionSettings.lastFullscreenCamera
+        if (!cam || cam === "")
+            return
+
+        var sv = contentLoader.item
+        if (!sv || sv.objectName !== "ServerView")
+            return
+        if (!sv.cameraGrid || typeof sv.cameraGrid.enterFullscreen !== "function")
+            return
+
+        Qt.callLater(function() {
+            if (sv.cameraGrid && typeof sv.cameraGrid.enterFullscreen === "function")
+                sv.cameraGrid.enterFullscreen(cam)
+        })
+    }
+
+    /** Leave Settings: back to Startup if not connected, else camera grid. */
+    function leaveSettings() {
+        if (contentLoader.startupDone)
+            goToServerView()
+        else
+            goToStartupPage()
+    }
+
+    function goToServerView() {
+        contentLoader.startupDone = true
+        contentLoader.source = "qrc:/app/resources/qml/components/ServerView.qml"
+    }
+
+    function goToStartupPage() {
+        contentLoader.startupDone = false
+        mainWindow.serverName = ""
+        mainWindow.cameraList = []
+        mainWindow.selectedCameraId = ""
+        if (sidebarWrapper)
+            sidebarWrapper.cameraList = []
+        contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
+    }
+
+    function disconnectFromServer() {
+        // User left on purpose — do not auto-reconnect this time
+        skipNextAutoConnect = true
+
+        if (frigateRef) {
+            if (typeof frigateRef.stopAllFullscreenStreams === "function")
+                frigateRef.stopAllFullscreenStreams()
+            if (typeof frigateRef.stopAllStreams === "function")
+                frigateRef.stopAllStreams()
+        }
+
+        goToStartupPage()
+
+        if (mainWindow.isFullscreen)
+            mainWindow.exitTrueFullscreen()
+        topbar.isMaximized = false
     }
 
     Timer {
@@ -119,7 +210,12 @@ ApplicationWindow {
             )
         }
 
+        onSettingsRequested: {
+            contentLoader.source = "qrc:/app/resources/qml/generalSettings.qml"
+        }
+
         onDisconnectRequested: {
+            mainWindow.disconnectFromServer()
         }
 
         onExitRequested: Qt.quit()
@@ -200,7 +296,7 @@ ApplicationWindow {
             }
 
             if (page === "disconnect") {
-                topbar.disconnectRequested()
+                mainWindow.disconnectFromServer()
                 return
             }
 
@@ -339,6 +435,23 @@ ApplicationWindow {
                 item.discovery = discovery
                 item.frigateRef = frigateRef
 
+                // Auto-connect only when setting is on AND user did not just Disconnect
+                if (appSettings.restoreLastFullscreen
+                        && appSettings.lastServerIp
+                        && appSettings.lastServerIp.length > 0
+                        && !mainWindow.skipNextAutoConnect) {
+                    Qt.callLater(function() {
+                        if (item && typeof item.connectToServer === "function") {
+                            item.connectToServer(
+                                appSettings.lastServerIp,
+                                appSettings.lastModulePort > 0 ? appSettings.lastModulePort : 8001
+                            )
+                        }
+                    })
+                }
+                // Clear one-shot skip so a later real app launch can still auto-connect
+                mainWindow.skipNextAutoConnect = false
+
                 item.serverSelected.connect(function(name, ip, apiPort, modulePort) {
                     if (frigateRef) {
                         if (typeof frigateRef.stopAllFullscreenStreams === "function")
@@ -353,6 +466,12 @@ ApplicationWindow {
                         sidebarWrapper.cameraList = []
 
                     mainWindow.serverName = name
+
+                    // Persist last server for restore-on-startup
+                    appSettings.lastServerName = name || ""
+                    appSettings.lastServerIp = ip || ""
+                    appSettings.lastApiPort = apiPort || 5000
+                    appSettings.lastModulePort = modulePort || 8001
 
                     if (typeof frigateRef.setServerIp === "function")
                         frigateRef.setServerIp(ip)
@@ -383,8 +502,18 @@ ApplicationWindow {
                     sidebarWrapper.cameraList = list
                 })
 
+                if (typeof item.gridReady !== "undefined") {
+                    item.gridReady.connect(function() {
+                        mainWindow.tryRestoreLastFullscreen()
+                    })
+                }
+
                 item.initializeGrid()
                 frigateRef.loadCameras()
+
+                Qt.callLater(function() {
+                    mainWindow.tryRestoreLastFullscreen()
+                })
             }
         }
     }
