@@ -239,16 +239,12 @@ Item {
                     MenuItem {
                         text: "Select"
                         enabled: cameraName !== ""
-                        onTriggered: {
-                            sidebar.selectedCameraId = cameraId
-                            sidebar.cameraSelected(cameraId)
-                        }
+                        onTriggered: sidebar.cameraSelected(cameraId)
                     }
                     MenuItem {
                         text: "Edit Camera"
                         enabled: cameraName !== ""
                         onTriggered: {
-                            sidebar.selectedCameraId = cameraId
                             sidebar.cameraSelected(cameraId)
                             sidebar.navigate("editCamera:" + cameraId)
                         }
@@ -265,10 +261,7 @@ Item {
 
                 TapHandler {
                     acceptedButtons: Qt.LeftButton
-                    onTapped: {
-                        sidebar.selectedCameraId = cameraId
-                        sidebar.cameraSelected(cameraId)
-                    }
+                    onTapped: sidebar.cameraSelected(cameraId)
                 }
 
                 DragHandler {

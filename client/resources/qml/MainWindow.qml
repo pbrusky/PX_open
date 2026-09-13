@@ -206,6 +206,14 @@ ApplicationWindow {
         FullscreenHelper.startIdleCursor(10000)
     }
 
+    Connections {
+        target: FullscreenHelper
+        function onCursorHiddenChanged() {
+            if (FullscreenHelper.cursorHidden)
+                mainWindow.selectedCameraId = ""
+        }
+    }
+
     Timer {
         id: frigatePollTimer
         interval: 1500
