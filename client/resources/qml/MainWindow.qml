@@ -39,6 +39,9 @@ ApplicationWindow {
     // After Disconnect, skip one auto-connect so user can stay on StartupPage
     property bool skipNextAutoConnect: false
 
+    // Hide mouse after idle (digital sign / wall monitor)
+    property bool idleCursorHidden: false
+
     // ── Persist “restore last view in fullscreen” + last session ──
     Settings {
         id: appSettings
@@ -86,6 +89,12 @@ ApplicationWindow {
     function collapseChrome() {
         topbar.collapsed = true
         sidebarWrapper.collapsed = true
+    }
+
+    function noteUserActivity() {
+        if (idleCursorHidden)
+            idleCursorHidden = false
+        cursorIdleTimer.restart()
     }
 
     /** Called by CameraGrid when a camera enters fullscreen. */
@@ -238,6 +247,23 @@ ApplicationWindow {
             if (frigateRef)
                 frigateRef.loadCameras()
         }
+    }
+
+    Timer {
+        id: cursorIdleTimer
+        interval: 10000
+        running: true
+        onTriggered: idleCursorHidden = true
+    }
+
+    // Tracks mouse without stealing clicks (digital sign: hide cursor after idle)
+    MouseArea {
+        anchors.fill: parent
+        z: 5000000
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+        cursorShape: mainWindow.idleCursorHidden ? Qt.BlankCursor : Qt.ArrowCursor
+        onPositionChanged: mainWindow.noteUserActivity()
     }
 
     Loader {
