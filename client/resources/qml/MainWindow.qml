@@ -255,7 +255,7 @@ ApplicationWindow {
         mainWindow: mainWindow
         selectedCameraId: mainWindow.selectedCameraId
 
-        property bool collapsed: false
+        property bool collapsed: true
 
         width: collapsed ? 0 : 300
         Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }

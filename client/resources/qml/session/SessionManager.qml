@@ -41,8 +41,8 @@ Item {
             topbar.collapsed = false
         if (sidebar)
             sidebar.collapsed = false
-        if (eventsPanel)
-            eventsPanel.collapsed = false
+       // if (eventsPanel)
+       //     eventsPanel.collapsed = false
     }
 
     function rememberFullscreenCamera(cameraName) {
