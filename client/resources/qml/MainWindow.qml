@@ -35,7 +35,6 @@ ApplicationWindow {
     property bool isFullscreen: false
     property bool cameraFullscreenActive: false
 
-    // Forward session helpers used elsewhere
     property alias skipNextAutoConnect: session.skipNextAutoConnect
     property alias appSettings: session.settings
 
@@ -63,6 +62,9 @@ ApplicationWindow {
     function goToStartupPage() { session.goToStartupPage() }
     function disconnectFromServer() { session.disconnectFromServer() }
 
+    readonly property bool onServerView: contentLoader.item
+                                         && contentLoader.item.objectName === "ServerView"
+
     SessionManager {
         id: session
         mainWindow: mainWindow
@@ -70,6 +72,7 @@ ApplicationWindow {
         contentLoader: contentLoader
         sidebar: sidebarWrapper
         topbar: topbar
+        eventsPanel: eventsPanel
     }
 
     NavigationRouter {
@@ -146,7 +149,7 @@ ApplicationWindow {
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
 
         isStartupPage: contentLoader.item && contentLoader.item.objectName === "StartupPage"
-        isCameraPage: contentLoader.item && contentLoader.item.objectName === "ServerView"
+        isCameraPage: mainWindow.onServerView
         serverName: mainWindow.serverName
 
         onAboutRequested: {
@@ -191,8 +194,7 @@ ApplicationWindow {
         x: collapsed ? -width : 0
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
-        visible: contentLoader.item && contentLoader.item.objectName === "ServerView"
-                 && !mainWindow.cameraFullscreenActive
+        visible: mainWindow.onServerView && !mainWindow.cameraFullscreenActive
 
         cameraList: mainWindow.cameraList
         selectedCameraId: mainWindow.selectedCameraId
@@ -205,7 +207,7 @@ ApplicationWindow {
         onRequestRemoveCamera: function(id) {
             mainWindow.pendingRemoveCameraId = id
             var host = null
-            if (contentLoader.item && contentLoader.item.objectName === "ServerView")
+            if (mainWindow.onServerView)
                 host = contentLoader.item
             popupManager.openPopup(
                 "qrc:/app/resources/qml/components/popups/RemoveCameraPopup.qml",
@@ -245,6 +247,50 @@ ApplicationWindow {
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
     }
 
+    EventList {
+        id: eventsPanel
+        objectName: "EventList"
+
+        frigateRef: mainWindow.frigateRef
+        mainWindow: mainWindow
+        selectedCameraId: mainWindow.selectedCameraId
+
+        // Start collapsed (kiosk); collapseChrome() also sets this
+        property bool collapsed: true
+
+        width: collapsed ? 0 : 300
+        Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+
+        height: mainWindow.height - (mainWindow.cameraFullscreenActive ? 0 : topbar.height)
+        y: mainWindow.cameraFullscreenActive ? 0 : topbar.height
+        anchors.right: parent.right
+        z: 9998
+        clip: true
+
+        visible: mainWindow.onServerView && !mainWindow.cameraFullscreenActive
+    }
+
+    IconButton {
+        id: eventsArrow
+        width: 32
+        height: 32
+        z: 10001
+
+        x: eventsPanel.collapsed
+            ? (mainWindow.width - width - 4)
+            : (mainWindow.width - eventsPanel.width - width - 4)
+        y: topbar.height + (mainWindow.height - topbar.height) / 2 - height / 2
+
+        Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+
+        icon: eventsPanel.collapsed
+              ? "qrc:/app/assets/icons/nx/arrow-left.svg"
+              : "qrc:/app/assets/icons/nx/arrow-right.svg"
+
+        visible: mainWindow.onServerView && !mainWindow.cameraFullscreenActive
+        onClicked: eventsPanel.collapsed = !eventsPanel.collapsed
+    }
+
     Loader {
         id: contentLoader
         anchors.fill: parent
@@ -252,6 +298,9 @@ ApplicationWindow {
         anchors.topMargin: (topbar.collapsed || mainWindow.cameraFullscreenActive) ? 0 : topbar.height
         anchors.leftMargin: (sidebarWrapper.collapsed || topbar.isStartupPage
                              || mainWindow.cameraFullscreenActive) ? 0 : sidebarWrapper.width
+        anchors.rightMargin: (!eventsPanel.visible || eventsPanel.collapsed
+                              || topbar.isStartupPage
+                              || mainWindow.cameraFullscreenActive) ? 0 : 300
 
         property bool startupDone: false
 
@@ -264,8 +313,11 @@ ApplicationWindow {
                 return
             if (item.objectName === "StartupPage")
                 session.bindStartupPage(item)
-            if (item.objectName === "ServerView")
+            if (item.objectName === "ServerView") {
                 session.bindServerView(item)
+                // Keep events closed when entering server view
+                eventsPanel.collapsed = true
+            }
         }
     }
 

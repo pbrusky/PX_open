@@ -9,6 +9,7 @@ Item {
     property var contentLoader
     property var sidebar
     property var topbar
+    property var eventsPanel
 
     property bool skipNextAutoConnect: false
 
@@ -22,7 +23,6 @@ Item {
         property int lastModulePort: 8001
     }
 
-    // Expose settings for generalSettings.qml if needed
     property alias settings: appSettings
 
     function collapseChrome() {
@@ -30,6 +30,18 @@ Item {
             topbar.collapsed = true
         if (sidebar)
             sidebar.collapsed = true
+        if (eventsPanel)
+            eventsPanel.collapsed = true
+    }
+
+    function expandChrome() {
+        if (topbar)
+            topbar.collapsed = false
+        if (sidebar)
+            sidebar.collapsed = false
+        // Events stay collapsed by default on startup page (panel hidden anyway)
+        if (eventsPanel)
+            eventsPanel.collapsed = true
     }
 
     function rememberFullscreenCamera(cameraName) {
@@ -116,10 +128,7 @@ Item {
             sidebar.layoutList = []
             sidebar.selectedLayoutName = ""
         }
-        if (topbar)
-            topbar.collapsed = false
-        if (sidebar)
-            sidebar.collapsed = false
+        expandChrome()
         contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
     }
 
@@ -144,6 +153,8 @@ Item {
             mainWindow.enterTrueFullscreen()
             if (topbar)
                 topbar.isMaximized = true
+            // Same kiosk chrome as auto-connect
+            collapseChrome()
         }
     }
 
@@ -248,6 +259,9 @@ Item {
             if (typeof item.refreshLayouts === "function")
                 item.refreshLayouts()
             syncSidebarLayouts()
+            // Keep events closed after view bind in kiosk-style sessions
+            if (eventsPanel)
+                eventsPanel.collapsed = true
         })
     }
 }

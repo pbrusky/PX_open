@@ -2,128 +2,255 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
-Rectangle {
+Item {
     id: root
-    anchors.fill: parent
-    color: "#111111"
+    objectName: "EventList"
 
-    //
-    // Event model provided by FrigateAPI
-    //
+    property var frigateRef
+    property var mainWindow
+    property string selectedCameraId: ""
+    // Parent (MainWindow) drives collapse via width; this mirrors state for refresh logic
+    property bool collapsed: width < 20
+
     property var eventsModel: []
+    property string statusText: ""
 
-    //
-    // Load events when page opens
-    //
+    clip: true
+
+    function refresh() {
+        if (root.width < 20)
+            return
+        if (!frigateRef || typeof frigateRef.loadEvents !== "function") {
+            statusText = "No API"
+            return
+        }
+        statusText = "Loading…"
+        var cam = selectedCameraId && selectedCameraId.length ? selectedCameraId : ""
+        if (cam.length) {
+            frigateRef.loadEvents(cam)
+            return
+        }
+        if (mainWindow && mainWindow.cameraList && mainWindow.cameraList.length) {
+            var c0 = mainWindow.cameraList[0]
+            var id0 = (typeof c0 === "string") ? c0 : (c0.id || c0.name || "")
+            if (id0.length)
+                frigateRef.loadEvents(id0)
+            else
+                statusText = "No camera"
+            return
+        }
+        statusText = "Select a camera"
+    }
+
+    onSelectedCameraIdChanged: {
+        if (root.width >= 20)
+            Qt.callLater(refresh)
+    }
+
+    onWidthChanged: {
+        if (root.width >= 20)
+            Qt.callLater(refresh)
+    }
 
     Connections {
-        target: frigate
+        target: frigateRef
+        ignoreUnknownSignals: true
+        enabled: frigateRef !== null && frigateRef !== undefined
 
-        function onEventsLoaded(list) {
-            root.eventsModel = list
+        function onEventsLoaded(cameraId, list) {
+            var rows = list
+            if ((rows === undefined || rows === null) && cameraId !== undefined && cameraId !== null) {
+                // Some bindings may pass a single list argument
+                if (typeof cameraId === "object" && cameraId.length !== undefined)
+                    rows = cameraId
+            }
+            root.eventsModel = rows || []
+            root.statusText = root.eventsModel.length
+                    ? (root.eventsModel.length + " events")
+                    : "No events"
         }
     }
 
-    //
-    // Title
-    //
-    Text {
-        text: "Events"
-        font.pixelSize: 26
-        color: "white"
-        anchors.left: parent.left
-        anchors.leftMargin: 20
-        anchors.top: parent.top
-        anchors.topMargin: 20
+    Rectangle {
+        anchors.fill: parent
+        color: "#202020"
+        visible: root.width > 0
     }
 
-    //
-    // Event list (NX style)
-    //
-    ListView {
-        id: list
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.margins: 20
+    Column {
+        id: col
+        anchors.fill: parent
+        anchors.margins: 10
+        spacing: 8
+        visible: root.width > 40
 
-        spacing: 10
-        clip: true
-
-        model: root.eventsModel
-
-        delegate: Rectangle {
+        Item {
             width: parent.width
-            height: 90
-            radius: 6
-            color: "#1e1e1e"
-            border.color: "#333"
+            height: 28
 
-            Row {
-                anchors.fill: parent
-                anchors.margins: 12
-                spacing: 12
-
-                //
-                // Thumbnail (placeholder)
-                //
-                Rectangle {
-                    width: 100
-                    height: 60
-                    radius: 4
-                    color: "#333"
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "Thumbnail"
-                        color: "#aaa"
-                        font.pixelSize: 12
-                    }
-                }
-
-                //
-                // Event info
-                //
-                Column {
-                    spacing: 4
-
-                    Text {
-                        text: model.camera
-                        color: "white"
-                        font.pixelSize: 18
-                    }
-
-                    Text {
-                        text: model.label
-                        color: "#ccc"
-                        font.pixelSize: 14
-                    }
-
-                    Text {
-                        text: model.timestamp
-                        color: "#888"
-                        font.pixelSize: 12
-                    }
-                }
+            Text {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Events"
+                color: "white"
+                font.pixelSize: 16
+                font.bold: true
             }
 
-            //
-            // Hover highlight
-            //
-            MouseArea {
-                anchors.fill: parent
+            Rectangle {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: 56
+                height: 24
+                radius: 3
+                color: "#333"
+                Text {
+                    anchors.centerIn: parent
+                    text: "Refresh"
+                    color: "#ccc"
+                    font.pixelSize: 11
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.refresh()
+                }
+            }
+        }
 
-                hoverEnabled: true
-                onEntered: parent.color = "#2A4A7A"
-                onExited: parent.color = "#1e1e1e"
+        Text {
+            width: parent.width
+            text: root.selectedCameraId.length
+                  ? ("Camera: " + root.selectedCameraId)
+                  : "Select a camera"
+            color: "#888"
+            font.pixelSize: 11
+            elide: Text.ElideRight
+        }
 
-                //
-                // Click → open playback
-                //
-                onClicked: {
-                    mainWindow.eventPlaybackData = model
-                    mainWindow.navigate("qrc:/app/resources/qml/EventPlayback.qml")
+        Text {
+            width: parent.width
+            text: root.statusText
+            color: "#666"
+            font.pixelSize: 11
+        }
+
+        ListView {
+            id: list
+            width: parent.width
+            height: Math.max(50, col.height - 90)
+            clip: true
+            spacing: 8
+            model: root.eventsModel
+
+            delegate: Rectangle {
+                id: rowRect
+                width: list.width
+                height: 72
+                radius: 5
+                color: delArea.containsMouse ? "#2A2A40" : "#1A1A1A"
+                border.color: "#333"
+                border.width: 1
+
+                readonly property var row: (typeof modelData !== "undefined") ? modelData : model
+                readonly property string evId: row && row.id ? ("" + row.id) : ""
+                readonly property string evCamera: (row && row.camera) ? ("" + row.camera)
+                                                                   : root.selectedCameraId
+                readonly property string evLabel: (row && row.label) ? ("" + row.label) : "object"
+                readonly property real evStart: {
+                    if (!row)
+                        return 0
+                    if (row.start !== undefined && row.start !== null)
+                        return Number(row.start)
+                    if (row.start_time !== undefined && row.start_time !== null)
+                        return Number(row.start_time)
+                    return 0
+                }
+                readonly property real evScore: row && row.score !== undefined ? Number(row.score) : 0
+                readonly property string thumbUrl: {
+                    if (!root.frigateRef || !evId.length)
+                        return ""
+                    var srv = ""
+                    try {
+                        srv = "" + (root.frigateRef.server || "")
+                    } catch (e) {
+                        return ""
+                    }
+                    if (!srv.length)
+                        return ""
+                    if (srv.charAt(srv.length - 1) === "/")
+                        srv = srv.substring(0, srv.length - 1)
+                    return srv + "/api/events/" + evId + "/thumbnail.jpg"
+                }
+
+                function formatTs(sec) {
+                    if (!sec || sec <= 0)
+                        return ""
+                    var d = new Date(sec * 1000)
+                    return Qt.formatDateTime(d, "MM/dd hh:mm:ss")
+                }
+
+                Row {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 10
+
+                    Rectangle {
+                        width: 96
+                        height: 54
+                        radius: 3
+                        color: "#111"
+                        clip: true
+                        Image {
+                            anchors.fill: parent
+                            source: rowRect.thumbUrl
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                        }
+                    }
+
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 3
+                        width: Math.max(40, parent.width - 110)
+
+                        Text {
+                            text: rowRect.evLabel
+                            color: "white"
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+                        Text {
+                            text: rowRect.evCamera
+                            color: "#aaa"
+                            font.pixelSize: 12
+                            elide: Text.ElideRight
+                            width: parent.width
+                        }
+                        Text {
+                            text: rowRect.formatTs(rowRect.evStart)
+                                  + (rowRect.evScore > 0
+                                     ? ("  ·  " + Math.round(rowRect.evScore * 100) + "%")
+                                     : "")
+                            color: "#888"
+                            font.pixelSize: 11
+                        }
+                    }
+                }
+
+                MouseArea {
+                    id: delArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (!root.frigateRef || !rowRect.evCamera.length || rowRect.evStart <= 0)
+                            return
+                        if (typeof root.frigateRef.startPlayback === "function")
+                            root.frigateRef.startPlayback(
+                                        rowRect.evCamera,
+                                        Math.floor(rowRect.evStart * 1000))
+                    }
                 }
             }
         }
