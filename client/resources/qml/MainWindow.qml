@@ -255,8 +255,7 @@ ApplicationWindow {
         mainWindow: mainWindow
         selectedCameraId: mainWindow.selectedCameraId
 
-        // Start collapsed (kiosk); collapseChrome() also sets this
-        property bool collapsed: true
+        property bool collapsed: false
 
         width: collapsed ? 0 : 300
         Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
@@ -313,11 +312,8 @@ ApplicationWindow {
                 return
             if (item.objectName === "StartupPage")
                 session.bindStartupPage(item)
-            if (item.objectName === "ServerView") {
+            if (item.objectName === "ServerView")
                 session.bindServerView(item)
-                // Keep events closed when entering server view
-                eventsPanel.collapsed = true
-            }
         }
     }
 

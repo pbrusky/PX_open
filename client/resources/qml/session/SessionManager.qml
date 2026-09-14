@@ -25,6 +25,8 @@ Item {
 
     property alias settings: appSettings
 
+    readonly property bool kioskMode: appSettings.restoreLastFullscreen
+
     function collapseChrome() {
         if (topbar)
             topbar.collapsed = true
@@ -39,9 +41,8 @@ Item {
             topbar.collapsed = false
         if (sidebar)
             sidebar.collapsed = false
-        // Events stay collapsed by default on startup page (panel hidden anyway)
         if (eventsPanel)
-            eventsPanel.collapsed = true
+            eventsPanel.collapsed = false
     }
 
     function rememberFullscreenCamera(cameraName) {
@@ -153,8 +154,11 @@ Item {
             mainWindow.enterTrueFullscreen()
             if (topbar)
                 topbar.isMaximized = true
-            // Same kiosk chrome as auto-connect
-            collapseChrome()
+            // Collapse panels only in kiosk mode
+            if (kioskMode)
+                collapseChrome()
+            else
+                expandChrome()
         }
     }
 
@@ -259,9 +263,8 @@ Item {
             if (typeof item.refreshLayouts === "function")
                 item.refreshLayouts()
             syncSidebarLayouts()
-            // Keep events closed after view bind in kiosk-style sessions
-            if (eventsPanel)
-                eventsPanel.collapsed = true
+            if (kioskMode)
+                collapseChrome()
         })
     }
 }
