@@ -104,7 +104,7 @@ Rectangle {
             }
 
             Text {
-                text: "Open last view in fullscreen on startup"
+                text: "Open last view in fullscreen on startup (Kiosk Mode)"
                 color: "#EEEEEE"
                 font.pixelSize: 16
                 anchors.verticalCenter: parent.verticalCenter
