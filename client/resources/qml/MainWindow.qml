@@ -267,28 +267,35 @@ ApplicationWindow {
         clip: true
 
         visible: mainWindow.onServerView && !mainWindow.cameraFullscreenActive
+
+        // Wire the header collapse button from EventList.qml
+        onRequestToggleCollapse: eventsPanel.collapsed = !eventsPanel.collapsed
     }
 
     IconButton {
-        id: eventsArrow
-        width: 32
-        height: 32
-        z: 10001
+    id: eventsArrow
+    width: 32
+    height: 32
+    z: 10001
 
-        x: eventsPanel.collapsed
-            ? (mainWindow.width - width - 4)
-            : (mainWindow.width - eventsPanel.width - width - 4)
-        y: topbar.height + (mainWindow.height - topbar.height) / 2 - height / 2
+    // Mirror the sidebar behaviour:
+    // - collapsed  → sit on the far right edge of the window
+    // - open       → sit inside the left edge of the events panel
+    x: eventsPanel.collapsed
+        ? (mainWindow.width - width - 4)
+        : (mainWindow.width - eventsPanel.width + 4)
 
-        Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+    y: topbar.height + (mainWindow.height - topbar.height) / 2 - height / 2
 
-        icon: eventsPanel.collapsed
-              ? "qrc:/app/assets/icons/nx/arrow-left.svg"
-              : "qrc:/app/assets/icons/nx/arrow-right.svg"
+    Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
-        visible: mainWindow.onServerView && !mainWindow.cameraFullscreenActive
-        onClicked: eventsPanel.collapsed = !eventsPanel.collapsed
-    }
+    icon: eventsPanel.collapsed
+          ? "qrc:/app/assets/icons/nx/arrow-left.svg"
+          : "qrc:/app/assets/icons/nx/arrow-right.svg"
+
+    visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
+    onClicked: eventsPanel.collapsed = !eventsPanel.collapsed
+}
 
     Loader {
         id: contentLoader

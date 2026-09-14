@@ -15,6 +15,10 @@ Item {
     property var eventsModel: []
     property string statusText: ""
 
+    // Emitted when the user clicks the collapse control in the header bar.
+    // Connected in MainWindow: onRequestToggleCollapse: eventsPanel.collapsed = !eventsPanel.collapsed
+    signal requestToggleCollapse()
+
     clip: true
 
     function refresh() {
@@ -60,7 +64,6 @@ Item {
         function onEventsLoaded(cameraId, list) {
             var rows = list
             if ((rows === undefined || rows === null) && cameraId !== undefined && cameraId !== null) {
-                // Some bindings may pass a single list argument
                 if (typeof cameraId === "object" && cameraId.length !== undefined)
                     rows = cameraId
             }
@@ -84,6 +87,7 @@ Item {
         spacing: 8
         visible: root.width > 40
 
+        // ===== HEADER BAR =====
         Item {
             width: parent.width
             height: 28
@@ -97,7 +101,40 @@ Item {
                 font.bold: true
             }
 
+            // ---- Collapse button (always visible in the bar) ----
             Rectangle {
+                id: collapseBtn
+                anchors.right: refreshBtn.left
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                width: 32
+                height: 24
+                radius: 4
+                color: collapseArea.containsMouse ? "#555" : "#3A3A3A"
+                border.color: "#666"
+                border.width: 1
+
+                // Use a simple Text arrow so it never fails to load
+                Text {
+                    anchors.centerIn: parent
+                    text: "›"                     // right-pointing chevron
+                    color: "white"
+                    font.pixelSize: 22
+                    font.bold: true
+                }
+
+                MouseArea {
+                    id: collapseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.requestToggleCollapse()
+                }
+            }
+
+            // ---- Refresh button ----
+            Rectangle {
+                id: refreshBtn
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 width: 56
