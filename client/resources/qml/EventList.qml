@@ -98,35 +98,6 @@ Item {
             }
 
             Rectangle {
-                id: collapseBtn
-                anchors.right: refreshBtn.left
-                anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
-                width: 32
-                height: 24
-                radius: 4
-                color: collapseArea.containsMouse ? "#555" : "#3A3A3A"
-                border.color: "#666"
-                border.width: 1
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "›"
-                    color: "white"
-                    font.pixelSize: 22
-                    font.bold: true
-                }
-
-                MouseArea {
-                    id: collapseArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.requestToggleCollapse()
-                }
-            }
-
-            Rectangle {
                 id: refreshBtn
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
@@ -203,7 +174,6 @@ Item {
                         var t = "" + row.thumbnail
                         if (t.indexOf("data:") === 0)
                             return t
-                        // Backend may already set full HTTP thumbnail URL
                         if (t.indexOf("http://") === 0 || t.indexOf("https://") === 0)
                             return t
                     }
@@ -219,7 +189,6 @@ Item {
                         return ""
                     while (srv.length && srv.charAt(srv.length - 1) === "/")
                         srv = srv.substring(0, srv.length - 1)
-                    // Frigate event thumbs (WebP) — requires imageformats/qwebp.dll
                     return srv + "/api/events/" + evId + "/thumbnail.jpg"
                 }
 
