@@ -11,6 +11,9 @@ Item {
     property string selectedCameraId: ""
     property bool collapsed: width < 20
 
+    // false = selected camera only; true = all cameras
+    property bool showAllCameras: true
+
     property var eventsModel: []
     property string statusText: ""
 
@@ -26,6 +29,12 @@ Item {
             return
         }
         statusText = "Loading…"
+
+        if (showAllCameras) {
+            frigateRef.loadEvents("")   // empty = all cameras
+            return
+        }
+
         var cam = selectedCameraId && selectedCameraId.length ? selectedCameraId : ""
         if (cam.length) {
             frigateRef.loadEvents(cam)
@@ -34,16 +43,21 @@ Item {
         if (mainWindow && mainWindow.cameraList && mainWindow.cameraList.length) {
             var c0 = mainWindow.cameraList[0]
             var id0 = (typeof c0 === "string") ? c0 : (c0.id || c0.name || "")
-            if (id0.length)
+            if (id0.length) {
                 frigateRef.loadEvents(id0)
-            else
-                statusText = "No camera"
-            return
+                return
+            }
         }
         statusText = "Select a camera"
+        eventsModel = []
     }
 
     onSelectedCameraIdChanged: {
+        if (root.width >= 20 && !showAllCameras)
+            Qt.callLater(refresh)
+    }
+
+    onShowAllCamerasChanged: {
         if (root.width >= 20)
             Qt.callLater(refresh)
     }
@@ -119,11 +133,56 @@ Item {
             }
         }
 
+        // All | Selected
+        Row {
+            spacing: 6
+            Rectangle {
+                width: 48
+                height: 22
+                radius: 3
+                color: root.showAllCameras ? "#3A4A7A" : "#333"
+                border.color: root.showAllCameras ? "#6A8AFF" : "#555"
+                border.width: 1
+                Text {
+                    anchors.centerIn: parent
+                    text: "All"
+                    color: "white"
+                    font.pixelSize: 11
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.showAllCameras = true
+                }
+            }
+            Rectangle {
+                width: 64
+                height: 22
+                radius: 3
+                color: !root.showAllCameras ? "#3A4A7A" : "#333"
+                border.color: !root.showAllCameras ? "#6A8AFF" : "#555"
+                border.width: 1
+                Text {
+                    anchors.centerIn: parent
+                    text: "Selected"
+                    color: "white"
+                    font.pixelSize: 11
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.showAllCameras = false
+                }
+            }
+        }
+
         Text {
             width: parent.width
-            text: root.selectedCameraId.length
-                  ? ("Camera: " + root.selectedCameraId)
-                  : "Select a camera"
+            text: root.showAllCameras
+                  ? "All cameras"
+                  : (root.selectedCameraId.length
+                     ? ("Camera: " + root.selectedCameraId)
+                     : "Select a camera")
             color: "#888"
             font.pixelSize: 11
             elide: Text.ElideRight
@@ -139,7 +198,7 @@ Item {
         ListView {
             id: list
             width: parent.width
-            height: Math.max(50, col.height - 90)
+            height: Math.max(50, col.height - 120)
             clip: true
             spacing: 8
             model: root.eventsModel

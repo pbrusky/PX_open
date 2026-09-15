@@ -251,7 +251,8 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
 
 void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
 {
-    if (m_server.isEmpty() || cameraId.isEmpty()) {
+    // Empty cameraId => all cameras on this Frigate server
+    if (m_server.isEmpty()) {
         m_eventsByCamera[cameraId] = QVariantList();
         emit eventsLoaded(cameraId, QVariantList());
         return;
@@ -259,11 +260,11 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
 
     QUrl url(QStringLiteral("%1/api/events").arg(m_server));
     QUrlQuery query;
-    query.addQueryItem(QStringLiteral("cameras"), cameraId);
+    if (!cameraId.isEmpty())
+        query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
     query.addQueryItem(QStringLiteral("before"), QString::number(beforeSec));
     query.addQueryItem(QStringLiteral("limit"), QStringLiteral("500"));
-    // Thumbnails loaded via URL in the UI (smaller JSON)
     query.addQueryItem(QStringLiteral("include_thumbnails"), QStringLiteral("0"));
     url.setQuery(query);
 
@@ -286,7 +287,7 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
                 for (const QJsonValue& v : doc.array()) {
                     const QJsonObject o = v.toObject();
                     const QString cam = o.value(QStringLiteral("camera")).toString();
-                    if (!cam.isEmpty() && cam != cameraId)
+                    if (!cameraId.isEmpty() && !cam.isEmpty() && cam != cameraId)
                         continue;
 
                     double start = o.value(QStringLiteral("start_time")).toDouble();
@@ -331,7 +332,13 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
             }
         }
 
-        m_eventsByCamera[cameraId] = events;
+        std::sort(events.begin(), events.end(), [](const QVariant& a, const QVariant& b) {
+            return a.toMap().value(QStringLiteral("start")).toDouble()
+                 > b.toMap().value(QStringLiteral("start")).toDouble();
+        });
+
+        const QString key = cameraId.isEmpty() ? QStringLiteral("__all__") : cameraId;
+        m_eventsByCamera[key] = events;
         emit eventsLoaded(cameraId, events);
     });
 }
