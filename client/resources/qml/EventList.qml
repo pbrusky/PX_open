@@ -9,14 +9,11 @@ Item {
     property var frigateRef
     property var mainWindow
     property string selectedCameraId: ""
-    // Parent (MainWindow) drives collapse via width; this mirrors state for refresh logic
     property bool collapsed: width < 20
 
     property var eventsModel: []
     property string statusText: ""
 
-    // Emitted when the user clicks the collapse control in the header bar.
-    // Connected in MainWindow: onRequestToggleCollapse: eventsPanel.collapsed = !eventsPanel.collapsed
     signal requestToggleCollapse()
 
     clip: true
@@ -87,7 +84,6 @@ Item {
         spacing: 8
         visible: root.width > 40
 
-        // ===== HEADER BAR =====
         Item {
             width: parent.width
             height: 28
@@ -101,7 +97,6 @@ Item {
                 font.bold: true
             }
 
-            // ---- Collapse button (always visible in the bar) ----
             Rectangle {
                 id: collapseBtn
                 anchors.right: refreshBtn.left
@@ -114,10 +109,9 @@ Item {
                 border.color: "#666"
                 border.width: 1
 
-                // Use a simple Text arrow so it never fails to load
                 Text {
                     anchors.centerIn: parent
-                    text: "›"                     // right-pointing chevron
+                    text: "›"
                     color: "white"
                     font.pixelSize: 22
                     font.bold: true
@@ -132,7 +126,6 @@ Item {
                 }
             }
 
-            // ---- Refresh button ----
             Rectangle {
                 id: refreshBtn
                 anchors.right: parent.right
@@ -204,7 +197,16 @@ Item {
                     return 0
                 }
                 readonly property real evScore: row && row.score !== undefined ? Number(row.score) : 0
+
                 readonly property string thumbUrl: {
+                    if (row && row.thumbnail) {
+                        var t = "" + row.thumbnail
+                        if (t.indexOf("data:") === 0)
+                            return t
+                        // Backend may already set full HTTP thumbnail URL
+                        if (t.indexOf("http://") === 0 || t.indexOf("https://") === 0)
+                            return t
+                    }
                     if (!root.frigateRef || !evId.length)
                         return ""
                     var srv = ""
@@ -215,8 +217,9 @@ Item {
                     }
                     if (!srv.length)
                         return ""
-                    if (srv.charAt(srv.length - 1) === "/")
+                    while (srv.length && srv.charAt(srv.length - 1) === "/")
                         srv = srv.substring(0, srv.length - 1)
+                    // Frigate event thumbs (WebP) — requires imageformats/qwebp.dll
                     return srv + "/api/events/" + evId + "/thumbnail.jpg"
                 }
 
@@ -238,11 +241,22 @@ Item {
                         radius: 3
                         color: "#111"
                         clip: true
+
                         Image {
+                            id: thumb
                             anchors.fill: parent
                             source: rowRect.thumbUrl
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
+                            cache: true
+                        }
+
+                        Text {
+                            anchors.centerIn: parent
+                            visible: thumb.status !== Image.Ready
+                            text: thumb.status === Image.Loading ? "…" : "No img"
+                            color: "#666"
+                            font.pixelSize: 11
                         }
                     }
 
