@@ -360,6 +360,46 @@ Item {
         }
     }
 
+    // Open fullscreen, then seek via FullscreenCamera.onTimelineSeek (binds playback queue)
+    function enterFullscreenAndSeek(cameraName, timestampMs) {
+        if (!cameraName || cameraName === "")
+            return
+        var ts = Number(timestampMs)
+        if (!(ts > 0))
+            return
+
+        seekFromEventTimer.stop()
+        seekFromEventTimer.cameraName = "" + cameraName
+        seekFromEventTimer.timestampMs = Math.floor(ts)
+
+        enterFullscreen(cameraName)
+        seekFromEventTimer.restart()
+    }
+
+    Timer {
+        id: seekFromEventTimer
+        interval: 750
+        repeat: false
+        property real timestampMs: 0
+        property string cameraName: ""
+        onTriggered: {
+            var item = fullscreenLoader.item
+            if (!item)
+                return
+
+            var name = "" + cameraName
+            if (item.cameraName !== name && item.cameraId !== name)
+                return
+
+            // open() arms seek after ~600ms; force arm so event seek is accepted
+            item.seekArmed = true
+            if (typeof item.onTimelineSeek === "function")
+                item.onTimelineSeek(timestampMs)
+            else if (frigateRef && typeof frigateRef.startPlayback === "function")
+                frigateRef.startPlayback(name, Math.floor(timestampMs))
+        }
+    }
+
     Timer {
         id: unlockTimer
         interval: 400
@@ -391,6 +431,8 @@ Item {
     function exitFullscreen() {
         if (fullscreenLocked)
             return
+
+        seekFromEventTimer.stop()
 
         var name = fullscreenName
         if (fullscreenLoader.item)

@@ -62,6 +62,38 @@ ApplicationWindow {
     function goToStartupPage() { session.goToStartupPage() }
     function disconnectFromServer() { session.disconnectFromServer() }
 
+    // Fullscreen + FFmpeg seek via CameraGrid.enterFullscreenAndSeek → FullscreenCamera.onTimelineSeek
+    function viewEvent(cameraId, startSec) {
+        if (!cameraId || !(("" + cameraId).length))
+            return
+
+        var sec = Number(startSec)
+        if (!(sec > 0))
+            return
+
+        var ms = Math.floor(sec * 1000)
+        var name = "" + cameraId
+
+        var sv = null
+        if (contentLoader.item && contentLoader.item.objectName === "ServerView")
+            sv = contentLoader.item
+
+        if (sv && sv.cameraGrid) {
+            if (typeof sv.cameraGrid.enterFullscreenAndSeek === "function") {
+                sv.cameraGrid.enterFullscreenAndSeek(name, ms)
+                return
+            }
+            if (typeof sv.cameraGrid.enterFullscreen === "function") {
+                sv.cameraGrid.enterFullscreen(name)
+                return
+            }
+        }
+
+        // Fallback: FFmpeg only (no fullscreen UI / queue bind)
+        if (frigateRef && typeof frigateRef.startPlayback === "function")
+            frigateRef.startPlayback(name, ms)
+    }
+
     readonly property bool onServerView: contentLoader.item
                                          && contentLoader.item.objectName === "ServerView"
 
@@ -268,34 +300,30 @@ ApplicationWindow {
 
         visible: mainWindow.onServerView && !mainWindow.cameraFullscreenActive
 
-        // Wire the header collapse button from EventList.qml
         onRequestToggleCollapse: eventsPanel.collapsed = !eventsPanel.collapsed
     }
 
     IconButton {
-    id: eventsArrow
-    width: 32
-    height: 32
-    z: 10001
+        id: eventsArrow
+        width: 32
+        height: 32
+        z: 10001
 
-    // Mirror the sidebar behaviour:
-    // - collapsed  → sit on the far right edge of the window
-    // - open       → sit inside the left edge of the events panel
-    x: eventsPanel.collapsed
-        ? (mainWindow.width - width - 4)
-        : (mainWindow.width - eventsPanel.width + 4)
+        x: eventsPanel.collapsed
+            ? (mainWindow.width - width - 4)
+            : (mainWindow.width - eventsPanel.width + 4)
 
-    y: topbar.height + (mainWindow.height - topbar.height) / 2 - height / 2
+        y: topbar.height + (mainWindow.height - topbar.height) / 2 - height / 2
 
-    Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+        Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
-    icon: eventsPanel.collapsed
-          ? "qrc:/app/assets/icons/nx/arrow-left.svg"
-          : "qrc:/app/assets/icons/nx/arrow-right.svg"
+        icon: eventsPanel.collapsed
+              ? "qrc:/app/assets/icons/nx/arrow-left.svg"
+              : "qrc:/app/assets/icons/nx/arrow-right.svg"
 
-    visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
-    onClicked: eventsPanel.collapsed = !eventsPanel.collapsed
-}
+        visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
+        onClicked: eventsPanel.collapsed = !eventsPanel.collapsed
+    }
 
     Loader {
         id: contentLoader

@@ -323,9 +323,17 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        if (!root.frigateRef || !rowRect.evCamera.length || rowRect.evStart <= 0)
+                        if (!rowRect.evCamera.length || rowRect.evStart <= 0)
                             return
-                        if (typeof root.frigateRef.startPlayback === "function")
+
+                        // FFmpeg + CameraGrid fullscreen (same path as timeline seek)
+                        if (root.mainWindow && typeof root.mainWindow.viewEvent === "function") {
+                            root.mainWindow.viewEvent(rowRect.evCamera, rowRect.evStart)
+                            return
+                        }
+
+                        // Fallback without MainWindow helper
+                        if (root.frigateRef && typeof root.frigateRef.startPlayback === "function")
                             root.frigateRef.startPlayback(
                                         rowRect.evCamera,
                                         Math.floor(rowRect.evStart * 1000))
