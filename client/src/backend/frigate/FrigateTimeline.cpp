@@ -264,7 +264,7 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
         query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
     query.addQueryItem(QStringLiteral("before"), QString::number(beforeSec));
-    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("500"));
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("5000"));
     query.addQueryItem(QStringLiteral("include_thumbnails"), QStringLiteral("0"));
     url.setQuery(query);
 
