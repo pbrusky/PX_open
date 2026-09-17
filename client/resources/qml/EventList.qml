@@ -138,7 +138,7 @@ Item {
     function rebuildLabelModel() {
         var prev = root.filterLabel
         labelModel.clear()
-        labelModel.append({ text: "All labels", value: "" })
+        labelModel.append({ text: "All object types", value: "" })
         var labs = root.availableLabels()
         var selectIdx = 0
         for (var i = 0; i < labs.length; i++) {
@@ -206,11 +206,10 @@ Item {
         id: labelModel
         Component.onCompleted: {
             clear()
-            append({ text: "All labels", value: "" })
+            append({ text: "All object types", value: "" })
         }
     }
 
-    // Background
     Rectangle {
         anchors.fill: parent
         color: root.panelBg
@@ -229,10 +228,9 @@ Item {
         id: col
         anchors.fill: parent
         anchors.margins: 12
-        spacing: 10
+        spacing: 8
         visible: root.width > 40
 
-        // Header
         Item {
             width: parent.width
             height: 30
@@ -279,12 +277,19 @@ Item {
             color: root.softBorder
         }
 
-        // All / Selected
+        Text {
+            width: parent.width
+            text: "Cameras"
+            color: root.muted
+            font.pixelSize: 10
+            font.bold: true
+        }
+
         Row {
             spacing: 6
 
             Rectangle {
-                width: 52
+                width: 96
                 height: 26
                 radius: 13
                 color: root.showAllCameras ? root.chipActive : root.chipIdle
@@ -292,7 +297,7 @@ Item {
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
-                    text: "All"
+                    text: "All cameras"
                     color: "white"
                     font.pixelSize: 11
                     font.bold: root.showAllCameras
@@ -304,7 +309,7 @@ Item {
                 }
             }
             Rectangle {
-                width: 72
+                width: 110
                 height: 26
                 radius: 13
                 color: !root.showAllCameras ? root.chipActive : root.chipIdle
@@ -312,7 +317,7 @@ Item {
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
-                    text: "Selected"
+                    text: "This camera"
                     color: "white"
                     font.pixelSize: 11
                     font.bold: !root.showAllCameras
@@ -327,17 +332,23 @@ Item {
 
         Text {
             width: parent.width
-            text: root.showAllCameras
-                  ? "All cameras"
-                  : (root.selectedCameraId.length
-                     ? ("Camera: " + root.selectedCameraId)
-                     : "Select a camera")
+            visible: !root.showAllCameras
+            text: root.selectedCameraId.length
+                  ? ("Showing: " + root.selectedCameraId)
+                  : "Select a camera in the sidebar"
             color: root.muted
             font.pixelSize: 11
             elide: Text.ElideRight
         }
 
-        // Label filter
+        Text {
+            width: parent.width
+            text: "Object type"
+            color: root.muted
+            font.pixelSize: 10
+            font.bold: true
+        }
+
         ComboBox {
             id: labelCombo
             width: parent.width
@@ -354,7 +365,7 @@ Item {
             contentItem: Text {
                 text: labelCombo.displayText.length
                       ? labelCombo.displayText
-                      : "All labels"
+                      : "All object types"
                 color: "#EEE"
                 font.pixelSize: 12
                 verticalAlignment: Text.AlignVCenter
@@ -371,13 +382,20 @@ Item {
             }
             Component.onCompleted: {
                 if (labelModel.count === 0)
-                    labelModel.append({ text: "All labels", value: "" })
+                    labelModel.append({ text: "All object types", value: "" })
                 currentIndex = 0
                 root.filterLabel = ""
             }
         }
 
-        // Score chips
+        Text {
+            width: parent.width
+            text: "Min. confidence"
+            color: root.muted
+            font.pixelSize: 10
+            font.bold: true
+        }
+
         Row {
             spacing: 5
             Repeater {
@@ -410,7 +428,14 @@ Item {
             }
         }
 
-        // Time chips
+        Text {
+            width: parent.width
+            text: "Time range"
+            color: root.muted
+            font.pixelSize: 10
+            font.bold: true
+        }
+
         Row {
             spacing: 5
             Repeater {
@@ -453,7 +478,7 @@ Item {
         ListView {
             id: list
             width: parent.width
-            height: Math.max(50, col.height - 230)
+            height: Math.max(50, col.height - 250)
             clip: true
             spacing: 8
             model: root.eventsModel
@@ -520,7 +545,6 @@ Item {
                     return Qt.formatDateTime(new Date(sec * 1000), "MM/dd hh:mm:ss")
                 }
 
-                // Left accent bar by object type
                 Rectangle {
                     anchors.left: parent.left
                     anchors.top: parent.top
@@ -539,7 +563,6 @@ Item {
                     anchors.bottomMargin: 8
                     spacing: 10
 
-                    // Thumbnail
                     Rectangle {
                         width: 100
                         height: 56
@@ -568,7 +591,8 @@ Item {
                         }
                         Text {
                             anchors.centerIn: parent
-                            visible: thumb.status === Image.Error || (thumb.status === Image.Null && !rowRect.thumbUrl.length)
+                            visible: thumb.status === Image.Error
+                                     || (thumb.status === Image.Null && !rowRect.thumbUrl.length)
                             text: "No img"
                             color: "#555"
                             font.pixelSize: 10
@@ -616,8 +640,8 @@ Item {
 
                         Text {
                             text: rowRect.formatTs(rowRect.evStart)
-                            color: root.muted
-                            font.pixelSize: 11
+                            color: "#FFFFFF"
+                            font.pixelSize: 12
                         }
                     }
                 }
