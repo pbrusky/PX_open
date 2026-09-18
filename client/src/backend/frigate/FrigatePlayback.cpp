@@ -175,8 +175,6 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
     if (!queue)
         return;
 
-    qInfo() << "[Playback] ffmpeg open" << cameraId << url;
-
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
@@ -188,17 +186,14 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
             [this, cameraId, gen]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
-        qInfo() << "[Playback] open ok" << cameraId;
         emit cameraOnline(cameraId);
         emit playbackStarted(cameraId);
     }, Qt::QueuedConnection);
 
-    // Direct HTTP failed (e.g. -138) → fall back to Qt download then local open
     connect(worker, &FFmpegWorker::openInputFailed, this,
             [this, cameraId, gen, url](const QString& reason) {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
-        qWarning() << "[Playback] open failed" << cameraId << reason << url;
 
         {
             QMutexLocker lock(&m_mutex);
@@ -206,14 +201,29 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
             m_playbackThreads.remove(cameraId);
         }
 
-        if (url.startsWith(QStringLiteral("http"), Qt::CaseInsensitive)) {
-            qInfo() << "[Playback] falling back to download" << cameraId;
+        const QString r = reason.toLower();
+        const bool isHttp = url.startsWith(QStringLiteral("http"), Qt::CaseInsensitive);
+        const bool noClip = r.contains(QStringLiteral("400"))
+                         || r.contains(QStringLiteral("bad request"))
+                         || r.contains(QStringLiteral("404"))
+                         || r.contains(QStringLiteral("not found"));
+
+        // Empty / invalid range — do not download, do not mark live camera offline
+        if (isHttp && noClip) {
+            emit playbackError(cameraId,
+                QStringLiteral("No recording at this time. Try another place on the timeline."));
+            emit playbackStopped(cameraId);
+            return;
+        }
+
+        if (isHttp) {
             downloadThenPlay(cameraId, gen, url);
             return;
         }
 
         cleanupTempFile(cameraId);
-        emit cameraOffline(cameraId);
+        emit playbackError(cameraId,
+            reason.isEmpty() ? QStringLiteral("Playback failed.") : reason);
         emit playbackStopped(cameraId);
     }, Qt::QueuedConnection);
 
@@ -275,9 +285,8 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
 
     QFile* outFile = new QFile(localPath);
     if (!outFile->open(QIODevice::WriteOnly)) {
-        qWarning() << "[Playback] cannot write" << localPath;
         delete outFile;
-        emit cameraOffline(cameraId);
+        emit playbackError(cameraId, QStringLiteral("Could not write temporary playback file."));
         emit playbackStopped(cameraId);
         return;
     }
@@ -305,7 +314,7 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
     });
 
     connect(reply, &QNetworkReply::finished, this,
-            [this, cameraId, gen, localPath, remoteUrl, reply]() {
+            [this, cameraId, gen, localPath, reply]() {
         m_downloadReplies.remove(cameraId);
         QFile* file = m_downloadFiles.take(cameraId);
         if (file) {
@@ -324,13 +333,22 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
         reply->deleteLater();
         const qint64 size = QFileInfo(localPath).size();
         if (err != QNetworkReply::NoError || status >= 400 || size < 1024) {
-            qWarning() << "[Playback] download failed" << cameraId << status << err << size;
             cleanupTempFile(cameraId);
-            emit cameraOffline(cameraId);
+
+            QString msg;
+            if (status == 400 || status == 404)
+                msg = QStringLiteral("No recording at this time. Try another place on the timeline.");
+            else if (status >= 400)
+                msg = QStringLiteral("Server error (%1) loading recording.").arg(status);
+            else if (size < 1024)
+                msg = QStringLiteral("Recording clip was empty.");
+            else
+                msg = QStringLiteral("Could not download recording.");
+
+            emit playbackError(cameraId, msg);
             emit playbackStopped(cameraId);
             return;
         }
-        qInfo() << "[Playback] downloaded" << cameraId << size << "bytes";
         startLocalWorker(cameraId, gen, localPath);
     });
 }
@@ -338,7 +356,7 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
 void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 {
     if (cameraId.trimmed().isEmpty() || m_server.isEmpty()) {
-        qWarning() << "[Playback] missing camera or server";
+        emit playbackError(cameraId, QStringLiteral("Missing camera or server for playback."));
         return;
     }
 
@@ -366,13 +384,10 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     if (endSec <= startSec)
         endSec = startSec + 10;
 
-    // Same URL the app used when playback "used to work"
     const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
                             .arg(m_server, cameraId)
                             .arg(startSec)
                             .arg(endSec);
-
-    qInfo() << "[Playback] starting" << cameraId << url;
 
     stopWorkerAsync(cameraId);
     cleanupTempFile(cameraId);

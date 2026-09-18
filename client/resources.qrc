@@ -59,6 +59,15 @@
         <file>resources/qml/components/timeline/TimelineMouseHandler.qml</file>
         <file>resources/qml/components/timeline/TimelineAutoHide.qml</file>
         
+        <!-- js -->
+        <file>resources/qml/js/CameraUtils.js</file>
+
+        <!-- session -->
+        <file>resources/qml/session/SessionManager.qml</file>
+
+        <!-- navigation -->
+        <file>resources/qml/navigation/NavigationRouter.qml</file>
+
         <!-- html -->
         <file>resources/html/mp4player.html</file>
 

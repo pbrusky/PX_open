@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import PxOpen 1.0
 
 Item {
     id: overlay
@@ -19,7 +20,9 @@ Item {
         id: hover
     }
 
-    property bool hovered: hover.hovered
+    // The cursor doesn't actually move when idle-hidden, so HoverHandler
+    // stays "hovered" on whatever tile it was last over — force it off.
+    property bool hovered: hover.hovered && !FullscreenHelper.cursorHidden
 
     // Highlight border only — do NOT darken the video
     Rectangle {
@@ -95,8 +98,7 @@ Item {
         anchors.right: parent.right
         anchors.topMargin: 8
         anchors.rightMargin: 8
-        opacity: hovered ? 1.0 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
+        opacity: 1.0
         z: 10
 
         Rectangle {

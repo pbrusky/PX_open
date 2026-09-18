@@ -26,6 +26,11 @@ Item {
     property var cameraOnlineMap: ({})
     property bool _skipStreamStopOnRemove: false
 
+    function setChromeHidden(hidden) {
+        if (mainWindow)
+            mainWindow.cameraFullscreenActive = !!hidden
+    }
+
     function cameraOnline(name) {
         cameraOnlineMap[name] = true
         cameraOnlineMap = cameraOnlineMap
@@ -67,6 +72,78 @@ Item {
         else {
             var side = Math.ceil(Math.sqrt(count))
             cols = side; rows = side
+        }
+    }
+
+    function getLayoutNames() {
+        var out = []
+        for (var i = 0; i < cameraNames.length; i++) {
+            var n = nameAt(i)
+            if (n !== "")
+                out.push(n)
+        }
+        return out
+    }
+
+    function applyLayoutNames(names) {
+        if (!names || !(names instanceof Array))
+            return
+
+        var allowed = ({})
+        var list = cameraList
+        if ((!list || !list.length) && mainWindow && mainWindow.cameraList)
+            list = mainWindow.cameraList
+
+        if (list && list.length) {
+            for (var i = 0; i < list.length; i++) {
+                var cam = list[i]
+                var id = (typeof cam === "string") ? cam : (cam.id || cam.name || "")
+                var nm = (typeof cam === "string") ? cam : (cam.name || cam.id || "")
+                if (id) {
+                    allowed[String(id)] = true
+                    allowed[String(id).replace(/ /g, "_")] = true
+                    allowed[String(id).replace(/_/g, " ")] = true
+                }
+                if (nm) {
+                    allowed[String(nm)] = true
+                    allowed[String(nm).replace(/ /g, "_")] = true
+                    allowed[String(nm).replace(/_/g, " ")] = true
+                }
+            }
+        }
+
+        var next = []
+        for (var j = 0; j < names.length; j++) {
+            var n = String(names[j] || "")
+            if (!n)
+                continue
+            if (next.indexOf(n) !== -1)
+                continue
+            if (list && list.length) {
+                if (!allowed[n] && !allowed[n.replace(/ /g, "_")] && !allowed[n.replace(/_/g, " ")])
+                    continue
+            }
+            next.push(n)
+        }
+
+        var prev = cameraNames.slice()
+        for (var p = 0; p < prev.length; p++) {
+            var oldName = String(prev[p] || "")
+            if (!oldName)
+                continue
+            if (next.indexOf(oldName) === -1 && frigateRef
+                    && typeof frigateRef.stopStream === "function") {
+                try { frigateRef.stopStream(oldName) } catch (e) {}
+            }
+        }
+
+        cameraNames = next
+        updateGridSize()
+
+        for (var k = 0; k < cameraNames.length; k++) {
+            var cn = cameraNames[k]
+            if (frigateRef && typeof frigateRef.getQueue === "function")
+                frigateRef.getQueue(cn)
         }
     }
 
@@ -130,6 +207,7 @@ Item {
             fullscreenSubQueue = null
             fullscreenMainQueue = null
             fullscreenLocked = false
+            setChromeHidden(false)
         }
 
         _skipStreamStopOnRemove = true
@@ -140,7 +218,6 @@ Item {
         }
     }
 
-    // Clear EVERY tile before system remove (Frigate/go2rtc restart kills streams)
     function clearAllTiles() {
         console.log("CameraGrid: clearAllTiles — removing", cameraNames.length, "cameras from grid")
 
@@ -151,6 +228,7 @@ Item {
             fullscreenSubQueue = null
             fullscreenMainQueue = null
             fullscreenLocked = false
+            setChromeHidden(false)
             if (frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
                 try {
                     frigateRef.stopFullscreenStream(fsName)
@@ -264,6 +342,10 @@ Item {
         fullscreenLocked = true
         unlockTimer.restart()
 
+        if (mainWindow && typeof mainWindow.rememberFullscreenCamera === "function")
+            mainWindow.rememberFullscreenCamera(cameraName)
+        setChromeHidden(true)
+
         if (mainWindow && mainWindow.contentItem) {
             fullscreenLoader.parent = mainWindow.contentItem
             fullscreenLoader.anchors.fill = mainWindow.contentItem
@@ -275,6 +357,46 @@ Item {
             fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
         } else if (fullscreenLoader.item) {
             applyFullscreenItem(cameraName, subQ, mainQ)
+        }
+    }
+
+    // Open fullscreen, then seek via FullscreenCamera.onTimelineSeek (binds playback queue)
+    function enterFullscreenAndSeek(cameraName, timestampMs) {
+        if (!cameraName || cameraName === "")
+            return
+        var ts = Number(timestampMs)
+        if (!(ts > 0))
+            return
+
+        seekFromEventTimer.stop()
+        seekFromEventTimer.cameraName = "" + cameraName
+        seekFromEventTimer.timestampMs = Math.floor(ts)
+
+        enterFullscreen(cameraName)
+        seekFromEventTimer.restart()
+    }
+
+    Timer {
+        id: seekFromEventTimer
+        interval: 750
+        repeat: false
+        property real timestampMs: 0
+        property string cameraName: ""
+        onTriggered: {
+            var item = fullscreenLoader.item
+            if (!item)
+                return
+
+            var name = "" + cameraName
+            if (item.cameraName !== name && item.cameraId !== name)
+                return
+
+            // open() arms seek after ~600ms; force arm so event seek is accepted
+            item.seekArmed = true
+            if (typeof item.onTimelineSeek === "function")
+                item.onTimelineSeek(timestampMs)
+            else if (frigateRef && typeof frigateRef.startPlayback === "function")
+                frigateRef.startPlayback(name, Math.floor(timestampMs))
         }
     }
 
@@ -310,6 +432,8 @@ Item {
         if (fullscreenLocked)
             return
 
+        seekFromEventTimer.stop()
+
         var name = fullscreenName
         if (fullscreenLoader.item)
             fullscreenLoader.item.close()
@@ -323,6 +447,8 @@ Item {
         fullscreenName = ""
         fullscreenSubQueue = null
         fullscreenMainQueue = null
+
+        setChromeHidden(false)
 
         if (name !== "" && frigateRef &&
             typeof frigateRef.stopFullscreenStream === "function") {

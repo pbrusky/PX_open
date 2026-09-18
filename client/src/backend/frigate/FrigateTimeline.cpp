@@ -199,7 +199,6 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
             return;
         }
 
-        // Fallback: per-camera hourly summary
         QUrl url2(QStringLiteral("%1/api/%2/recordings/summary").arg(m_server, cameraId));
         QUrlQuery q2;
         q2.addQueryItem(QStringLiteral("timezone"), systemTzName());
@@ -252,7 +251,8 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
 
 void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
 {
-    if (m_server.isEmpty() || cameraId.isEmpty()) {
+    // Empty cameraId => all cameras on this Frigate server
+    if (m_server.isEmpty()) {
         m_eventsByCamera[cameraId] = QVariantList();
         emit eventsLoaded(cameraId, QVariantList());
         return;
@@ -260,10 +260,11 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
 
     QUrl url(QStringLiteral("%1/api/events").arg(m_server));
     QUrlQuery query;
-    query.addQueryItem(QStringLiteral("cameras"), cameraId);
+    if (!cameraId.isEmpty())
+        query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
     query.addQueryItem(QStringLiteral("before"), QString::number(beforeSec));
-    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("500"));
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("5000"));
     query.addQueryItem(QStringLiteral("include_thumbnails"), QStringLiteral("0"));
     url.setQuery(query);
 
@@ -272,33 +273,72 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId]() {
         const QByteArray data = reply->readAll();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         reply->deleteLater();
 
         QVariantList events;
-        const QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (doc.isArray()) {
-            for (const QJsonValue& v : doc.array()) {
-                const QJsonObject o = v.toObject();
-                const QString cam = o.value(QStringLiteral("camera")).toString();
-                if (!cam.isEmpty() && cam != cameraId)
-                    continue;
+        if (status < 400) {
+            const QJsonDocument doc = QJsonDocument::fromJson(data);
+            if (doc.isArray()) {
+                QString base = m_server;
+                while (base.endsWith(QLatin1Char('/')))
+                    base.chop(1);
 
-                double start = o.value(QStringLiteral("start_time")).toDouble();
-                double end   = o.value(QStringLiteral("end_time")).toDouble();
-                if (end <= 0.0)
-                    end = start;
+                for (const QJsonValue& v : doc.array()) {
+                    const QJsonObject o = v.toObject();
+                    const QString cam = o.value(QStringLiteral("camera")).toString();
+                    if (!cameraId.isEmpty() && !cam.isEmpty() && cam != cameraId)
+                        continue;
 
-                QVariantMap ev;
-                ev.insert(QStringLiteral("start"), start);
-                ev.insert(QStringLiteral("end"), end);
-                ev.insert(QStringLiteral("label"), o.value(QStringLiteral("label")).toString());
-                ev.insert(QStringLiteral("score"), o.value(QStringLiteral("score")).toDouble());
-                ev.insert(QStringLiteral("id"), o.value(QStringLiteral("id")).toString());
-                events.append(ev);
+                    double start = o.value(QStringLiteral("start_time")).toDouble();
+                    double end   = o.value(QStringLiteral("end_time")).toDouble();
+                    if (end <= 0.0)
+                        end = start;
+
+                    const QString id = o.value(QStringLiteral("id")).toString();
+                    const QString label = o.value(QStringLiteral("label")).toString();
+
+                    double score = o.value(QStringLiteral("score")).toDouble();
+                    if (score <= 0.0) {
+                        const QJsonObject dataObj = o.value(QStringLiteral("data")).toObject();
+                        score = dataObj.value(QStringLiteral("top_score")).toDouble();
+                        if (score <= 0.0)
+                            score = dataObj.value(QStringLiteral("score")).toDouble();
+                    }
+
+                    QVariantMap ev;
+                    ev.insert(QStringLiteral("id"), id);
+                    ev.insert(QStringLiteral("camera"), cam.isEmpty() ? cameraId : cam);
+                    ev.insert(QStringLiteral("label"), label);
+                    ev.insert(QStringLiteral("start"), start);
+                    ev.insert(QStringLiteral("end"), end);
+                    ev.insert(QStringLiteral("score"), score);
+                    ev.insert(QStringLiteral("has_snapshot"),
+                              o.value(QStringLiteral("has_snapshot")).toBool());
+                    ev.insert(QStringLiteral("has_clip"),
+                              o.value(QStringLiteral("has_clip")).toBool());
+
+                    if (!id.isEmpty() && !base.isEmpty()) {
+                        ev.insert(QStringLiteral("thumbnail"),
+                                  base + QStringLiteral("/api/events/") + id
+                                      + QStringLiteral("/thumbnail.jpg"));
+                        ev.insert(QStringLiteral("snapshot"),
+                                  base + QStringLiteral("/api/events/") + id
+                                      + QStringLiteral("/snapshot.jpg"));
+                    }
+
+                    events.append(ev);
+                }
             }
         }
 
-        m_eventsByCamera[cameraId] = events;
+        std::sort(events.begin(), events.end(), [](const QVariant& a, const QVariant& b) {
+            return a.toMap().value(QStringLiteral("start")).toDouble()
+                 > b.toMap().value(QStringLiteral("start")).toDouble();
+        });
+
+        const QString key = cameraId.isEmpty() ? QStringLiteral("__all__") : cameraId;
+        m_eventsByCamera[key] = events;
         emit eventsLoaded(cameraId, events);
     });
 }
