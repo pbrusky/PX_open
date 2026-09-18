@@ -20,7 +20,6 @@ FFmpegWorker::FFmpegWorker(QObject* parent)
 {
     static bool ffmpegInit = false;
     if (!ffmpegInit) {
-        av_log_set_level(AV_LOG_ERROR);
         avformat_network_init();
         ffmpegInit = true;
     }
