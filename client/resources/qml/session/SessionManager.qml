@@ -68,6 +68,11 @@ Item {
             frigateRef.stopAllStreams()
     }
 
+    function clearTimelinePrefetch() {
+        if (mainWindow && typeof mainWindow.clearTimelinePrefetch === "function")
+            mainWindow.clearTimelinePrefetch()
+    }
+
     function applyServerEndpoints(name, ip, apiPort, modulePort) {
         if (mainWindow)
             mainWindow.serverName = name || ""
@@ -105,6 +110,7 @@ Item {
             sidebar.layoutList = []
             sidebar.selectedLayoutName = ""
         }
+        clearTimelinePrefetch()
     }
 
     function goToServerView() {
@@ -129,6 +135,7 @@ Item {
             sidebar.layoutList = []
             sidebar.selectedLayoutName = ""
         }
+        clearTimelinePrefetch()
         expandChrome()
         contentLoader.source = "qrc:/app/resources/qml/StartupPage.qml"
     }

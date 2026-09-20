@@ -208,7 +208,6 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
                          || r.contains(QStringLiteral("404"))
                          || r.contains(QStringLiteral("not found"));
 
-        // Empty / invalid range — do not download, do not mark live camera offline
         if (isHttp && noClip) {
             emit playbackError(cameraId,
                 QStringLiteral("No recording at this time. Try another place on the timeline."));
@@ -360,29 +359,48 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         return;
     }
 
+    // Light debounce — avoid restarting FFmpeg on double open() + timer
     const qint64 wall = QDateTime::currentMSecsSinceEpoch();
-    if (m_lastSeekMs.contains(cameraId) && (wall - m_lastSeekMs.value(cameraId) < 800))
+    if (m_lastSeekMs.contains(cameraId) && (wall - m_lastSeekMs.value(cameraId) < 400))
         return;
     m_lastSeekMs[cameraId] = wall;
 
     const int gen = m_seekGen.value(cameraId, 0) + 1;
     m_seekGen[cameraId] = gen;
 
-    qint64 startSec = timestampMs;
+    // Normalize to unix seconds
+    qint64 seekSec = timestampMs;
     if (timestampMs > 100000000000LL)
-        startSec = timestampMs / 1000;
+        seekSec = timestampMs / 1000;
+    else if (timestampMs > 10000000000LL)
+        seekSec = timestampMs / 1000;
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    if (startSec > nowSec - 30)
-        startSec = nowSec - 30;
+
+    // Viewing window: a few seconds before the event, then continue for several minutes.
+    // Primary path streams HTTP progressively (does not wait for full file).
+    // Playback ends when this range ends — longer continuous play needs auto-extend later.
+    constexpr qint64 kBeforeSec = 5;
+    constexpr qint64 kAfterSec  = 180;   // 3 minutes after seek (use 600 for ~10 min)
+    constexpr qint64 kMinLenSec = 30;
+
+    qint64 startSec = seekSec - kBeforeSec;
     if (startSec < 1)
         startSec = 1;
 
-    qint64 endSec = startSec + 30;
-    if (endSec > nowSec - 5)
-        endSec = nowSec - 5;
+    qint64 endSec = seekSec + kAfterSec;
     if (endSec <= startSec)
-        endSec = startSec + 10;
+        endSec = startSec + kMinLenSec;
+
+    // Avoid empty "live edge" clips
+    if (endSec > nowSec - 2)
+        endSec = nowSec - 2;
+    if (startSec >= endSec) {
+        endSec = nowSec - 2;
+        startSec = endSec - kMinLenSec;
+        if (startSec < 1)
+            startSec = 1;
+    }
 
     const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
                             .arg(m_server, cameraId)
@@ -403,8 +421,8 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
             queue->resetReceived();
     }
 
-    m_playbackPositionByCamera[cameraId] = startSec * 1000;
-    emit playbackPositionChanged(cameraId, startSec * 1000);
+    m_playbackPositionByCamera[cameraId] = seekSec * 1000;
+    emit playbackPositionChanged(cameraId, seekSec * 1000);
 
     startUrlWorker(cameraId, gen, url);
 }

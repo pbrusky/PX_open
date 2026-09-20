@@ -32,6 +32,9 @@ Item {
     property int _activeSeekGen: -1
     property bool seekArmed: false
 
+    /** Set by CameraGrid before open() when opening from an event (ms). -1 = normal live open */
+    property real pendingSeekMs: -1
+
     signal requestClose()
 
     onSubQueueChanged: liveLayers.subQueue = subQueue
@@ -75,6 +78,9 @@ Item {
         mainQueue: root.mainQueue
         isPlayback: root.isPlayback
         playbackReady: root.playbackReady
+        // Hide live underlay during event/playback load and playback
+        visible: !root.isPlayback
+        opacity: root.isPlayback ? 0 : 1
     }
 
     CameraVideoItem {
@@ -126,7 +132,7 @@ Item {
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "Live stays on until first clip frame"
+                text: "Opening recording…"
                 color: "#FF8888"
                 font.pixelSize: 13
             }
@@ -258,8 +264,6 @@ Item {
                 return
             if (root.timelinePointerInside || bottomEdge.containsMouse)
                 return
-            // Calendar is taller than the timeline bar, so hover can leave the
-            // 150px strip while the popup is still in use.
             if (timelineLoader.item.calendarOpen)
                 return
             if (typeof timelineLoader.item.hideTimeline === "function")
@@ -351,6 +355,7 @@ Item {
                 text: root.playbackReady ? "" : ((liveLayers.mainReady && root.trueMain) ? "MAIN" : "SUB")
                 color: (liveLayers.mainReady && root.trueMain) ? "#FFC107" : "#90CAF9"
                 font.pixelSize: 13
+                visible: !root.isPlayback
             }
         }
     }
@@ -601,6 +606,9 @@ Item {
 
         if (typeof liveLayers.resumeMain === "function")
             liveLayers.resumeMain(id)
+        else if (typeof liveLayers.startLive === "function")
+            liveLayers.startLive()
+
         root.mainQueue = liveLayers.mainQueue
         root.trueMain = false
         if (frigateRef && typeof frigateRef.isFullscreenTrueMain === "function")
@@ -617,6 +625,13 @@ Item {
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         if (id === "")
             return
+
+        if (typeof frigateRef.getRecordingsForCamera === "function") {
+            var cached = frigateRef.getRecordingsForCamera(id)
+            if (cached && cached.length > 0)
+                applyRecordings(cached)
+        }
+
         if (typeof frigateRef.loadRecordings === "function")
             frigateRef.loadRecordings(id)
         if (typeof frigateRef.loadEvents === "function")
@@ -645,6 +660,48 @@ Item {
         apiConn.target = frigateRef
 
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        var pending = root.pendingSeekMs
+        root.pendingSeekMs = -1
+
+        liveLayers.cameraId = root.cameraId
+        liveLayers.cameraName = root.cameraName
+        liveLayers.frigateRef = root.frigateRef
+
+        // ── Event path: no live streams, hide live layers immediately ──
+        if (pending > 0 && id !== "") {
+            root.subQueue = null
+            root.mainQueue = null
+            liveLayers.subQueue = null
+            liveLayers.mainQueue = null
+            liveLayers.isPlayback = true
+            liveLayers.playbackReady = false
+
+            // Set isPlayback BEFORE anything else so liveLayers.visible becomes false
+            root.isPlayback = true
+            root.playbackReady = false
+
+            playbackQueueConn.target = null
+            playbackVideo.queue = null
+            root.playbackQueue = null
+
+            if (timelineLoader.item) {
+                timelineLoader.item.isPlayback = true
+                timelineLoader.item.playbackPositionMs = pending
+                timelineLoader.item.collapsed = false
+                timelineLoader.item.allowAutoReveal = true
+            }
+
+            applyTimelineCamera()
+            loadTimelineData()
+
+            seekArmed = true
+            onTimelineSeek(pending)
+            return
+        }
+
+        // ── Normal live fullscreen ──
+        liveLayers.subQueue = root.subQueue
+        liveLayers.mainQueue = root.mainQueue
 
         if (frigateRef && id !== "") {
             if (typeof frigateRef.switchToLive === "function")
@@ -653,11 +710,6 @@ Item {
                 frigateRef.stopPlayback(id)
         }
 
-        liveLayers.cameraId = root.cameraId
-        liveLayers.cameraName = root.cameraName
-        liveLayers.frigateRef = root.frigateRef
-        liveLayers.subQueue = root.subQueue
-        liveLayers.mainQueue = root.mainQueue
         liveLayers.isPlayback = false
         liveLayers.playbackReady = false
         liveLayers.startLive()
@@ -693,6 +745,7 @@ Item {
         root.subQueue = null
         root.playbackQueue = null
         root.trueMain = false
+        root.pendingSeekMs = -1
 
         if (frigateRef && typeof frigateRef.stopFullscreenStream === "function")
             frigateRef.stopFullscreenStream(id)

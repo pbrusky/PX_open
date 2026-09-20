@@ -25,6 +25,9 @@ ApplicationWindow {
     property string serverName: ""
     property string _fullscreenCameraKey: ""
 
+    // Avoid duplicate timeline prefetch for the same camera
+    property string _timelinePrefetchCam: ""
+
     property var fullscreenManager
     property var dropHandler
 
@@ -62,6 +65,54 @@ ApplicationWindow {
     function goToStartupPage() { session.goToStartupPage() }
     function disconnectFromServer() { session.disconnectFromServer() }
 
+    function clearTimelinePrefetch() {
+        _timelinePrefetchCam = ""
+    }
+
+    // Warm FrigateTimeline caches while still on the grid (NX-style)
+    function prefetchTimelineForCamera(cameraId) {
+        if (!frigateRef || !cameraId || !(("" + cameraId).length))
+            return
+        if (!onServerView)
+            return
+
+        var id = "" + cameraId
+        if (id === _timelinePrefetchCam)
+            return
+        _timelinePrefetchCam = id
+
+        // Calendar day list
+        if (typeof frigateRef.loadRecordingDays === "function")
+            frigateRef.loadRecordingDays(id)
+
+        // Last 24h — same family of calls FullscreenTimeline uses
+        var nowSec = Math.floor(Date.now() / 1000)
+        var afterSec = nowSec - (24 * 3600)
+
+        if (typeof frigateRef.loadRecordingsRange === "function")
+            frigateRef.loadRecordingsRange(id, afterSec, nowSec)
+        else if (typeof frigateRef.loadRecordings === "function")
+            frigateRef.loadRecordings(id)
+
+        if (typeof frigateRef.loadMotionActivityRange === "function")
+            frigateRef.loadMotionActivityRange(id, afterSec, nowSec)
+        else if (typeof frigateRef.loadMotionActivity === "function")
+            frigateRef.loadMotionActivity(id)
+
+        if (typeof frigateRef.loadEventsRange === "function")
+            frigateRef.loadEventsRange(id, afterSec, nowSec)
+        else if (typeof frigateRef.loadEvents === "function")
+            frigateRef.loadEvents(id)
+    }
+
+    onSelectedCameraIdChanged: {
+        if (!selectedCameraId || !selectedCameraId.length)
+            return
+        Qt.callLater(function() {
+            mainWindow.prefetchTimelineForCamera(mainWindow.selectedCameraId)
+        })
+    }
+
     // Fullscreen + FFmpeg seek via CameraGrid.enterFullscreenAndSeek → FullscreenCamera.onTimelineSeek
     function viewEvent(cameraId, startSec) {
         if (!cameraId || !(("" + cameraId).length))
@@ -73,6 +124,9 @@ ApplicationWindow {
 
         var ms = Math.floor(sec * 1000)
         var name = "" + cameraId
+
+        // Ensure this camera’s timeline data is loading (or already cached)
+        prefetchTimelineForCamera(name)
 
         var sv = null
         if (contentLoader.item && contentLoader.item.objectName === "ServerView")

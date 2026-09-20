@@ -26,6 +26,10 @@ Item {
     property var cameraOnlineMap: ({})
     property bool _skipStreamStopOnRemove: false
 
+    // Pending event seek (ms). FullscreenCamera skips live and goes straight to playback.
+    property real pendingSeekMs: -1
+    property string pendingSeekCamera: ""
+
     function setChromeHidden(hidden) {
         if (mainWindow)
             mainWindow.cameraFullscreenActive = !!hidden
@@ -318,9 +322,14 @@ Item {
         }
     }
 
+    // Normal live fullscreen (double-click tile) — starts sub + main queues
     function enterFullscreen(cameraName) {
         if (!cameraName || cameraName === "")
             return
+
+        // Clear any leftover event seek so open() takes the live path
+        pendingSeekMs = -1
+        pendingSeekCamera = ""
 
         var prevName = fullscreenName
         if (prevName !== "" && prevName !== cameraName &&
@@ -360,7 +369,43 @@ Item {
         }
     }
 
-    // Open fullscreen, then seek via FullscreenCamera.onTimelineSeek (binds playback queue)
+    // Event path: fullscreen UI without starting live main/sub (avoids live flash)
+    function enterFullscreenForEvent(cameraName) {
+        if (!cameraName || cameraName === "")
+            return
+
+        var prevName = fullscreenName
+        if (prevName !== "" && prevName !== cameraName &&
+            frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
+            frigateRef.stopFullscreenStream(prevName)
+        }
+
+        // Do NOT call getQueue / getFullscreenQueue — that starts live video
+        fullscreenName = cameraName
+        fullscreenSubQueue = null
+        fullscreenMainQueue = null
+        fullscreenLocked = true
+        unlockTimer.restart()
+
+        if (mainWindow && typeof mainWindow.rememberFullscreenCamera === "function")
+            mainWindow.rememberFullscreenCamera(cameraName)
+        setChromeHidden(true)
+
+        if (mainWindow && mainWindow.contentItem) {
+            fullscreenLoader.parent = mainWindow.contentItem
+            fullscreenLoader.anchors.fill = mainWindow.contentItem
+            fullscreenLoader.z = 1000000
+        }
+        fullscreenLoader.visible = true
+
+        if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0) {
+            fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
+        } else if (fullscreenLoader.item) {
+            applyFullscreenItem(cameraName, null, null)
+        }
+    }
+
+    // Open fullscreen + start playback immediately; no live queues
     function enterFullscreenAndSeek(cameraName, timestampMs) {
         if (!cameraName || cameraName === "")
             return
@@ -368,17 +413,28 @@ Item {
         if (!(ts > 0))
             return
 
-        seekFromEventTimer.stop()
-        seekFromEventTimer.cameraName = "" + cameraName
-        seekFromEventTimer.timestampMs = Math.floor(ts)
+        var name = "" + cameraName
+        var ms = Math.floor(ts)
 
-        enterFullscreen(cameraName)
+        pendingSeekCamera = name
+        pendingSeekMs = ms
+
+        seekFromEventTimer.stop()
+        seekFromEventTimer.cameraName = name
+        seekFromEventTimer.timestampMs = ms
+
+        if (frigateRef && typeof frigateRef.startPlayback === "function")
+            frigateRef.startPlayback(name, ms)
+
+        enterFullscreenForEvent(name)
+
+        seekFromEventTimer.interval = 200
         seekFromEventTimer.restart()
     }
 
     Timer {
         id: seekFromEventTimer
-        interval: 750
+        interval: 200
         repeat: false
         property real timestampMs: 0
         property string cameraName: ""
@@ -391,12 +447,15 @@ Item {
             if (item.cameraName !== name && item.cameraId !== name)
                 return
 
-            // open() arms seek after ~600ms; force arm so event seek is accepted
+            // Bind playback queue / playhead if open() already ran; do not start live
             item.seekArmed = true
             if (typeof item.onTimelineSeek === "function")
                 item.onTimelineSeek(timestampMs)
             else if (frigateRef && typeof frigateRef.startPlayback === "function")
                 frigateRef.startPlayback(name, Math.floor(timestampMs))
+
+            gridContainer.pendingSeekMs = -1
+            gridContainer.pendingSeekCamera = ""
         }
     }
 
@@ -425,6 +484,13 @@ Item {
         item.mainQueue = (mainQ !== undefined) ? mainQ : null
         item.mainReady = false
 
+        if (typeof item.pendingSeekMs !== "undefined") {
+            if (pendingSeekCamera === name && pendingSeekMs > 0)
+                item.pendingSeekMs = pendingSeekMs
+            else
+                item.pendingSeekMs = -1
+        }
+
         item.open()
     }
 
@@ -433,6 +499,8 @@ Item {
             return
 
         seekFromEventTimer.stop()
+        pendingSeekMs = -1
+        pendingSeekCamera = ""
 
         var name = fullscreenName
         if (fullscreenLoader.item)
