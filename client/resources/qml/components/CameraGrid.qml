@@ -26,7 +26,7 @@ Item {
     property var cameraOnlineMap: ({})
     property bool _skipStreamStopOnRemove: false
 
-    // Pending event seek (ms). FullscreenCamera skips live and goes straight to playback.
+    // Pending event seek (ms). FullscreenCamera shows live while clip loads, then seeks.
     property real pendingSeekMs: -1
     property string pendingSeekCamera: ""
 
@@ -322,14 +322,15 @@ Item {
         }
     }
 
-    // Normal live fullscreen (double-click tile) — starts sub + main queues
-    function enterFullscreen(cameraName) {
+    // keepPendingSeek: true when opening from an event (preserve pendingSeekMs)
+    function enterFullscreen(cameraName, keepPendingSeek) {
         if (!cameraName || cameraName === "")
             return
 
-        // Clear any leftover event seek so open() takes the live path
-        pendingSeekMs = -1
-        pendingSeekCamera = ""
+        if (!keepPendingSeek) {
+            pendingSeekMs = -1
+            pendingSeekCamera = ""
+        }
 
         var prevName = fullscreenName
         if (prevName !== "" && prevName !== cameraName &&
@@ -369,43 +370,7 @@ Item {
         }
     }
 
-    // Event path: fullscreen UI without starting live main/sub (avoids live flash)
-    function enterFullscreenForEvent(cameraName) {
-        if (!cameraName || cameraName === "")
-            return
-
-        var prevName = fullscreenName
-        if (prevName !== "" && prevName !== cameraName &&
-            frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
-            frigateRef.stopFullscreenStream(prevName)
-        }
-
-        // Do NOT call getQueue / getFullscreenQueue — that starts live video
-        fullscreenName = cameraName
-        fullscreenSubQueue = null
-        fullscreenMainQueue = null
-        fullscreenLocked = true
-        unlockTimer.restart()
-
-        if (mainWindow && typeof mainWindow.rememberFullscreenCamera === "function")
-            mainWindow.rememberFullscreenCamera(cameraName)
-        setChromeHidden(true)
-
-        if (mainWindow && mainWindow.contentItem) {
-            fullscreenLoader.parent = mainWindow.contentItem
-            fullscreenLoader.anchors.fill = mainWindow.contentItem
-            fullscreenLoader.z = 1000000
-        }
-        fullscreenLoader.visible = true
-
-        if (fullscreenLoader.source.toString().indexOf("FullscreenCamera.qml") < 0) {
-            fullscreenLoader.source = "qrc:/app/resources/qml/fullscreen/FullscreenCamera.qml"
-        } else if (fullscreenLoader.item) {
-            applyFullscreenItem(cameraName, null, null)
-        }
-    }
-
-    // Open fullscreen + start playback immediately; no live queues
+    // Open fullscreen with live queues + pending seek (live shows while clip loads)
     function enterFullscreenAndSeek(cameraName, timestampMs) {
         if (!cameraName || cameraName === "")
             return
@@ -426,7 +391,8 @@ Item {
         if (frigateRef && typeof frigateRef.startPlayback === "function")
             frigateRef.startPlayback(name, ms)
 
-        enterFullscreenForEvent(name)
+        // Live sub/main queues + keep pendingSeek for FullscreenCamera.open()
+        enterFullscreen(name, true)
 
         seekFromEventTimer.interval = 200
         seekFromEventTimer.restart()
@@ -447,7 +413,6 @@ Item {
             if (item.cameraName !== name && item.cameraId !== name)
                 return
 
-            // Bind playback queue / playhead if open() already ran; do not start live
             item.seekArmed = true
             if (typeof item.onTimelineSeek === "function")
                 item.onTimelineSeek(timestampMs)

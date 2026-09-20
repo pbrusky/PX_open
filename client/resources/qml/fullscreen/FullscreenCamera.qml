@@ -18,7 +18,6 @@ Item {
     property bool closeEnabled: false
 
     property alias mainReady: liveLayers.mainReady
-    /** true only when C++ confirmed the real _main profile opened */
     property bool trueMain: false
 
     property bool isPlayback: false
@@ -31,8 +30,6 @@ Item {
     property int _seekGen: 0
     property int _activeSeekGen: -1
     property bool seekArmed: false
-
-    /** Set by CameraGrid before open() when opening from an event (ms). -1 = normal live open */
     property real pendingSeekMs: -1
 
     signal requestClose()
@@ -78,9 +75,9 @@ Item {
         mainQueue: root.mainQueue
         isPlayback: root.isPlayback
         playbackReady: root.playbackReady
-        // Hide live underlay during event/playback load and playback
-        visible: !root.isPlayback
-        opacity: root.isPlayback ? 0 : 1
+        // Live visible while loading clip; hide only after first playback frame
+        visible: !root.playbackReady
+        opacity: root.playbackReady ? 0 : 1
     }
 
     CameraVideoItem {
@@ -147,10 +144,8 @@ Item {
                 return
             if (root._returningLive)
                 return
-
             if (root.isPlayback && root.playbackReady)
                 return
-
             if (root.isPlayback && !root.playbackReady) {
                 root.isPlayback = false
                 root.playbackReady = false
@@ -540,6 +535,17 @@ Item {
         recordingsPollTimer.start()
     }
 
+    function ensureLiveQueues(id) {
+        if (!frigateRef || id === "")
+            return
+        if (!root.subQueue && typeof frigateRef.getQueue === "function")
+            root.subQueue = frigateRef.getQueue(id)
+        if (!root.mainQueue && typeof frigateRef.getFullscreenQueue === "function")
+            root.mainQueue = frigateRef.getFullscreenQueue(id)
+        liveLayers.subQueue = root.subQueue
+        liveLayers.mainQueue = root.mainQueue
+    }
+
     function open() {
         closeEnabled = false
         isPlayback = false
@@ -565,18 +571,17 @@ Item {
         liveLayers.cameraName = root.cameraName
         liveLayers.frigateRef = root.frigateRef
 
-        // ── Event path: no live streams, hide live layers immediately ──
+        // ── Event / seek path: live underlay + LOADING CLIP + start playback ──
+        // Do NOT call switchToLive (that cancels startPlayback).
         if (pending > 0 && id !== "") {
-            root.subQueue = null
-            root.mainQueue = null
-            liveLayers.subQueue = null
-            liveLayers.mainQueue = null
-            liveLayers.isPlayback = true
-            liveLayers.playbackReady = false
-
-            // Set isPlayback BEFORE anything else so liveLayers.visible becomes false
             root.isPlayback = true
             root.playbackReady = false
+
+            ensureLiveQueues(id)
+            liveLayers.isPlayback = true
+            liveLayers.playbackReady = false
+            if (typeof liveLayers.startLive === "function")
+                liveLayers.startLive()
 
             playbackQueueConn.target = null
             playbackVideo.queue = null
