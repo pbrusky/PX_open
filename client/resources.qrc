@@ -11,6 +11,8 @@
         <file>resources/qml/fullscreen/FullscreenCamera.qml</file>
         <file>resources/qml/fullscreen/FullscreenTimeline.qml</file>
         <file>resources/qml/fullscreen/FullscreenToolbar.qml</file>
+        <file>resources/qml/fullscreen/FullscreenTopBar.qml</file>
+        <file>resources/qml/fullscreen/FullscreenLoadingOverlay.qml</file>
         <file>resources/qml/fullscreen/LiveFullscreenLayers.qml</file>
         <file>resources/qml/fullscreen/TimelineStatusBar.qml</file>
         <file>resources/qml/fullscreen/TimelineTrack.qml</file>

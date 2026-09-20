@@ -110,33 +110,9 @@ Item {
         }
     }
 
-    Rectangle {
-        anchors.centerIn: parent
-        width: Math.min(parent.width * 0.7, 440)
-        height: 80
-        radius: 10
-        color: "#CC000000"
-        border.color: "#FFC107"
-        border.width: 1
-        z: 50
-        visible: root.isPlayback && !root.playbackReady
-        Column {
-            anchors.centerIn: parent
-            spacing: 8
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "LOADING CLIP... " + root.loadSecs + "s"
-                color: "#FFC107"
-                font.pixelSize: 20
-                font.bold: true
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "Opening recording…"
-                color: "#FF8888"
-                font.pixelSize: 13
-            }
-        }
+    FullscreenLoadingOverlay {
+        active: root.isPlayback && !root.playbackReady
+        loadSecs: root.loadSecs
     }
 
     Timer {
@@ -323,95 +299,17 @@ Item {
         }
     }
 
-    Rectangle {
-        height: 36
-        width: parent.width
+    FullscreenTopBar {
         anchors.top: parent.top
-        color: "#00000099"
-        z: 30
-        Row {
-            anchors.fill: parent
-            anchors.margins: 8
-            spacing: 16
-            Text {
-                text: root.cameraName
-                color: "white"
-                font.pixelSize: 15
-                font.bold: true
-            }
-            Text {
-                text: {
-                    if (!root.isPlayback)
-                        return "LIVE"
-                    if (!root.playbackReady)
-                        return "LOADING..."
-                    return "PLAYBACK"
-                }
-                color: root.isPlayback ? "#FFC107" : "#00C853"
-                font.pixelSize: 13
-                font.bold: true
-            }
-            Text {
-                text: root.playbackReady ? "" : ((liveLayers.mainReady && root.trueMain) ? "MAIN" : "SUB")
-                color: (liveLayers.mainReady && root.trueMain) ? "#FFC107" : "#90CAF9"
-                font.pixelSize: 13
-                visible: !root.isPlayback
-            }
-        }
-    }
-
-    Rectangle {
-        width: 70
-        height: 28
-        anchors.top: parent.top
+        anchors.left: parent.left
         anchors.right: parent.right
-        anchors.rightMargin: 90
-        anchors.topMargin: 10
-        radius: 4
-        color: root.playbackReady ? "#1B5E20" : "#00000055"
-        border.color: root.playbackReady ? "#00C853" : "#444"
-        border.width: 1
-        z: 31
-        visible: root.isPlayback
-        Text {
-            anchors.centerIn: parent
-            text: "Live"
-            color: "white"
-            font.pixelSize: 13
-        }
-        MouseArea {
-            anchors.fill: parent
-            enabled: root.playbackReady
-            preventStealing: true
-            onClicked: function(mouse) {
-                mouse.accepted = true
-                root.returnToLive()
-            }
-        }
-    }
-
-    Rectangle {
-        width: 70
-        height: 28
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: 10
-        radius: 4
-        color: "#000000AA"
-        z: 31
-        Text {
-            anchors.centerIn: parent
-            text: "Exit"
-            color: "white"
-            font.pixelSize: 13
-        }
-        MouseArea {
-            anchors.fill: parent
-            onClicked: function(mouse) {
-                mouse.accepted = true
-                root.tryExit()
-            }
-        }
+        cameraName: root.cameraName
+        isPlayback: root.isPlayback
+        playbackReady: root.playbackReady
+        mainReady: liveLayers.mainReady
+        trueMain: root.trueMain
+        onExitRequested: root.tryExit()
+        onReturnToLiveRequested: root.returnToLive()
     }
 
     Loader {
