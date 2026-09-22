@@ -31,6 +31,9 @@ Rectangle {
     property real exportStartMs: -1
     property real exportEndMs: -1
     property bool exportBusy: false
+    property real exportPercent: 0   // -1 = unknown size, 0..100 known
+    property string exportStatusMessage: ""
+    property real _lastProgressUiAt: 0
 
     // Blocks FullscreenCamera auto-hide while exporting / range selected
     readonly property bool exportUiOpen: (exportConfirm && exportConfirm.visible)
@@ -44,7 +47,6 @@ Rectangle {
     }
 
     function hideTimeline() {
-        // Never auto-collapse while export UI is active
         if (exportUiOpen)
             return
         collapsed = true
@@ -114,7 +116,6 @@ Rectangle {
              + ".mp4"
     }
 
-    // Export button → confirm popup (editable times) → Save As
     function requestExport() {
         if (!(exportEndMs > exportStartMs) || !frigateRef)
             return
@@ -163,9 +164,19 @@ Rectangle {
         }
     }
 
+    Timer {
+        id: exportDoneClearTimer
+        interval: 2500
+        onTriggered: {
+            exportPercent = 0
+            exportStatusMessage = ""
+        }
+    }
+
     HoverHandler {
-        enabled: !collapsed
         onHoveredChanged: {
+            if (timeline.collapsed)
+                return
             pointerInside = hovered
             hoverActiveChanged(hovered || timeline.exportUiOpen)
             if (!hovered)
@@ -218,11 +229,35 @@ Rectangle {
             }
         }
 
+        function onExportProgress(received, total) {
+            if (!exportBusy)
+                exportBusy = true
+
+            // Throttle UI updates (~4/sec)
+            var now = Date.now()
+            if (timeline._lastProgressUiAt && (now - timeline._lastProgressUiAt) < 250)
+                return
+            timeline._lastProgressUiAt = now
+
+            if (total > 0) {
+                exportPercent = Math.min(100, (received * 100.0) / total)
+                exportStatusMessage = ""
+            } else {
+                exportPercent = -1
+                var mb = received / (1024 * 1024)
+                exportStatusMessage = mb < 0.1
+                    ? (Math.round(received / 1024) + " KB")
+                    : (mb.toFixed(1) + " MB")
+            }
+        }
+
         function onExportFinished(ok, message, path) {
             exportBusy = false
+            exportPercent = ok ? 100 : 0
+            exportStatusMessage = message || ""
             if (ok)
                 clearExportRange()
-            hoverActiveChanged(pointerInside || exportUiOpen)
+            exportDoneClearTimer.restart()
         }
     }
 
@@ -495,10 +530,6 @@ Rectangle {
 
     Component.onCompleted: updatePlayhead()
 
-    onExportStartMsChanged: hoverActiveChanged(pointerInside || exportUiOpen)
-    onExportEndMsChanged: hoverActiveChanged(pointerInside || exportUiOpen)
-    onExportBusyChanged: hoverActiveChanged(pointerInside || exportUiOpen)
-
     TimelineStatusBar {
         id: statusBar
         anchors.left: parent.left
@@ -509,6 +540,7 @@ Rectangle {
         timeline: timeline
         calendarOpen: timeline.calendarOpen
         exportBusy: timeline.exportBusy
+        exportPercent: timeline.exportPercent
         onCalendarToggled: {
             if (!calendarPopup.visible) {
                 var d = new Date(effectiveStartTs() * 1000)
@@ -668,6 +700,9 @@ Rectangle {
                 endSec = startSec + 1
 
             exportBusy = true
+            exportPercent = 0
+            exportStatusMessage = ""
+            _lastProgressUiAt = 0
             frigateRef.exportClip(id, startSec, endSec, path)
         }
         onRejected: {

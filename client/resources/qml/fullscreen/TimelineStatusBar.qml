@@ -8,6 +8,7 @@ Rectangle {
     property var timeline: null
     property bool calendarOpen: false
     property bool exportBusy: false
+    property real exportPercent: 0   // -1 unknown, 0..100 known
 
     signal calendarToggled()
     signal zoomOut()
@@ -16,14 +17,29 @@ Rectangle {
     signal exportRequested()
     signal clearExportRange()
 
+    readonly property bool hasExportRange: timeline
+        && timeline.exportStartMs > 0
+        && timeline.exportEndMs > timeline.exportStartMs
+
     Text {
+        id: leftLabel
         anchors.left: parent.left
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
+        width: Math.min(implicitWidth, parent.width * 0.40)
+        elide: Text.ElideRight
         text: {
             if (!timeline)
                 return ""
-            if (timeline.exportStartMs > 0 && timeline.exportEndMs > timeline.exportStartMs) {
+            if (root.exportBusy) {
+                if (root.exportPercent < 0) {
+                    var extra = (timeline.exportStatusMessage && timeline.exportStatusMessage.length)
+                                ? ("  " + timeline.exportStatusMessage) : ""
+                    return "Downloading…" + extra
+                }
+                return "Downloading…  " + Math.round(root.exportPercent) + "%"
+            }
+            if (root.hasExportRange) {
                 return "Export  "
                      + timeline.formatFull(timeline.exportStartMs)
                      + "  →  "
@@ -39,7 +55,7 @@ Rectangle {
         color: {
             if (!timeline)
                 return "#00C853"
-            if (timeline.exportStartMs > 0 && timeline.exportEndMs > timeline.exportStartMs)
+            if (root.exportBusy || root.hasExportRange)
                 return "#6A8AFF"
             if (timeline.hoverTsMs > 0)
                 return "#FFC107"
@@ -49,32 +65,75 @@ Rectangle {
         font.bold: true
     }
 
+    Rectangle {
+        id: progressTrack
+        visible: root.exportBusy
+        anchors.left: leftLabel.right
+        anchors.leftMargin: 12
+        anchors.right: rightRow.left
+        anchors.rightMargin: 12
+        anchors.verticalCenter: parent.verticalCenter
+        height: 10
+        radius: 4
+        color: "#2A2A32"
+        border.color: "#444"
+        border.width: 1
+        clip: true
+
+        // Known size
+        Rectangle {
+            visible: root.exportPercent >= 0
+            width: parent.width * Math.max(0, Math.min(1, root.exportPercent / 100.0))
+            height: parent.height
+            radius: 4
+            color: "#6A8AFF"
+        }
+
+        // Unknown size — fixed fraction, animate with phase only (no width binding in Animation)
+        Rectangle {
+            id: pulse
+            visible: root.exportPercent < 0
+            height: parent.height
+            radius: 4
+            color: "#6A8AFF"
+            width: Math.max(24, parent.width * 0.25)
+            x: (parent.width - width) * pulsePhase
+
+            property real pulsePhase: 0
+
+            SequentialAnimation on pulsePhase {
+                running: pulse.visible && progressTrack.width > 0
+                loops: Animation.Infinite
+                NumberAnimation { from: 0; to: 1; duration: 1000; easing.type: Easing.InOutQuad }
+                NumberAnimation { from: 1; to: 0; duration: 1000; easing.type: Easing.InOutQuad }
+            }
+        }
+    }
+
     Row {
+        id: rightRow
         anchors.right: parent.right
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
 
-        // Export when range is set
         Rectangle {
             width: 64
             height: 22
             radius: 3
-            visible: timeline && timeline.exportStartMs > 0
-                     && timeline.exportEndMs > timeline.exportStartMs
-            color: root.exportBusy ? "#444" : "#2F4A8A"
+            visible: root.hasExportRange && !root.exportBusy
+            color: "#2F4A8A"
             border.color: "#6A8AFF"
             border.width: 1
             Text {
                 anchors.centerIn: parent
-                text: root.exportBusy ? "…" : "Export"
+                text: "Export"
                 color: "white"
                 font.pixelSize: 12
                 font.bold: true
             }
             MouseArea {
                 anchors.fill: parent
-                enabled: !root.exportBusy
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.exportRequested()
             }
@@ -84,8 +143,7 @@ Rectangle {
             width: 28
             height: 22
             radius: 3
-            visible: timeline && timeline.exportStartMs > 0
-                     && timeline.exportEndMs > timeline.exportStartMs
+            visible: root.hasExportRange && !root.exportBusy
             color: "#333"
             Text {
                 anchors.centerIn: parent
@@ -102,8 +160,7 @@ Rectangle {
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !(timeline && timeline.exportStartMs > 0
-                       && timeline.exportEndMs > timeline.exportStartMs)
+            visible: !root.hasExportRange && !root.exportBusy
             text: {
                 if (!timeline)
                     return ""
@@ -125,7 +182,6 @@ Rectangle {
             color: root.calendarOpen ? "#555" : "#333"
             border.color: root.calendarOpen ? "#FFC107" : "#666"
             border.width: 1
-
             Image {
                 anchors.centerIn: parent
                 width: 14
@@ -135,7 +191,6 @@ Rectangle {
                 smooth: true
                 mipmap: true
             }
-
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor

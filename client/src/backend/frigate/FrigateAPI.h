@@ -91,7 +91,7 @@ public:
     Q_INVOKABLE void loadGo2rtcConfig();
     Q_INVOKABLE void saveGo2rtcConfig(const QString& content, bool restart = true);
 
-    // Download clip range to local PC
+    /** Download Frigate clip.mp4 for [startSec, endSec] to savePath on disk. */
     Q_INVOKABLE void exportClip(const QString& cameraId, qint64 startSec, qint64 endSec, const QString& savePath);
     Q_INVOKABLE void cancelExport();
 
