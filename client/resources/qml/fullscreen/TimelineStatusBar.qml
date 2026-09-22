@@ -7,11 +7,14 @@ Rectangle {
 
     property var timeline: null
     property bool calendarOpen: false
+    property bool exportBusy: false
 
     signal calendarToggled()
     signal zoomOut()
     signal zoomIn()
     signal resetZoom()
+    signal exportRequested()
+    signal clearExportRange()
 
     Text {
         anchors.left: parent.left
@@ -20,6 +23,13 @@ Rectangle {
         text: {
             if (!timeline)
                 return ""
+            if (timeline.exportStartMs > 0 && timeline.exportEndMs > timeline.exportStartMs) {
+                return "Export  "
+                     + timeline.formatFull(timeline.exportStartMs)
+                     + "  →  "
+                     + Qt.formatDateTime(new Date(timeline.exportEndMs), "hh:mm:ss")
+                     + "  (" + timeline.exportSpanLabel() + ")"
+            }
             if (timeline.hoverTsMs > 0)
                 return "Cursor   " + timeline.formatFull(timeline.hoverTsMs)
             if (timeline.isPlayback && timeline.playbackPositionMs > 0)
@@ -29,11 +39,13 @@ Rectangle {
         color: {
             if (!timeline)
                 return "#00C853"
+            if (timeline.exportStartMs > 0 && timeline.exportEndMs > timeline.exportStartMs)
+                return "#6A8AFF"
             if (timeline.hoverTsMs > 0)
                 return "#FFC107"
             return timeline.isPlayback ? "#FFC107" : "#00C853"
         }
-        font.pixelSize: 16
+        font.pixelSize: 14
         font.bold: true
     }
 
@@ -41,10 +53,57 @@ Rectangle {
         anchors.right: parent.right
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 10
+        spacing: 8
+
+        // Export when range is set
+        Rectangle {
+            width: 64
+            height: 22
+            radius: 3
+            visible: timeline && timeline.exportStartMs > 0
+                     && timeline.exportEndMs > timeline.exportStartMs
+            color: root.exportBusy ? "#444" : "#2F4A8A"
+            border.color: "#6A8AFF"
+            border.width: 1
+            Text {
+                anchors.centerIn: parent
+                text: root.exportBusy ? "…" : "Export"
+                color: "white"
+                font.pixelSize: 12
+                font.bold: true
+            }
+            MouseArea {
+                anchors.fill: parent
+                enabled: !root.exportBusy
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.exportRequested()
+            }
+        }
+
+        Rectangle {
+            width: 28
+            height: 22
+            radius: 3
+            visible: timeline && timeline.exportStartMs > 0
+                     && timeline.exportEndMs > timeline.exportStartMs
+            color: "#333"
+            Text {
+                anchors.centerIn: parent
+                text: "✕"
+                color: "#ccc"
+                font.pixelSize: 12
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.clearExportRange()
+            }
+        }
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
+            visible: !(timeline && timeline.exportStartMs > 0
+                       && timeline.exportEndMs > timeline.exportStartMs)
             text: {
                 if (!timeline)
                     return ""
@@ -59,7 +118,6 @@ Rectangle {
             font.pixelSize: 12
         }
 
-        // Calendar button — SVG (works on Windows + Linux)
         Rectangle {
             width: 30
             height: 22

@@ -15,7 +15,8 @@ Rectangle {
 
     signal seekRequested(real tsMs)
     signal hoverTimeChanged(real tsMs)
-    property alias panActive: panHandler.active
+
+    property bool panActive: false
 
     TimelineSegments {
         anchors.fill: parent
@@ -32,26 +33,16 @@ Rectangle {
     Repeater {
         model: timeline ? timeline.motionPoints : []
         z: 5
-
         Rectangle {
             property real sec: {
                 var t = 0
-                if (typeof start !== "undefined" && start)
-                    t = Number(start)
-                else if (modelData)
+                if (modelData)
                     t = Number(modelData.start || modelData.start_time || 0)
                 if (t > 100000000000)
                     t = t / 1000
                 return t
             }
-            property real mot: {
-                if (typeof motion !== "undefined" && motion)
-                    return Number(motion)
-                if (modelData)
-                    return Number(modelData.motion || 0)
-                return 0
-            }
-
+            property real mot: modelData ? Number(modelData.motion || 0) : 0
             width: 3
             height: Math.min(parent.height - 4, 14 + Math.min(22, mot / 8.0))
             anchors.bottom: parent.bottom
@@ -67,19 +58,13 @@ Rectangle {
     Repeater {
         model: timeline ? timeline.events : []
         z: 6
-
         Rectangle {
             property real sec: {
-                var t = 0
-                if (typeof start !== "undefined" && start)
-                    t = Number(start)
-                else if (modelData)
-                    t = Number(modelData.start || 0)
+                var t = modelData ? Number(modelData.start || 0) : 0
                 if (t > 100000000000)
                     t = t / 1000
                 return t
             }
-
             width: 3
             height: 18
             y: 2
@@ -90,6 +75,23 @@ Rectangle {
                      && sec >= timeline.effectiveStartTs()
                      && sec <= timeline.effectiveEndTs()
         }
+    }
+
+    // Export selection highlight
+    Rectangle {
+        z: 15
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        color: "#3A6AFF55"
+        border.color: "#6A8AFF"
+        border.width: 1
+        visible: timeline && timeline.exportStartMs > 0
+                 && timeline.exportEndMs > timeline.exportStartMs
+        x: visible ? timeline.timestampToX(timeline.exportStartMs) : 0
+        width: visible
+               ? Math.max(2, timeline.timestampToX(timeline.exportEndMs)
+                            - timeline.timestampToX(timeline.exportStartMs))
+               : 0
     }
 
     Rectangle {
@@ -115,51 +117,109 @@ Rectangle {
         }
     }
 
-    DragHandler {
-        id: panHandler
+    // Single mouse area: click = seek, drag = export range, Shift+drag = pan
+    MouseArea {
+        id: mouse
+        anchors.fill: parent
+        hoverEnabled: true
         acceptedButtons: Qt.LeftButton
-        acceptedModifiers: Qt.ShiftModifier
-        target: null
-        property real lastX: 0
-        onActiveChanged: {
-            if (active)
-                lastX = centroid.position.x
-        }
-        onTranslationChanged: {
-            if (!active || !timeline)
-                return
-            var dx = centroid.position.x - lastX
-            lastX = centroid.position.x
-            if (Math.abs(dx) > 0.5)
-                timeline.panByPixels(dx)
-        }
-    }
+        preventStealing: true
+        z: 50
 
-    TapHandler {
-        acceptedButtons: Qt.LeftButton
-        onDoubleTapped: {
+        property real pressX: 0
+        property real lastX: 0
+        property bool dragging: false
+        property bool panning: false
+        property real dragThreshold: 6
+
+        onPositionChanged: function(event) {
+            if (!timeline)
+                return
+
+            var ts = timeline.xToTimestamp(event.x)
+            trackBg.hoverTimeChanged(ts)
+
+            if (!(event.buttons & Qt.LeftButton))
+                return
+
+            var dx = event.x - pressX
+
+            // Shift held → pan
+            if (event.modifiers & Qt.ShiftModifier) {
+                panning = true
+                dragging = false
+                trackBg.panActive = true
+                var step = event.x - lastX
+                lastX = event.x
+                if (Math.abs(step) > 0.5)
+                    timeline.panByPixels(step)
+                return
+            }
+
+            // Drag far enough → range select
+            if (!dragging && Math.abs(dx) >= dragThreshold) {
+                dragging = true
+                var startTs = timeline.xToTimestamp(pressX)
+                timeline.exportStartMs = startTs
+                timeline.exportEndMs = startTs
+            }
+
+            if (dragging) {
+                timeline.exportEndMs = timeline.xToTimestamp(event.x)
+            }
+        }
+
+        onPressed: function(event) {
+            pressX = event.x
+            lastX = event.x
+            dragging = false
+            panning = false
+            trackBg.panActive = false
+        }
+
+        onReleased: function(event) {
+            if (!timeline) {
+                dragging = false
+                panning = false
+                trackBg.panActive = false
+                return
+            }
+
+            if (panning) {
+                panning = false
+                trackBg.panActive = false
+                return
+            }
+
+            if (dragging) {
+                // Normalize start/end
+                if (timeline.exportEndMs < timeline.exportStartMs) {
+                    var tmp = timeline.exportStartMs
+                    timeline.exportStartMs = timeline.exportEndMs
+                    timeline.exportEndMs = tmp
+                }
+                // Tiny drag = ignore
+                if (timeline.exportEndMs - timeline.exportStartMs < 2000) {
+                    timeline.exportStartMs = -1
+                    timeline.exportEndMs = -1
+                }
+                dragging = false
+                return
+            }
+
+            // Click = seek
+            var ts = timeline.xToTimestamp(event.x)
+            if (ts > 0)
+                trackBg.seekRequested(ts)
+        }
+
+        onExited: {
+            trackBg.hoverTimeChanged(-1)
+        }
+
+        onDoubleClicked: {
             if (timeline)
                 timeline.resetZoom()
-        }
-    }
-
-    TimelineMouseHandler {
-        anchors.fill: parent
-        z: 50
-        scrubber: null
-        hoverPreview: null
-        pan: 0
-        xToTimestamp: function(x) {
-            return timeline ? timeline.xToTimestamp(x) : 0
-        }
-        trackHeight: trackBg.height
-        enabled: !panHandler.active
-
-        onSeekRequested: function(tsMs) {
-            trackBg.seekRequested(tsMs)
-        }
-        onHoverTimeChanged: function(tsMs) {
-            trackBg.hoverTimeChanged(tsMs)
         }
     }
 }

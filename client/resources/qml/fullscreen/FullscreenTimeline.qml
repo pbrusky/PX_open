@@ -1,5 +1,6 @@
 ﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Dialogs
 import "qrc:/app/resources/qml/components/timeline"
 
 Rectangle {
@@ -25,6 +26,11 @@ Rectangle {
 
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
+
+    // Export range (ms). Ctrl+drag on track sets these.
+    property real exportStartMs: -1
+    property real exportEndMs: -1
+    property bool exportBusy: false
 
     function showTimeline() {
         if (!allowAutoReveal)
@@ -61,8 +67,6 @@ Rectangle {
     property bool isPlayback: false
     property real hoverTsMs: -1
     property real currentTimeMs: Date.now()
-
-    // Safer playhead – no complex expression that can re-enter
     property real playheadTsMs: 0
 
     function updatePlayhead() {
@@ -70,6 +74,43 @@ Rectangle {
             playheadTsMs = playbackPositionMs
         else
             playheadTsMs = currentTimeMs
+    }
+
+    function exportSpanLabel() {
+        if (!(exportEndMs > exportStartMs))
+            return ""
+        var sec = (exportEndMs - exportStartMs) / 1000
+        if (sec < 90)
+            return Math.round(sec) + "s"
+        if (sec < 3600)
+            return Math.round(sec / 60) + "m"
+        return (sec / 3600).toFixed(1) + "h"
+    }
+
+    function clearExportRange() {
+        exportStartMs = -1
+        exportEndMs = -1
+    }
+
+    function defaultExportFileName() {
+        var cam = (cameraName || cameraId || "camera").toString().replace(/[^\w\-]+/g, "_")
+        var a = new Date(exportStartMs)
+        var b = new Date(exportEndMs)
+        function pad(n) { return (n < 10 ? "0" : "") + n }
+        return cam + "_"
+             + a.getFullYear() + "-" + pad(a.getMonth() + 1) + "-" + pad(a.getDate())
+             + "_" + pad(a.getHours()) + "-" + pad(a.getMinutes())
+             + "_to_" + pad(b.getHours()) + "-" + pad(b.getMinutes())
+             + ".mp4"
+    }
+
+    function requestExport() {
+        if (!(exportEndMs > exportStartMs) || !frigateRef)
+            return
+        if (typeof frigateRef.exportClip !== "function")
+            return
+        exportFileDialog.selectedFile = "file:///" + defaultExportFileName()
+        exportFileDialog.open()
     }
 
     Timer {
@@ -92,8 +133,6 @@ Rectangle {
             var endMs = dataEndBound() * 1000
             if (endMs > 0 && next > endMs)
                 next = endMs
-
-            // Prevent feedback loop
             if (Math.abs(next - playbackPositionMs) > 1) {
                 playbackPositionMs = next
                 updatePlayhead()
@@ -155,6 +194,12 @@ Rectangle {
                 updatePlayhead()
             }
         }
+
+        function onExportFinished(ok, message, path) {
+            exportBusy = false
+            if (ok)
+                clearExportRange()
+        }
     }
 
     function normalizeSec(t) {
@@ -193,7 +238,6 @@ Rectangle {
         if (start < ds)
             start = ds
 
-        // Only write if actually changed
         if (Math.abs(viewStartTs - start) > 0.1)
             viewStartTs = start
         if (Math.abs(viewEndTs - end) > 0.1)
@@ -241,7 +285,6 @@ Rectangle {
         if (ne <= ns)
             ne = ns + minViewSpan
 
-        // Critical: only assign when value really changed
         if (Math.abs(ns - viewStartTs) > 0.05)
             viewStartTs = ns
         if (Math.abs(ne - viewEndTs) > 0.05)
@@ -426,7 +469,6 @@ Rectangle {
         }
     }
 
-    // Initialize playhead once
     Component.onCompleted: updatePlayhead()
 
     TimelineStatusBar {
@@ -438,6 +480,7 @@ Rectangle {
         z: 20
         timeline: timeline
         calendarOpen: timeline.calendarOpen
+        exportBusy: timeline.exportBusy
         onCalendarToggled: {
             if (!calendarPopup.visible) {
                 var d = new Date(effectiveStartTs() * 1000)
@@ -452,6 +495,8 @@ Rectangle {
         onZoomOut: zoomAt(mapWidth() / 2, 0.7)
         onZoomIn: zoomAt(mapWidth() / 2, 1.4)
         onResetZoom: resetZoom()
+        onExportRequested: timeline.requestExport()
+        onClearExportRange: timeline.clearExportRange()
     }
 
     TimelineRuler {
@@ -552,12 +597,36 @@ Rectangle {
                 return ""
             return recordings.length + " rec, "
                  + visibleMotionCount() + "/" + motionPoints.length + " motion, "
-                 + events.length + " events, "
-                 + recordingDays.length + " days — wheel=zoom, Shift+drag=pan"
+                 + events.length + " events — wheel=zoom, Shift+drag=pan, Ctrl+drag=export"
         }
         color: "#777777"
         font.pixelSize: 10
         visible: !collapsed
         z: 5
+    }
+
+    FileDialog {
+        id: exportFileDialog
+        title: "Export footage"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Video (*.mp4)"]
+        defaultSuffix: "mp4"
+        onAccepted: {
+            var path = selectedFile.toString()
+            if (path.indexOf("file:///") === 0)
+                path = path.substring(8)
+            else if (path.indexOf("file://") === 0)
+                path = path.substring(7)
+            path = decodeURIComponent(path)
+
+            var id = cameraId !== "" ? cameraId : cameraName
+            var startSec = Math.floor(exportStartMs / 1000)
+            var endSec = Math.ceil(exportEndMs / 1000)
+            if (endSec <= startSec)
+                endSec = startSec + 1
+
+            exportBusy = true
+            frigateRef.exportClip(id, startSec, endSec, path)
+        }
     }
 }

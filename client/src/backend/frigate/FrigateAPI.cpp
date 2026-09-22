@@ -8,6 +8,11 @@
 
 #include <QProcess>
 #include <QDebug>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QFile>
+#include <QUrl>
 
 FrigateAPI::FrigateAPI(QObject* parent)
     : QObject(parent)
@@ -17,6 +22,7 @@ FrigateAPI::FrigateAPI(QObject* parent)
     m_timeline      = new FrigateTimeline(this);
     m_playback      = new FrigatePlayback(this);
     m_onvif         = new FrigateOnvif(this);
+    m_exportNet     = new QNetworkAccessManager(this);
 
     connect(m_cameraManager, &FrigateCameraManager::camerasLoaded,
             this, &FrigateAPI::camerasLoaded);
@@ -406,4 +412,102 @@ QString FrigateAPI::cameraCodec(const QString& cameraName) const
 bool FrigateAPI::isFullscreenTrueMain(const QString& cameraName) const
 {
     return m_streamManager ? m_streamManager->isFullscreenTrueMain(cameraName) : false;
+}
+
+void FrigateAPI::cancelExport()
+{
+    if (m_exportReply) {
+        m_exportReply->abort();
+        m_exportReply->deleteLater();
+        m_exportReply = nullptr;
+    }
+    if (m_exportFile) {
+        m_exportFile->close();
+        m_exportFile->deleteLater();
+        m_exportFile = nullptr;
+    }
+}
+
+void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 endSec, const QString& savePath)
+{
+    cancelExport();
+
+    if (m_server.isEmpty() || cameraId.trimmed().isEmpty() || savePath.isEmpty()) {
+        emit exportFinished(false, QStringLiteral("Missing server, camera, or path"), QString());
+        return;
+    }
+    if (endSec <= startSec) {
+        emit exportFinished(false, QStringLiteral("Invalid time range"), QString());
+        return;
+    }
+
+    const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
+                            .arg(m_server, cameraId)
+                            .arg(startSec)
+                            .arg(endSec);
+
+    m_exportFile = new QFile(savePath, this);
+    if (!m_exportFile->open(QIODevice::WriteOnly)) {
+        const QString err = m_exportFile->errorString();
+        m_exportFile->deleteLater();
+        m_exportFile = nullptr;
+        emit exportFinished(false, QStringLiteral("Cannot write file: ") + err, savePath);
+        return;
+    }
+
+    QNetworkRequest req{QUrl(url)};
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::NoLessSafeRedirectPolicy);
+
+    m_exportReply = m_exportNet->get(req);
+
+    connect(m_exportReply, &QNetworkReply::downloadProgress, this,
+            [this](qint64 rec, qint64 tot) {
+        emit exportProgress(rec, tot);
+    });
+
+    connect(m_exportReply, &QNetworkReply::readyRead, this, [this]() {
+        if (m_exportFile && m_exportReply)
+            m_exportFile->write(m_exportReply->readAll());
+    });
+
+    connect(m_exportReply, &QNetworkReply::finished, this, [this, savePath]() {
+        QNetworkReply* reply = m_exportReply;
+        m_exportReply = nullptr;
+
+        if (m_exportFile) {
+            if (reply)
+                m_exportFile->write(reply->readAll());
+            m_exportFile->close();
+        }
+
+        bool ok = false;
+        QString msg;
+        if (!reply) {
+            msg = QStringLiteral("Export cancelled");
+        } else if (reply->error() != QNetworkReply::NoError) {
+            msg = reply->errorString();
+            if (m_exportFile)
+                QFile::remove(savePath);
+        } else {
+            const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (code >= 400) {
+                msg = QStringLiteral("Server returned %1").arg(code);
+                if (m_exportFile)
+                    QFile::remove(savePath);
+            } else {
+                ok = true;
+                msg = QStringLiteral("Saved %1").arg(savePath);
+            }
+        }
+
+        if (m_exportFile) {
+            m_exportFile->deleteLater();
+            m_exportFile = nullptr;
+        }
+        if (reply)
+            reply->deleteLater();
+
+        emit exportFinished(ok, msg, ok ? savePath : QString());
+    });
 }

@@ -11,6 +11,9 @@ class FrigateStreamManager;
 class FrigateTimeline;
 class FrigatePlayback;
 class FrigateOnvif;
+class QNetworkAccessManager;
+class QNetworkReply;
+class QFile;
 
 class FrigateAPI : public QObject
 {
@@ -88,6 +91,10 @@ public:
     Q_INVOKABLE void loadGo2rtcConfig();
     Q_INVOKABLE void saveGo2rtcConfig(const QString& content, bool restart = true);
 
+    // Download clip range to local PC
+    Q_INVOKABLE void exportClip(const QString& cameraId, qint64 startSec, qint64 endSec, const QString& savePath);
+    Q_INVOKABLE void cancelExport();
+
 signals:
     void serverChanged();
     void moduleServerChanged();
@@ -122,7 +129,7 @@ signals:
     void playbackPositionChanged(const QString& cameraId, qint64 positionMs);
     void playbackStarted(const QString& cameraId);
     void playbackStopped(const QString& cameraId);
-    void playbackError(const QString& cameraId, const QString& message);   // ← Added
+    void playbackError(const QString& cameraId, const QString& message);
 
     void moduleInformationReceived(QString name,
                                    QString version,
@@ -137,6 +144,9 @@ signals:
     void go2rtcConfigLoaded(bool ok, QString content, QString path, QString message);
     void go2rtcConfigSaved(bool ok, QString message);
 
+    void exportProgress(qint64 received, qint64 total);
+    void exportFinished(bool ok, QString message, QString path);
+
 private:
     QString m_server;
     QString m_moduleServer;
@@ -147,6 +157,10 @@ private:
     FrigateTimeline* m_timeline;
     FrigatePlayback* m_playback;
     FrigateOnvif* m_onvif;
+
+    QNetworkAccessManager* m_exportNet = nullptr;
+    QNetworkReply* m_exportReply = nullptr;
+    QFile* m_exportFile = nullptr;
 };
 
 #endif
