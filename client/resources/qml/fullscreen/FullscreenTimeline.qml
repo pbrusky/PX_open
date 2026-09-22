@@ -27,10 +27,15 @@ Rectangle {
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
 
-    // Export range (ms). Ctrl+drag on track sets these.
+    // Export range (ms). Drag on track sets these.
     property real exportStartMs: -1
     property real exportEndMs: -1
     property bool exportBusy: false
+
+    // Blocks FullscreenCamera auto-hide while exporting / range selected
+    readonly property bool exportUiOpen: (exportConfirm && exportConfirm.visible)
+                                         || exportBusy
+                                         || (exportEndMs > exportStartMs)
 
     function showTimeline() {
         if (!allowAutoReveal)
@@ -39,10 +44,15 @@ Rectangle {
     }
 
     function hideTimeline() {
+        // Never auto-collapse while export UI is active
+        if (exportUiOpen)
+            return
         collapsed = true
         hoverTsMs = -1
         pointerInside = false
         calendarPopup.visible = false
+        if (exportConfirm.visible)
+            exportConfirm.close()
     }
 
     height: collapsed ? 4 : 150
@@ -104,11 +114,24 @@ Rectangle {
              + ".mp4"
     }
 
+    // Export button → confirm popup (editable times) → Save As
     function requestExport() {
         if (!(exportEndMs > exportStartMs) || !frigateRef)
             return
         if (typeof frigateRef.exportClip !== "function")
             return
+        allowAutoReveal = true
+        collapsed = false
+        hoverActiveChanged(true)
+        var cam = cameraName !== "" ? cameraName : cameraId
+        exportConfirm.openWith(cam, exportStartMs, exportEndMs)
+    }
+
+    function startExportDownload(sMs, eMs) {
+        exportStartMs = sMs
+        exportEndMs = eMs
+        allowAutoReveal = true
+        collapsed = false
         exportFileDialog.selectedFile = "file:///" + defaultExportFileName()
         exportFileDialog.open()
     }
@@ -144,7 +167,7 @@ Rectangle {
         enabled: !collapsed
         onHoveredChanged: {
             pointerInside = hovered
-            hoverActiveChanged(hovered)
+            hoverActiveChanged(hovered || timeline.exportUiOpen)
             if (!hovered)
                 hoverTsMs = -1
         }
@@ -199,6 +222,7 @@ Rectangle {
             exportBusy = false
             if (ok)
                 clearExportRange()
+            hoverActiveChanged(pointerInside || exportUiOpen)
         }
     }
 
@@ -471,6 +495,10 @@ Rectangle {
 
     Component.onCompleted: updatePlayhead()
 
+    onExportStartMsChanged: hoverActiveChanged(pointerInside || exportUiOpen)
+    onExportEndMsChanged: hoverActiveChanged(pointerInside || exportUiOpen)
+    onExportBusyChanged: hoverActiveChanged(pointerInside || exportUiOpen)
+
     TimelineStatusBar {
         id: statusBar
         anchors.left: parent.left
@@ -582,7 +610,7 @@ Rectangle {
         anchors.bottomMargin: 28
         z: 200
         timeline: timeline
-        onVisibleChanged: timeline.hoverActiveChanged(visible || timeline.pointerInside)
+        onVisibleChanged: timeline.hoverActiveChanged(visible || timeline.pointerInside || timeline.exportUiOpen)
         onDaySelected: function(y, m, d) {
             jumpToDay(y, m, d)
         }
@@ -597,12 +625,26 @@ Rectangle {
                 return ""
             return recordings.length + " rec, "
                  + visibleMotionCount() + "/" + motionPoints.length + " motion, "
-                 + events.length + " events — wheel=zoom, Shift+drag=pan, Ctrl+drag=export"
+                 + events.length + " events — wheel=zoom, Shift+drag=pan, drag=export range"
         }
         color: "#777777"
         font.pixelSize: 10
         visible: !collapsed
         z: 5
+    }
+
+    ExportConfirmPopup {
+        id: exportConfirm
+        onConfirmed: function(sMs, eMs) {
+            timeline.startExportDownload(sMs, eMs)
+        }
+        onVisibleChanged: {
+            if (visible) {
+                timeline.allowAutoReveal = true
+                timeline.collapsed = false
+            }
+            timeline.hoverActiveChanged(timeline.pointerInside || timeline.exportUiOpen)
+        }
     }
 
     FileDialog {
@@ -627,6 +669,9 @@ Rectangle {
 
             exportBusy = true
             frigateRef.exportClip(id, startSec, endSec, path)
+        }
+        onRejected: {
+            hoverActiveChanged(pointerInside || exportUiOpen)
         }
     }
 }

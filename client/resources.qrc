@@ -17,6 +17,7 @@
         <file>resources/qml/fullscreen/TimelineStatusBar.qml</file>
         <file>resources/qml/fullscreen/TimelineTrack.qml</file>
         <file>resources/qml/fullscreen/TimelineCalendarPopup.qml</file>
+        <file>resources/qml/fullscreen/ExportConfirmPopup.qml</file>
 
         <!-- Settings / Pages -->
         <file>resources/qml/aboutSettings.qml</file>

@@ -58,6 +58,21 @@ Item {
             forcePlaybackTimer.restart()
     }
 
+    function timelineExportUiOpen() {
+        if (!timelineLoader.item)
+            return false
+        if (timelineLoader.item.exportUiOpen)
+            return true
+        // Fallback if property not yet on older timeline builds
+        if (timelineLoader.item.exportBusy)
+            return true
+        if (timelineLoader.item.exportConfirm && timelineLoader.item.exportConfirm.visible)
+            return true
+        if (timelineLoader.item.exportEndMs > timelineLoader.item.exportStartMs)
+            return true
+        return false
+    }
+
     Rectangle {
         anchors.fill: parent
         color: "black"
@@ -237,6 +252,9 @@ Item {
                 return
             if (timelineLoader.item.calendarOpen)
                 return
+            // Do not auto-hide during export confirm / range / download
+            if (root.timelineExportUiOpen())
+                return
             if (typeof timelineLoader.item.hideTimeline === "function")
                 timelineLoader.item.hideTimeline()
             else
@@ -343,6 +361,8 @@ Item {
             timelineHideTimer.stop()
         }
         onExited: {
+            if (root.timelineExportUiOpen())
+                return
             if (!root.timelinePointerInside)
                 timelineHideTimer.restart()
         }
@@ -354,9 +374,12 @@ Item {
 
     function onTimelineHoverActive(active) {
         root.timelinePointerInside = active
-        if (active || (timelineLoader.item && timelineLoader.item.calendarOpen)) {
+        var keep = active
+                || (timelineLoader.item && timelineLoader.item.calendarOpen)
+                || root.timelineExportUiOpen()
+        if (keep) {
             timelineHideTimer.stop()
-            if (active)
+            if (active || root.timelineExportUiOpen())
                 showTimelineBar()
         } else {
             timelineHideTimer.restart()
@@ -572,7 +595,6 @@ Item {
         liveLayers.frigateRef = root.frigateRef
 
         // ── Event / seek path: live underlay + LOADING CLIP + start playback ──
-        // Do NOT call switchToLive (that cancels startPlayback).
         if (pending > 0 && id !== "") {
             root.isPlayback = true
             root.playbackReady = false
@@ -679,6 +701,10 @@ Item {
             timelineLoader.item.allowAutoReveal = false
             timelineLoader.item.collapsed = true
             timelineLoader.item.isPlayback = false
+            if (typeof timelineLoader.item.clearExportRange === "function")
+                timelineLoader.item.clearExportRange()
+            if (timelineLoader.item.exportConfirm && timelineLoader.item.exportConfirm.visible)
+                timelineLoader.item.exportConfirm.close()
         }
     }
 }
