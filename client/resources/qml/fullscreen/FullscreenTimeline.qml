@@ -31,11 +31,15 @@ Rectangle {
     property real exportStartMs: -1
     property real exportEndMs: -1
     property bool exportBusy: false
-    property real exportPercent: 0   // -1 = unknown size, 0..100 known
+    property real exportPercent: 0
     property string exportStatusMessage: ""
     property real _lastProgressUiAt: 0
+    property real exportBytesReceived: 0
+    property real exportBytesPerSec: 0
+    property real exportEtaSec: -1
+    property real _progressSampleBytes: 0
+    property real _progressSampleAt: 0
 
-    // Blocks FullscreenCamera auto-hide while exporting / range selected
     readonly property bool exportUiOpen: (exportConfirm && exportConfirm.visible)
                                          || exportBusy
                                          || (exportEndMs > exportStartMs)
@@ -166,10 +170,32 @@ Rectangle {
 
     Timer {
         id: exportDoneClearTimer
-        interval: 2500
+        interval: 1800
         onTriggered: {
             exportPercent = 0
             exportStatusMessage = ""
+            exportBytesReceived = 0
+            exportBytesPerSec = 0
+            exportEtaSec = -1
+            exportBusy = false
+        }
+    }
+
+    // If stuck at 99% with no new bytes, treat download as finished
+    Timer {
+        id: exportStallTimer
+        interval: 2500
+        repeat: false
+        onTriggered: {
+            if (!exportBusy)
+                return
+            exportBusy = false
+            exportPercent = 100
+            exportBytesPerSec = 0
+            exportEtaSec = -1
+            exportStatusMessage = "Saved"
+            clearExportRange()
+            exportDoneClearTimer.restart()
         }
     }
 
@@ -233,28 +259,79 @@ Rectangle {
             if (!exportBusy)
                 exportBusy = true
 
-            // Throttle UI updates (~4/sec)
             var now = Date.now()
-            if (timeline._lastProgressUiAt && (now - timeline._lastProgressUiAt) < 250)
+            if (timeline._lastProgressUiAt && (now - timeline._lastProgressUiAt) < 200)
                 return
             timeline._lastProgressUiAt = now
 
-            if (total > 0) {
-                exportPercent = Math.min(100, (received * 100.0) / total)
-                exportStatusMessage = ""
+            var grew = received > exportBytesReceived
+            exportBytesReceived = received
+
+            if (timeline._progressSampleAt > 0) {
+                var dt = (now - timeline._progressSampleAt) / 1000.0
+                if (dt > 0.2) {
+                    var db = received - timeline._progressSampleBytes
+                    if (db >= 0)
+                        exportBytesPerSec = db / dt
+                    timeline._progressSampleBytes = received
+                    timeline._progressSampleAt = now
+                }
             } else {
-                exportPercent = -1
-                var mb = received / (1024 * 1024)
-                exportStatusMessage = mb < 0.1
-                    ? (Math.round(received / 1024) + " KB")
-                    : (mb.toFixed(1) + " MB")
+                timeline._progressSampleBytes = received
+                timeline._progressSampleAt = now
             }
+
+            var mb = received / (1024 * 1024)
+            var sizeStr = mb < 0.1
+                ? (Math.round(received / 1024) + " KB")
+                : (mb.toFixed(1) + " MB")
+
+            if (total > 0) {
+                exportPercent = Math.min(99.5, (received * 100.0) / total)
+                if (exportBytesPerSec > 1024)
+                    exportEtaSec = Math.max(0, total - received) / exportBytesPerSec
+                else
+                    exportEtaSec = -1
+                exportStatusMessage = sizeStr
+            } else {
+                // Fixed duration estimate only — never estTotal = received/0.9
+                var durSec = 1
+                if (exportEndMs > exportStartMs)
+                    durSec = Math.max(1, (exportEndMs - exportStartMs) / 1000.0)
+                var estTotal = durSec * 0.5 * 1024 * 1024
+
+                var pct = (received * 100.0) / estTotal
+                if (pct < 0)
+                    pct = 0
+                if (pct > 99)
+                    pct = 99
+                exportPercent = pct
+
+                if (exportBytesPerSec > 1024 && received < estTotal)
+                    exportEtaSec = Math.max(0, estTotal - received) / exportBytesPerSec
+                else
+                    exportEtaSec = -1
+
+                if (pct >= 99 || (pct >= 85 && exportBytesPerSec < 2048))
+                    exportStatusMessage = sizeStr + "  ·  finishing…"
+                else
+                    exportStatusMessage = sizeStr
+            }
+
+            // Bytes still growing → keep waiting; stuck at high % → arm auto-finish
+            if (grew)
+                exportStallTimer.restart()
+            else if (exportPercent >= 99)
+                exportStallTimer.restart()
         }
 
         function onExportFinished(ok, message, path) {
+            exportStallTimer.stop()
             exportBusy = false
             exportPercent = ok ? 100 : 0
-            exportStatusMessage = message || ""
+            exportBytesPerSec = 0
+            exportEtaSec = -1
+            exportStatusMessage = message || (ok ? "Saved" : "Failed")
             if (ok)
                 clearExportRange()
             exportDoneClearTimer.restart()
@@ -475,9 +552,7 @@ Rectangle {
             return Math.round(span) + "s"
         if (span < 3600)
             return Math.round(span / 60) + "m"
-        if (span < 86400)
-            return (span / 3600).toFixed(1) + "h"
-        return (span / 86400).toFixed(1) + "d"
+        return (span / 3600).toFixed(1) + "h"
     }
 
     function dayHasRecording(y, m, d) {
@@ -699,10 +774,17 @@ Rectangle {
             if (endSec <= startSec)
                 endSec = startSec + 1
 
+            exportStallTimer.stop()
+            exportDoneClearTimer.stop()
             exportBusy = true
             exportPercent = 0
             exportStatusMessage = ""
+            exportBytesReceived = 0
+            exportBytesPerSec = 0
+            exportEtaSec = -1
             _lastProgressUiAt = 0
+            _progressSampleAt = 0
+            _progressSampleBytes = 0
             frigateRef.exportClip(id, startSec, endSec, path)
         }
         onRejected: {

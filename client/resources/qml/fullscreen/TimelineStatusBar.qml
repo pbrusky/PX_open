@@ -8,7 +8,7 @@ Rectangle {
     property var timeline: null
     property bool calendarOpen: false
     property bool exportBusy: false
-    property real exportPercent: 0   // -1 unknown, 0..100 known
+    property real exportPercent: 0   // 0..100 during transfer; StatusBar only shown when exportBusy
 
     signal calendarToggled()
     signal zoomOut()
@@ -26,18 +26,19 @@ Rectangle {
         anchors.left: parent.left
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        width: Math.min(implicitWidth, parent.width * 0.40)
+        width: Math.min(implicitWidth, parent.width * 0.42)
         elide: Text.ElideRight
         text: {
             if (!timeline)
                 return ""
             if (root.exportBusy) {
-                if (root.exportPercent < 0) {
-                    var extra = (timeline.exportStatusMessage && timeline.exportStatusMessage.length)
-                                ? ("  " + timeline.exportStatusMessage) : ""
-                    return "Downloading…" + extra
-                }
-                return "Downloading…  " + Math.round(root.exportPercent) + "%"
+                var pct = Math.round(root.exportPercent)
+                var extra = (timeline.exportStatusMessage && timeline.exportStatusMessage.length)
+                            ? ("  ·  " + timeline.exportStatusMessage)
+                            : ""
+                if (pct >= 100)
+                    return "Saved" + extra
+                return "Downloading…  " + pct + "%" + extra
             }
             if (root.hasExportRange) {
                 return "Export  "
@@ -67,6 +68,7 @@ Rectangle {
 
     Rectangle {
         id: progressTrack
+        // Only while download is active — hides when FullscreenTimeline sets exportBusy = false
         visible: root.exportBusy
         anchors.left: leftLabel.right
         anchors.leftMargin: 12
@@ -80,33 +82,11 @@ Rectangle {
         border.width: 1
         clip: true
 
-        // Known size
         Rectangle {
-            visible: root.exportPercent >= 0
             width: parent.width * Math.max(0, Math.min(1, root.exportPercent / 100.0))
             height: parent.height
             radius: 4
-            color: "#6A8AFF"
-        }
-
-        // Unknown size — fixed fraction, animate with phase only (no width binding in Animation)
-        Rectangle {
-            id: pulse
-            visible: root.exportPercent < 0
-            height: parent.height
-            radius: 4
-            color: "#6A8AFF"
-            width: Math.max(24, parent.width * 0.25)
-            x: (parent.width - width) * pulsePhase
-
-            property real pulsePhase: 0
-
-            SequentialAnimation on pulsePhase {
-                running: pulse.visible && progressTrack.width > 0
-                loops: Animation.Infinite
-                NumberAnimation { from: 0; to: 1; duration: 1000; easing.type: Easing.InOutQuad }
-                NumberAnimation { from: 1; to: 0; duration: 1000; easing.type: Easing.InOutQuad }
-            }
+            color: root.exportPercent >= 100 ? "#00C853" : "#6A8AFF"
         }
     }
 
