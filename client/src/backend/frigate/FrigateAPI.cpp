@@ -414,23 +414,64 @@ bool FrigateAPI::isFullscreenTrueMain(const QString& cameraName) const
     return m_streamManager ? m_streamManager->isFullscreenTrueMain(cameraName) : false;
 }
 
-void FrigateAPI::cancelExport()
+void FrigateAPI::finishExport(bool ok, const QString& message, const QString& path, int gen)
 {
+    if (gen != m_exportGen)
+        return;
+    if (!m_exportActive)
+        return;
+    m_exportActive = false;
+
+    if (m_exportFile) {
+        m_exportFile->flush();
+        m_exportFile->close();
+        m_exportFile->deleteLater();
+        m_exportFile = nullptr;
+    }
+
     if (m_exportReply) {
-        m_exportReply->abort();
         m_exportReply->deleteLater();
         m_exportReply = nullptr;
     }
+
+    if (ok && m_exportBytes > 0)
+        emit exportProgress(m_exportBytes, m_exportBytes);
+
+    emit exportFinished(ok, message, ok ? path : QString());
+}
+
+void FrigateAPI::cancelExport()
+{
+    if (!m_exportActive && !m_exportReply && !m_exportFile)
+        return;
+
+    const int gen = m_exportGen;
+    const QString path = m_exportPath;
+
+    if (m_exportReply) {
+        QNetworkReply* r = m_exportReply;
+        m_exportReply = nullptr;
+        r->disconnect(this);
+        r->abort();
+        r->deleteLater();
+    }
+
     if (m_exportFile) {
         m_exportFile->close();
         m_exportFile->deleteLater();
         m_exportFile = nullptr;
     }
+
+    if (!path.isEmpty())
+        QFile::remove(path);
+
+    finishExport(false, QStringLiteral("Export cancelled"), QString(), gen);
 }
 
 void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 endSec, const QString& savePath)
 {
-    cancelExport();
+    if (m_exportActive)
+        cancelExport();
 
     if (m_server.isEmpty() || cameraId.trimmed().isEmpty() || savePath.isEmpty()) {
         emit exportFinished(false, QStringLiteral("Missing server, camera, or path"), QString());
@@ -441,73 +482,104 @@ void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 end
         return;
     }
 
-    const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
-                            .arg(m_server, cameraId)
-                            .arg(startSec)
-                            .arg(endSec);
+    ++m_exportGen;
+    const int gen = m_exportGen;
+    m_exportPath = savePath;
+    m_exportBytes = 0;
+    m_exportActive = true;
 
-    m_exportFile = new QFile(savePath, this);
-    if (!m_exportFile->open(QIODevice::WriteOnly)) {
+    m_exportFile = new QFile(savePath);
+    if (!m_exportFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         const QString err = m_exportFile->errorString();
         m_exportFile->deleteLater();
         m_exportFile = nullptr;
-        emit exportFinished(false, QStringLiteral("Cannot write file: ") + err, savePath);
+        finishExport(false, QStringLiteral("Cannot write file: ") + err, savePath, gen);
         return;
     }
+
+    QString base = m_server;
+    while (base.endsWith(QLatin1Char('/')))
+        base.chop(1);
+
+    const QString cam = QString::fromUtf8(QUrl::toPercentEncoding(cameraId));
+    const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
+                            .arg(base, cam)
+                            .arg(startSec)
+                            .arg(endSec);
 
     QNetworkRequest req{QUrl(url)};
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                      QNetworkRequest::NoLessSafeRedirectPolicy);
+    req.setRawHeader("Accept-Encoding", "identity");
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("PX-Open/1.0.8"));
 
     m_exportReply = m_exportNet->get(req);
 
     connect(m_exportReply, &QNetworkReply::downloadProgress, this,
-            [this](qint64 rec, qint64 tot) {
-        emit exportProgress(rec, tot);
+            [this, gen](qint64 rec, qint64 tot) {
+        if (gen != m_exportGen || !m_exportActive)
+            return;
+        const qint64 shown = m_exportBytes > 0 ? m_exportBytes : rec;
+        emit exportProgress(shown, tot);
     });
 
-    connect(m_exportReply, &QNetworkReply::readyRead, this, [this]() {
-        if (m_exportFile && m_exportReply)
-            m_exportFile->write(m_exportReply->readAll());
+    connect(m_exportReply, &QNetworkReply::readyRead, this, [this, gen]() {
+        if (gen != m_exportGen || !m_exportActive || !m_exportFile || !m_exportReply)
+            return;
+        const QByteArray chunk = m_exportReply->readAll();
+        if (chunk.isEmpty())
+            return;
+        const qint64 n = m_exportFile->write(chunk);
+        if (n > 0)
+            m_exportBytes += n;
+        emit exportProgress(m_exportBytes, -1);
     });
 
-    connect(m_exportReply, &QNetworkReply::finished, this, [this, savePath]() {
+    connect(m_exportReply, &QNetworkReply::finished, this, [this, gen, savePath]() {
+        if (gen != m_exportGen)
+            return;
+
         QNetworkReply* reply = m_exportReply;
         m_exportReply = nullptr;
 
-        if (m_exportFile) {
-            if (reply)
-                m_exportFile->write(reply->readAll());
-            m_exportFile->close();
+        if (reply && m_exportFile && m_exportActive) {
+            const QByteArray rest = reply->readAll();
+            if (!rest.isEmpty()) {
+                const qint64 n = m_exportFile->write(rest);
+                if (n > 0)
+                    m_exportBytes += n;
+            }
+            m_exportFile->flush();
         }
 
         bool ok = false;
         QString msg;
+
         if (!reply) {
             msg = QStringLiteral("Export cancelled");
+        } else if (reply->error() == QNetworkReply::OperationCanceledError) {
+            msg = QStringLiteral("Export cancelled");
+            QFile::remove(savePath);
         } else if (reply->error() != QNetworkReply::NoError) {
             msg = reply->errorString();
-            if (m_exportFile)
-                QFile::remove(savePath);
+            QFile::remove(savePath);
         } else {
             const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             if (code >= 400) {
                 msg = QStringLiteral("Server returned %1").arg(code);
-                if (m_exportFile)
-                    QFile::remove(savePath);
+                QFile::remove(savePath);
+            } else if (m_exportBytes <= 0) {
+                msg = QStringLiteral("Empty file (no recording in range?)");
+                QFile::remove(savePath);
             } else {
                 ok = true;
-                msg = QStringLiteral("Saved %1").arg(savePath);
+                msg = QStringLiteral("Saved");
             }
         }
 
-        if (m_exportFile) {
-            m_exportFile->deleteLater();
-            m_exportFile = nullptr;
-        }
         if (reply)
             reply->deleteLater();
 
-        emit exportFinished(ok, msg, ok ? savePath : QString());
+        finishExport(ok, msg, savePath, gen);
     });
 }

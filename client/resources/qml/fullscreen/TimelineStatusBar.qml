@@ -8,7 +8,8 @@ Rectangle {
     property var timeline: null
     property bool calendarOpen: false
     property bool exportBusy: false
-    property real exportPercent: 0   // 0..100 during transfer; StatusBar only shown when exportBusy
+    // -1 = unknown size (indeterminate); 0..100 when known / done
+    property real exportPercent: 0
 
     signal calendarToggled()
     signal zoomOut()
@@ -26,19 +27,20 @@ Rectangle {
         anchors.left: parent.left
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        width: Math.min(implicitWidth, parent.width * 0.42)
+        width: Math.min(implicitWidth, parent.width * 0.48)
         elide: Text.ElideRight
         text: {
             if (!timeline)
                 return ""
             if (root.exportBusy) {
-                var pct = Math.round(root.exportPercent)
                 var extra = (timeline.exportStatusMessage && timeline.exportStatusMessage.length)
-                            ? ("  ·  " + timeline.exportStatusMessage)
+                            ? ("  " + timeline.exportStatusMessage)
                             : ""
-                if (pct >= 100)
+                if (root.exportPercent >= 100)
                     return "Saved" + extra
-                return "Downloading…  " + pct + "%" + extra
+                if (root.exportPercent < 0)
+                    return "Downloading…" + extra
+                return "Downloading…  " + Math.round(root.exportPercent) + "%" + extra
             }
             if (root.hasExportRange) {
                 return "Export  "
@@ -68,7 +70,6 @@ Rectangle {
 
     Rectangle {
         id: progressTrack
-        // Only while download is active — hides when FullscreenTimeline sets exportBusy = false
         visible: root.exportBusy
         anchors.left: leftLabel.right
         anchors.leftMargin: 12
@@ -82,11 +83,34 @@ Rectangle {
         border.width: 1
         clip: true
 
+        // Known size: solid fill by percent
         Rectangle {
+            visible: root.exportPercent >= 0
             width: parent.width * Math.max(0, Math.min(1, root.exportPercent / 100.0))
             height: parent.height
             radius: 4
             color: root.exportPercent >= 100 ? "#00C853" : "#6A8AFF"
+        }
+
+        // Unknown size: sliding chunk
+        Rectangle {
+            id: indeterminateChunk
+            visible: root.exportPercent < 0
+            width: Math.max(24, parent.width * 0.28)
+            height: parent.height
+            radius: 4
+            color: "#6A8AFF"
+
+            SequentialAnimation on x {
+                running: indeterminateChunk.visible && root.exportBusy
+                loops: Animation.Infinite
+                NumberAnimation {
+                    from: -indeterminateChunk.width
+                    to: progressTrack.width
+                    duration: 1200
+                    easing.type: Easing.InOutQuad
+                }
+            }
         }
     }
 

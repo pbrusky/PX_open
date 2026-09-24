@@ -148,6 +148,8 @@ signals:
     void exportFinished(bool ok, QString message, QString path);
 
 private:
+    void finishExport(bool ok, const QString& message, const QString& path, int gen);
+
     QString m_server;
     QString m_moduleServer;
     QString m_serverIp;
@@ -161,6 +163,10 @@ private:
     QNetworkAccessManager* m_exportNet = nullptr;
     QNetworkReply* m_exportReply = nullptr;
     QFile* m_exportFile = nullptr;
+    QString m_exportPath;
+    qint64 m_exportBytes = 0;
+    int m_exportGen = 0;
+    bool m_exportActive = false;
 };
 
 #endif

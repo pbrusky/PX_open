@@ -27,10 +27,10 @@ Rectangle {
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
 
-    // Export range (ms). Drag on track sets these.
     property real exportStartMs: -1
     property real exportEndMs: -1
     property bool exportBusy: false
+    // -1 = unknown size (indeterminate); 0..100 when total known / finished
     property real exportPercent: 0
     property string exportStatusMessage: ""
     property real _lastProgressUiAt: 0
@@ -181,21 +181,22 @@ Rectangle {
         }
     }
 
-    // If stuck at 99% with no new bytes, treat download as finished
     Timer {
         id: exportStallTimer
-        interval: 2500
+        interval: 4000
         repeat: false
         onTriggered: {
             if (!exportBusy)
                 return
-            exportBusy = false
-            exportPercent = 100
-            exportBytesPerSec = 0
-            exportEtaSec = -1
-            exportStatusMessage = "Saved"
-            clearExportRange()
-            exportDoneClearTimer.restart()
+            if (exportBytesReceived > 0) {
+                exportBusy = false
+                exportPercent = 100
+                exportBytesPerSec = 0
+                exportEtaSec = -1
+                exportStatusMessage = "Saved"
+                clearExportRange()
+                exportDoneClearTimer.restart()
+            }
         }
     }
 
@@ -260,16 +261,12 @@ Rectangle {
                 exportBusy = true
 
             var now = Date.now()
-            if (timeline._lastProgressUiAt && (now - timeline._lastProgressUiAt) < 200)
-                return
-            timeline._lastProgressUiAt = now
-
             var grew = received > exportBytesReceived
             exportBytesReceived = received
 
             if (timeline._progressSampleAt > 0) {
                 var dt = (now - timeline._progressSampleAt) / 1000.0
-                if (dt > 0.2) {
+                if (dt > 0.25) {
                     var db = received - timeline._progressSampleBytes
                     if (db >= 0)
                         exportBytesPerSec = db / dt
@@ -281,10 +278,21 @@ Rectangle {
                 timeline._progressSampleAt = now
             }
 
+            if (grew)
+                exportStallTimer.restart()
+
+            if (timeline._lastProgressUiAt && (now - timeline._lastProgressUiAt) < 250)
+                return
+            timeline._lastProgressUiAt = now
+
             var mb = received / (1024 * 1024)
             var sizeStr = mb < 0.1
                 ? (Math.round(received / 1024) + " KB")
                 : (mb.toFixed(1) + " MB")
+
+            var rateStr = ""
+            if (exportBytesPerSec > 1024)
+                rateStr = "  ·  " + (exportBytesPerSec / (1024 * 1024)).toFixed(1) + " MB/s"
 
             if (total > 0) {
                 exportPercent = Math.min(99.5, (received * 100.0) / total)
@@ -292,37 +300,13 @@ Rectangle {
                     exportEtaSec = Math.max(0, total - received) / exportBytesPerSec
                 else
                     exportEtaSec = -1
-                exportStatusMessage = sizeStr
+                exportStatusMessage = sizeStr + rateStr
             } else {
-                // Fixed duration estimate only — never estTotal = received/0.9
-                var durSec = 1
-                if (exportEndMs > exportStartMs)
-                    durSec = Math.max(1, (exportEndMs - exportStartMs) / 1000.0)
-                var estTotal = durSec * 0.5 * 1024 * 1024
-
-                var pct = (received * 100.0) / estTotal
-                if (pct < 0)
-                    pct = 0
-                if (pct > 99)
-                    pct = 99
-                exportPercent = pct
-
-                if (exportBytesPerSec > 1024 && received < estTotal)
-                    exportEtaSec = Math.max(0, estTotal - received) / exportBytesPerSec
-                else
-                    exportEtaSec = -1
-
-                if (pct >= 99 || (pct >= 85 && exportBytesPerSec < 2048))
-                    exportStatusMessage = sizeStr + "  ·  finishing…"
-                else
-                    exportStatusMessage = sizeStr
+                // No Content-Length — no invented %
+                exportPercent = -1
+                exportEtaSec = -1
+                exportStatusMessage = sizeStr + rateStr
             }
-
-            // Bytes still growing → keep waiting; stuck at high % → arm auto-finish
-            if (grew)
-                exportStallTimer.restart()
-            else if (exportPercent >= 99)
-                exportStallTimer.restart()
         }
 
         function onExportFinished(ok, message, path) {
@@ -777,7 +761,7 @@ Rectangle {
             exportStallTimer.stop()
             exportDoneClearTimer.stop()
             exportBusy = true
-            exportPercent = 0
+            exportPercent = -1
             exportStatusMessage = ""
             exportBytesReceived = 0
             exportBytesPerSec = 0
