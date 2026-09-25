@@ -70,7 +70,7 @@ QObject* FrigatePlayback::getPlaybackQueue(const QString& cameraId)
         return m_playbackQueues.value(cameraId);
 
     FrameQueue* queue = new FrameQueue(this);
-    queue->setMaxSize(2);
+    queue->setMaxSize(4);
     m_playbackQueues.insert(cameraId, queue);
     return queue;
 }
@@ -163,7 +163,7 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
         QMutexLocker lock(&m_mutex);
         if (!m_playbackQueues.contains(cameraId)) {
             FrameQueue* q = new FrameQueue(this);
-            q->setMaxSize(2);
+            q->setMaxSize(4);
             m_playbackQueues.insert(cameraId, q);
         }
         queue = m_playbackQueues.value(cameraId);
@@ -178,7 +178,8 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
-    worker->setHighQuality(false);
+    // Match fullscreen live: full resolution decode (up to 4K), not 720p cap
+    worker->setHighQuality(true);
 
     QThread* thread = new QThread();
 
@@ -359,7 +360,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         return;
     }
 
-    // Light debounce — avoid restarting FFmpeg on double open() + timer
     const qint64 wall = QDateTime::currentMSecsSinceEpoch();
     if (m_lastSeekMs.contains(cameraId) && (wall - m_lastSeekMs.value(cameraId) < 400))
         return;
@@ -368,7 +368,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     const int gen = m_seekGen.value(cameraId, 0) + 1;
     m_seekGen[cameraId] = gen;
 
-    // Normalize to unix seconds
     qint64 seekSec = timestampMs;
     if (timestampMs > 100000000000LL)
         seekSec = timestampMs / 1000;
@@ -377,11 +376,8 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
 
-    // Viewing window: a few seconds before the event, then continue for several minutes.
-    // Primary path streams HTTP progressively (does not wait for full file).
-    // Playback ends when this range ends — longer continuous play needs auto-extend later.
     constexpr qint64 kBeforeSec = 5;
-    constexpr qint64 kAfterSec  = 180;   // 3 minutes after seek (use 600 for ~10 min)
+    constexpr qint64 kAfterSec  = 180;
     constexpr qint64 kMinLenSec = 30;
 
     qint64 startSec = seekSec - kBeforeSec;
@@ -392,7 +388,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     if (endSec <= startSec)
         endSec = startSec + kMinLenSec;
 
-    // Avoid empty "live edge" clips
     if (endSec > nowSec - 2)
         endSec = nowSec - 2;
     if (startSec >= endSec) {
@@ -414,7 +409,7 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         QMutexLocker lock(&m_mutex);
         if (!m_playbackQueues.contains(cameraId)) {
             FrameQueue* q = new FrameQueue(this);
-            q->setMaxSize(2);
+            q->setMaxSize(4);
             m_playbackQueues.insert(cameraId, q);
         }
         if (FrameQueue* queue = m_playbackQueues.value(cameraId))

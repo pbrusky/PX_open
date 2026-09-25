@@ -91,9 +91,16 @@ bool FFmpegWorker::openCodec(AVCodecContext** codecCtx,
         return false;
     }
 
-    (*codecCtx)->flags  |= AV_CODEC_FLAG_LOW_DELAY;
-    (*codecCtx)->flags2 |= AV_CODEC_FLAG2_FAST;
-    (*codecCtx)->thread_count = 2;
+    if (m_highQuality) {
+        // Prefer quality over lowest latency for fullscreen / playback
+        (*codecCtx)->thread_count = 4;
+        // Keep mild low-delay for responsiveness, skip FLAG2_FAST
+        (*codecCtx)->flags |= AV_CODEC_FLAG_LOW_DELAY;
+    } else {
+        (*codecCtx)->flags  |= AV_CODEC_FLAG_LOW_DELAY;
+        (*codecCtx)->flags2 |= AV_CODEC_FLAG2_FAST;
+        (*codecCtx)->thread_count = 2;
+    }
 
     if (avcodec_open2(*codecCtx, codec, nullptr) < 0) {
         avcodec_free_context(codecCtx);
@@ -174,7 +181,6 @@ void FFmpegWorker::decodeLoop()
 
     AVDictionary* opts = nullptr;
     if (isHttp) {
-        // Long timeouts: Frigate may take a while to mux clip.mp4
         av_dict_set(&opts, "rw_timeout", "60000000", 0);
         av_dict_set(&opts, "timeout", "60000000", 0);
         av_dict_set(&opts, "reconnect", "1", 0);
@@ -214,8 +220,6 @@ void FFmpegWorker::decodeLoop()
         emit finished();
         return;
     }
-
-    // Do NOT emit openInputOk here — connection open is not "ready to play"
 
     if (avformat_find_stream_info(fmtCtx, nullptr) < 0 || m_abort.load()) {
         avformat_close_input(&fmtCtx);
@@ -258,7 +262,6 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
-    // Ready only after codec is open
     emit openInputOk();
     emit streamStarted();
 
@@ -275,6 +278,7 @@ void FFmpegWorker::decodeLoop()
 
     const int kMaxOutW = m_highQuality ? 3840 : 1280;
     const int kMaxOutH = m_highQuality ? 2160 : 720;
+    const int swsFlags = m_highQuality ? SWS_BILINEAR : SWS_FAST_BILINEAR;
 
     qint64 lastDataMs = QDateTime::currentMSecsSinceEpoch();
     qint64 lastFileSize = isLocalFile ? QFileInfo(m_url).size() : 0;
@@ -363,7 +367,7 @@ void FFmpegWorker::decodeLoop()
                     static_cast<AVPixelFormat>(frame->format),
                     dstW, dstH,
                     AV_PIX_FMT_BGRA,
-                    SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
+                    swsFlags, nullptr, nullptr, nullptr);
 
                 lastSrcW = frame->width;
                 lastSrcH = frame->height;
