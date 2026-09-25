@@ -17,6 +17,7 @@ Rectangle {
     signal resetZoom()
     signal exportRequested()
     signal clearExportRange()
+    signal cancelExportRequested()
 
     readonly property bool hasExportRange: timeline
         && timeline.exportStartMs > 0
@@ -27,7 +28,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        width: Math.min(implicitWidth, parent.width * 0.48)
+        width: Math.min(implicitWidth, parent.width * 0.42)
         elide: Text.ElideRight
         text: {
             if (!timeline)
@@ -83,7 +84,6 @@ Rectangle {
         border.width: 1
         clip: true
 
-        // Known size: solid fill by percent
         Rectangle {
             visible: root.exportPercent >= 0
             width: parent.width * Math.max(0, Math.min(1, root.exportPercent / 100.0))
@@ -92,7 +92,6 @@ Rectangle {
             color: root.exportPercent >= 100 ? "#00C853" : "#6A8AFF"
         }
 
-        // Unknown size: sliding chunk
         Rectangle {
             id: indeterminateChunk
             visible: root.exportPercent < 0
@@ -120,6 +119,29 @@ Rectangle {
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
+
+        // Cancel active download
+        Rectangle {
+            width: 64
+            height: 22
+            radius: 3
+            visible: root.exportBusy && root.exportPercent < 100
+            color: "#5A2020"
+            border.color: "#E57373"
+            border.width: 1
+            Text {
+                anchors.centerIn: parent
+                text: "Cancel"
+                color: "white"
+                font.pixelSize: 12
+                font.bold: true
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.cancelExportRequested()
+            }
+        }
 
         Rectangle {
             width: 64

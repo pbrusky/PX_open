@@ -108,6 +108,15 @@ Rectangle {
         exportEndMs = -1
     }
 
+    function cancelExport() {
+        if (!exportBusy)
+            return
+        exportStallTimer.stop()
+        if (frigateRef && typeof frigateRef.cancelExport === "function")
+            frigateRef.cancelExport()
+        // Status/UI finish via onExportFinished("Export cancelled")
+    }
+
     function defaultExportFileName() {
         var cam = (cameraName || cameraId || "camera").toString().replace(/[^\w\-]+/g, "_")
         var a = new Date(exportStartMs)
@@ -316,7 +325,9 @@ Rectangle {
             exportBytesPerSec = 0
             exportEtaSec = -1
             exportStatusMessage = message || (ok ? "Saved" : "Failed")
-            if (ok)
+            // Clear range on success or cancel
+            var msg = (message || "").toLowerCase()
+            if (ok || msg.indexOf("cancel") >= 0)
                 clearExportRange()
             exportDoneClearTimer.restart()
         }
@@ -616,6 +627,7 @@ Rectangle {
         onResetZoom: resetZoom()
         onExportRequested: timeline.requestExport()
         onClearExportRange: timeline.clearExportRange()
+        onCancelExportRequested: timeline.cancelExport()
     }
 
     TimelineRuler {
