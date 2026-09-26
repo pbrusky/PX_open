@@ -27,6 +27,13 @@ Item {
 
     readonly property bool kioskMode: appSettings.restoreLastFullscreen
 
+    function serverViewItem() {
+        if (contentLoader && contentLoader.item
+                && contentLoader.item.objectName === "ServerView")
+            return contentLoader.item
+        return null
+    }
+
     function collapseChrome() {
         if (topbar)
             topbar.collapsed = true
@@ -34,6 +41,9 @@ Item {
             sidebar.collapsed = true
         if (eventsPanel)
             eventsPanel.collapsed = true
+        var sv = serverViewItem()
+        if (sv)
+            sv.timelineCollapsed = true
     }
 
     function expandChrome() {
@@ -41,8 +51,10 @@ Item {
             topbar.collapsed = false
         if (sidebar)
             sidebar.collapsed = false
-       // if (eventsPanel)
-       //     eventsPanel.collapsed = false
+        // Events stay user-controlled; grid timeline expands when not kiosk
+        var sv = serverViewItem()
+        if (sv && !kioskMode)
+            sv.timelineCollapsed = false
     }
 
     function rememberFullscreenCamera(cameraName) {
@@ -161,7 +173,6 @@ Item {
             mainWindow.enterTrueFullscreen()
             if (topbar)
                 topbar.isMaximized = true
-            // Collapse panels only in kiosk mode
             if (kioskMode)
                 collapseChrome()
             else
@@ -249,6 +260,12 @@ Item {
 
         item.frigateRef = frigateRef
         item.mainWindow = mainWindow
+
+        // Kiosk: start with grid timeline collapsed
+        if (kioskMode)
+            item.timelineCollapsed = true
+        else
+            item.timelineCollapsed = false
 
         item.camerasLoadedToMain.connect(function(list) {
             mainWindow.cameraList = list

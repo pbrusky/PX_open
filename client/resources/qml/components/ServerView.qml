@@ -13,8 +13,23 @@ Item {
     property var frigateRef
     property var cameraGrid
 
-    // [{ name: "…", cameras: ["id1", "id2"] }, ...]
     property var savedLayouts: []
+
+    // true = hidden (same idea as sidebar/topbar/events)
+    property bool timelineCollapsed: false
+
+    property string timelineCameraId: {
+        if (mainWindow && mainWindow.selectedCameraId && mainWindow.selectedCameraId.length)
+            return mainWindow.selectedCameraId
+        return ""
+    }
+    readonly property bool hideGridTimeline: mainWindow && mainWindow.cameraFullscreenActive
+    readonly property real timelineExpandedHeight: 150
+    readonly property real timelineBarHeight: {
+        if (hideGridTimeline || timelineCollapsed)
+            return 0
+        return timelineExpandedHeight
+    }
 
     signal camerasLoadedToMain(var list)
     signal gridReady()
@@ -33,7 +48,6 @@ Item {
         return "layouts_default"
     }
 
-    // Migrate old single-layout key once
     function migrateLegacyLayout() {
         var oldKey = layoutStorageKey().replace("layouts_", "layout_")
         var oldRaw = layoutSettings.value(oldKey, "")
@@ -94,7 +108,6 @@ Item {
         return names
     }
 
-    // Save current grid under a name (overwrite if same name)
     function saveLayoutAs(layoutName) {
         if (!layoutName || !("" + layoutName).length)
             return false
@@ -119,7 +132,6 @@ Item {
         return true
     }
 
-    // Back-compat: old "Save Layout" without a name
     function saveLayout() {
         return saveLayoutAs("Default")
     }
@@ -137,7 +149,6 @@ Item {
         return false
     }
 
-    // Back-compat: load Default or first
     function loadLayout() {
         if (loadLayoutByName("Default"))
             return true
@@ -163,7 +174,6 @@ Item {
     function openAddCameraPopup() {
         if (!mainWindow || !mainWindow.popupManager)
             return
-
         mainWindow.popupManager.openPopup(
             "qrc:/app/resources/qml/components/popups/AddCameraPopup.qml",
             {
@@ -176,9 +186,7 @@ Item {
     function openRemoveCameraPopup(cameraId) {
         if (!mainWindow || !mainWindow.popupManager)
             return
-
         mainWindow.pendingRemoveCameraId = cameraId
-
         mainWindow.popupManager.openPopup(
             "qrc:/app/resources/qml/components/popups/RemoveCameraPopup.qml",
             {
@@ -193,7 +201,6 @@ Item {
     function openEditCameraPopup(cameraId, rtspUrl, username, password) {
         if (!mainWindow || !mainWindow.popupManager)
             return
-
         mainWindow.popupManager.openPopup(
             "qrc:/app/resources/qml/components/popups/EditCameraPopup.qml",
             {
@@ -207,48 +214,177 @@ Item {
         )
     }
 
-    Loader {
-        id: gridLoader
+    function loadGridTimelineData() {
+        if (!frigateRef || !timelineCameraId.length)
+            return
+        if (typeof frigateRef.loadRecordings === "function")
+            frigateRef.loadRecordings(timelineCameraId)
+        if (typeof frigateRef.loadEvents === "function")
+            frigateRef.loadEvents(timelineCameraId)
+        if (typeof frigateRef.loadMotionActivity === "function")
+            frigateRef.loadMotionActivity(timelineCameraId)
+        if (typeof frigateRef.loadRecordingDays === "function")
+            frigateRef.loadRecordingDays(timelineCameraId)
+    }
+
+    function applyGridTimelineCamera() {
+        var tl = gridTimelineLoader.item
+        if (!tl)
+            return
+        // Avoid assigning undefined into QObject* properties
+        if (root.frigateRef)
+            tl.frigateRef = root.frigateRef
+        tl.cameraId = root.timelineCameraId
+        tl.cameraName = root.timelineCameraId
+        if (root.timelineCameraId.length && !root.timelineCollapsed && !root.hideGridTimeline) {
+            tl.allowAutoReveal = true
+            tl.collapsed = false
+            Qt.callLater(loadGridTimelineData)
+        } else {
+            tl.allowAutoReveal = false
+            tl.collapsed = true
+        }
+    }
+
+    function onGridTimelineSeek(tsMs) {
+        if (!cameraGrid || !timelineCameraId.length)
+            return
+        if (typeof cameraGrid.enterFullscreenAndSeek === "function")
+            cameraGrid.enterFullscreenAndSeek(timelineCameraId, tsMs)
+        else if (typeof cameraGrid.enterFullscreen === "function")
+            cameraGrid.enterFullscreen(timelineCameraId)
+    }
+
+    onTimelineCameraIdChanged: {
+        if (!timelineCollapsed && !hideGridTimeline)
+            Qt.callLater(applyGridTimelineCamera)
+    }
+
+    onTimelineCollapsedChanged: {
+        if (!timelineCollapsed && !hideGridTimeline)
+            Qt.callLater(applyGridTimelineCamera)
+    }
+
+    Column {
         anchors.fill: parent
-        active: false
-        z: 1
+        spacing: 0
 
-        onLoaded: {
-            if (!item)
-                return
+        Loader {
+            id: gridLoader
+            width: parent.width
+            height: parent.height - root.timelineBarHeight
+            active: false
+            z: 1
 
-            item.width = Qt.binding(function() { return gridLoader.width })
-            item.height = Qt.binding(function() { return gridLoader.height })
-            item.mainWindow = root.mainWindow
-            item.frigateRef = root.frigateRef
-            item.serverViewRoot = root
-            if (root.mainWindow)
-                item.cameraList = root.mainWindow.cameraList
+            onLoaded: {
+                if (!item)
+                    return
 
-            root.cameraGrid = item
-            root.gridReady()
+                item.width = Qt.binding(function() { return gridLoader.width })
+                item.height = Qt.binding(function() { return gridLoader.height })
+                item.mainWindow = root.mainWindow
+                item.frigateRef = root.frigateRef
+                item.serverViewRoot = root
+                if (root.mainWindow)
+                    item.cameraList = root.mainWindow.cameraList
 
-            if (root.frigateRef && root.mainWindow && root.mainWindow.cameraList) {
-                for (var i = 0; i < root.mainWindow.cameraList.length; i++) {
-                    var cam = root.mainWindow.cameraList[i]
-                    var name = (typeof cam === "string") ? cam : (cam.name || cam.id || "")
-                    if (!name)
-                        continue
+                root.cameraGrid = item
+                root.gridReady()
 
-                    if (root.frigateRef.isCameraOnline(name)) {
-                        if (item.cameraOnline)
-                            item.cameraOnline(name)
-                    } else {
-                        if (item.cameraOffline)
+                if (root.frigateRef && root.mainWindow && root.mainWindow.cameraList) {
+                    for (var i = 0; i < root.mainWindow.cameraList.length; i++) {
+                        var cam = root.mainWindow.cameraList[i]
+                        var name = (typeof cam === "string") ? cam : (cam.name || cam.id || "")
+                        if (!name)
+                            continue
+                        if (root.frigateRef.isCameraOnline(name)) {
+                            if (item.cameraOnline)
+                                item.cameraOnline(name)
+                        } else if (item.cameraOffline) {
                             item.cameraOffline(name)
+                        }
                     }
                 }
-            }
 
-            Qt.callLater(function() {
-                root.refreshLayouts()
-                root.loadLayout()
-            })
+                Qt.callLater(function() {
+                    root.refreshLayouts()
+                    root.loadLayout()
+                })
+            }
+        }
+
+        // Expanded timeline only (height 0 when collapsed — like other bars)
+        Item {
+            id: timelineHost
+            width: parent.width
+            height: root.timelineBarHeight
+            visible: height > 0
+            clip: true
+
+            Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+
+            Loader {
+                id: gridTimelineLoader
+                anchors.fill: parent
+                active: !root.hideGridTimeline
+                source: "qrc:/app/resources/qml/fullscreen/FullscreenTimeline.qml"
+
+                onLoaded: {
+                    if (!item)
+                        return
+                    item.allowAutoReveal = false
+                    item.collapsed = false
+                    if (root.frigateRef)
+                        item.frigateRef = root.frigateRef
+                    if (item.seekRequested)
+                        item.seekRequested.connect(root.onGridTimelineSeek)
+                    root.applyGridTimelineCamera()
+                }
+            }
+        }
+    }
+
+    // Camera name above the arrow when timeline is collapsed
+    Text {
+        id: collapsedCamName
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 40
+        z: 10001
+        visible: root.timelineCollapsed
+                 && root.timelineCameraId.length > 0
+                 && !root.hideGridTimeline
+                 && root.mainWindow
+                 && !root.mainWindow.cameraFullscreenActive
+        text: root.timelineCameraId
+        color: "#C8C8D0"
+        font.pixelSize: 12
+        font.bold: true
+    }
+
+    // Same control as topbar / sidebar / events — NX arrow IconButton
+    IconButton {
+        id: timelineArrow
+        width: 32
+        height: 32
+        z: 10001
+
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: root.timelineCollapsed ? 4 : (root.timelineBarHeight + 4)
+
+        icon: root.timelineCollapsed
+              ? "qrc:/app/assets/icons/nx/arrow-up.svg"
+              : "qrc:/app/assets/icons/nx/arrow-down.svg"
+
+        visible: !root.hideGridTimeline
+                 && root.mainWindow
+                 && !root.mainWindow.cameraFullscreenActive
+
+        onClicked: root.timelineCollapsed = !root.timelineCollapsed
+
+        Behavior on anchors.bottomMargin {
+            NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
         }
     }
 
@@ -257,7 +393,6 @@ Item {
             console.log("ServerView: initializeGrid() called too early")
             return
         }
-
         gridLoader.source = ""
         gridLoader.source = "qrc:/app/resources/qml/components/CameraGrid.qml"
         gridLoader.active = true

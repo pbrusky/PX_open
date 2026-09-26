@@ -23,12 +23,44 @@ Rectangle {
         && timeline.exportStartMs > 0
         && timeline.exportEndMs > timeline.exportStartMs
 
+    readonly property string cameraLabel: {
+        if (!timeline)
+            return ""
+        var n = timeline.cameraName || timeline.cameraId || ""
+        return ("" + n).length ? ("" + n) : ""
+    }
+
     Text {
-        id: leftLabel
+        id: camLabel
         anchors.left: parent.left
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        width: Math.min(implicitWidth, parent.width * 0.42)
+        visible: root.cameraLabel.length > 0
+        text: root.cameraLabel
+        color: "#E8E8F0"
+        font.pixelSize: 13
+        font.bold: true
+        elide: Text.ElideRight
+        width: Math.min(implicitWidth, parent.width * 0.22)
+    }
+
+    Rectangle {
+        id: camSep
+        anchors.left: camLabel.right
+        anchors.leftMargin: 10
+        anchors.verticalCenter: parent.verticalCenter
+        width: 1
+        height: 14
+        color: "#444"
+        visible: camLabel.visible
+    }
+
+    Text {
+        id: leftLabel
+        anchors.left: camLabel.visible ? camSep.right : parent.left
+        anchors.leftMargin: camLabel.visible ? 10 : 12
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.min(implicitWidth, parent.width * 0.40)
         elide: Text.ElideRight
         text: {
             if (!timeline)
