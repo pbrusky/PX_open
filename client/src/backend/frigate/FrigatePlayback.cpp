@@ -39,6 +39,7 @@ FrigatePlayback::~FrigatePlayback()
             QFile::remove(it.value());
     }
     m_tempFiles.clear();
+    m_downloadStartedPlay.clear();
 }
 
 void FrigatePlayback::setServer(const QString& server)
@@ -88,6 +89,7 @@ void FrigatePlayback::cancelDownload(const QString& cameraId)
         file->close();
         delete file;
     }
+    m_downloadStartedPlay.remove(cameraId);
 }
 
 void FrigatePlayback::cleanupTempFile(const QString& cameraId)
@@ -95,6 +97,7 @@ void FrigatePlayback::cleanupTempFile(const QString& cameraId)
     const QString path = m_tempFiles.take(cameraId);
     if (!path.isEmpty())
         QFile::remove(path);
+    m_downloadStartedPlay.remove(cameraId);
 }
 
 void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
@@ -282,6 +285,7 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
         QStringLiteral("px_playback_%1_%2.mp4").arg(cameraId).arg(gen));
 
     cleanupTempFile(cameraId);
+    m_downloadStartedPlay.remove(cameraId);
 
     QFile* outFile = new QFile(localPath);
     if (!outFile->open(QIODevice::WriteOnly)) {
@@ -303,7 +307,36 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
     QNetworkReply* reply = m_net->get(req);
     m_downloadReplies.insert(cameraId, reply);
 
-    connect(reply, &QNetworkReply::readyRead, this, [this, cameraId, gen, reply]() {
+    // Start local FFmpeg once we have enough bytes (play while download continues).
+    // static so MSVC does not require capturing into the lambda
+    static constexpr qint64 kMinBytesToStart = 512 * 1024;
+
+    auto tryStartEarly = [this, cameraId, gen, localPath]() {
+        if (m_seekGen.value(cameraId, 0) != gen)
+            return;
+        if (m_downloadStartedPlay.value(cameraId, false))
+            return;
+
+        QFile* f = m_downloadFiles.value(cameraId);
+        if (!f || f->size() < kMinBytesToStart)
+            return;
+
+        f->flush();
+
+        {
+            QMutexLocker lock(&m_mutex);
+            if (m_playbackWorkers.contains(cameraId)) {
+                m_downloadStartedPlay.insert(cameraId, true);
+                return;
+            }
+        }
+
+        m_downloadStartedPlay.insert(cameraId, true);
+        startLocalWorker(cameraId, gen, localPath);
+    };
+
+    connect(reply, &QNetworkReply::readyRead, this,
+            [this, cameraId, gen, reply, tryStartEarly]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
         if (QFile* f = m_downloadFiles.value(cameraId)) {
@@ -311,11 +344,13 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
             if (!chunk.isEmpty())
                 f->write(chunk);
         }
+        tryStartEarly();
     });
 
     connect(reply, &QNetworkReply::finished, this,
             [this, cameraId, gen, localPath, reply]() {
         m_downloadReplies.remove(cameraId);
+
         QFile* file = m_downloadFiles.take(cameraId);
         if (file) {
             if (reply->bytesAvailable() > 0)
@@ -324,16 +359,21 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
             file->close();
             delete file;
         }
+
         if (m_seekGen.value(cameraId, 0) != gen) {
             reply->deleteLater();
+            m_downloadStartedPlay.remove(cameraId);
             return;
         }
+
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto err = reply->error();
         reply->deleteLater();
+
         const qint64 size = QFileInfo(localPath).size();
         if (err != QNetworkReply::NoError || status >= 400 || size < 1024) {
             cleanupTempFile(cameraId);
+            m_downloadStartedPlay.remove(cameraId);
 
             QString msg;
             if (status == 400 || status == 404)
@@ -349,7 +389,13 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
             emit playbackStopped(cameraId);
             return;
         }
-        startLocalWorker(cameraId, gen, localPath);
+
+        // Download complete: start only if we never started mid-download
+        if (!m_downloadStartedPlay.value(cameraId, false)) {
+            m_downloadStartedPlay.insert(cameraId, true);
+            startLocalWorker(cameraId, gen, localPath);
+        }
+        m_downloadStartedPlay.remove(cameraId);
     });
 }
 
