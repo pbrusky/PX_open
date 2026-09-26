@@ -217,29 +217,115 @@ Item {
     function loadGridTimelineData() {
         if (!frigateRef || !timelineCameraId.length)
             return
+        var id = timelineCameraId
         if (typeof frigateRef.loadRecordings === "function")
-            frigateRef.loadRecordings(timelineCameraId)
+            frigateRef.loadRecordings(id)
         if (typeof frigateRef.loadEvents === "function")
-            frigateRef.loadEvents(timelineCameraId)
+            frigateRef.loadEvents(id)
         if (typeof frigateRef.loadMotionActivity === "function")
-            frigateRef.loadMotionActivity(timelineCameraId)
+            frigateRef.loadMotionActivity(id)
         if (typeof frigateRef.loadRecordingDays === "function")
-            frigateRef.loadRecordingDays(timelineCameraId)
+            frigateRef.loadRecordingDays(id)
+    }
+
+    function clearGridTimelineTrack(tl) {
+        if (!tl)
+            return
+        tl.recordings = []
+        tl.events = []
+        tl.motionPoints = []
+        if (tl.recordingDays !== undefined)
+            tl.recordingDays = []
+        if (tl._fixedDayMode !== undefined)
+            tl._fixedDayMode = false
+        if (tl.hoverTsMs !== undefined)
+            tl.hoverTsMs = -1
+        if (tl.playbackPositionMs !== undefined)
+            tl.playbackPositionMs = 0
+    }
+
+    function applyCachedTimeline(tl, id) {
+        if (!tl || !root.frigateRef || !id.length)
+            return false
+        var had = false
+        if (typeof root.frigateRef.getRecordingsForCamera === "function") {
+            var r = root.frigateRef.getRecordingsForCamera(id) || []
+            if (r.length) {
+                tl.recordings = r
+                had = true
+            }
+        }
+        if (typeof root.frigateRef.getEventsForCamera === "function") {
+            var e = root.frigateRef.getEventsForCamera(id) || []
+            if (e.length) {
+                tl.events = e
+                had = true
+            }
+        }
+        if (typeof root.frigateRef.getMotionActivityForCamera === "function") {
+            var m = root.frigateRef.getMotionActivityForCamera(id) || []
+            if (m.length) {
+                tl.motionPoints = m
+                had = true
+            }
+        }
+        if (typeof root.frigateRef.getRecordingDaysForCamera === "function") {
+            var d = root.frigateRef.getRecordingDaysForCamera(id) || []
+            if (d.length)
+                tl.recordingDays = d
+        }
+        return had
+    }
+
+    // Warm cache for cameras on the grid (NX-style)
+    function prefetchGridTimelineCameras() {
+        if (!frigateRef || !mainWindow || !mainWindow.cameraList)
+            return
+        var list = mainWindow.cameraList
+        var n = Math.min(list.length, 12)
+        for (var i = 0; i < n; i++) {
+            var cam = list[i]
+            var id = (typeof cam === "string") ? cam : (cam.id || cam.name || "")
+            if (!id.length)
+                continue
+            var hasRec = false
+            if (typeof frigateRef.getRecordingsForCamera === "function") {
+                var r = frigateRef.getRecordingsForCamera(id)
+                hasRec = r && r.length > 0
+            }
+            if (hasRec)
+                continue
+            if (typeof frigateRef.loadRecordings === "function")
+                frigateRef.loadRecordings(id)
+            if (typeof frigateRef.loadMotionActivity === "function")
+                frigateRef.loadMotionActivity(id)
+        }
     }
 
     function applyGridTimelineCamera() {
         var tl = gridTimelineLoader.item
         if (!tl)
             return
-        // Avoid assigning undefined into QObject* properties
+
         if (root.frigateRef)
             tl.frigateRef = root.frigateRef
-        tl.cameraId = root.timelineCameraId
-        tl.cameraName = root.timelineCameraId
-        if (root.timelineCameraId.length && !root.timelineCollapsed && !root.hideGridTimeline) {
+
+        var id = root.timelineCameraId
+        tl.cameraId = id
+        tl.cameraName = id
+
+        if (id.length && !root.timelineCollapsed && !root.hideGridTimeline) {
             tl.allowAutoReveal = true
             tl.collapsed = false
-            Qt.callLater(loadGridTimelineData)
+
+            // NX: paint cache without blanking; only clear if no cache yet
+            if (!applyCachedTimeline(tl, id))
+                clearGridTimelineTrack(tl)
+
+            Qt.callLater(function() {
+                if (root.timelineCameraId === id)
+                    root.loadGridTimelineData()
+            })
         } else {
             tl.allowAutoReveal = false
             tl.collapsed = true
@@ -256,7 +342,7 @@ Item {
     }
 
     onTimelineCameraIdChanged: {
-        if (!timelineCollapsed && !hideGridTimeline)
+        if (!hideGridTimeline)
             Qt.callLater(applyGridTimelineCamera)
     }
 
@@ -309,11 +395,11 @@ Item {
                 Qt.callLater(function() {
                     root.refreshLayouts()
                     root.loadLayout()
+                    root.prefetchGridTimelineCameras()
                 })
             }
         }
 
-        // Expanded timeline only (height 0 when collapsed — like other bars)
         Item {
             id: timelineHost
             width: parent.width
@@ -344,7 +430,6 @@ Item {
         }
     }
 
-    // Camera name above the arrow when timeline is collapsed
     Text {
         id: collapsedCamName
         anchors.horizontalCenter: parent.horizontalCenter
@@ -362,7 +447,6 @@ Item {
         font.bold: true
     }
 
-    // Same control as topbar / sidebar / events — NX arrow IconButton
     IconButton {
         id: timelineArrow
         width: 32
@@ -407,6 +491,11 @@ Item {
             Qt.callLater(function() {
                 root.refreshLayouts()
                 root.loadLayout()
+                root.prefetchGridTimelineCameras()
+            })
+        } else {
+            Qt.callLater(function() {
+                root.prefetchGridTimelineCameras()
             })
         }
     }

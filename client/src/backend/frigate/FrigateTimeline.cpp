@@ -101,6 +101,13 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         emit recordingsLoaded(cameraId, QVariantList());
         return;
     }
+
+    // NX-style: serve memory cache immediately, then soft-refresh from network
+    if (m_recordingsByCamera.contains(cameraId))
+        emit recordingsLoaded(cameraId, m_recordingsByCamera.value(cameraId));
+    if (m_recordingDaysByCamera.contains(cameraId))
+        emit recordingDaysLoaded(cameraId, m_recordingDaysByCamera.value(cameraId));
+
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
     loadRecordingsRange(cameraId, nowSec - 24 * 3600, nowSec);
     loadRecordingDays(cameraId);
@@ -245,6 +252,10 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
 
 void FrigateTimeline::loadEvents(const QString& cameraId)
 {
+    const QString key = cameraId.isEmpty() ? QStringLiteral("__all__") : cameraId;
+    if (m_eventsByCamera.contains(key))
+        emit eventsLoaded(cameraId, m_eventsByCamera.value(key));
+
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
     loadEventsRange(cameraId, nowSec - 24 * 3600, nowSec);
 }
@@ -345,6 +356,9 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
 
 void FrigateTimeline::loadMotionActivity(const QString& cameraId)
 {
+    if (m_motionByCamera.contains(cameraId))
+        emit motionActivityLoaded(cameraId, m_motionByCamera.value(cameraId));
+
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
     loadMotionActivityRange(cameraId, nowSec - 24 * 3600, nowSec);
 }
