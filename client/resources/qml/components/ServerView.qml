@@ -7,7 +7,7 @@ Item {
     id: root
     objectName: "ServerView"
     anchors.fill: parent
-    clip: true
+    clip: false
 
     property var mainWindow
     property var frigateRef
@@ -277,7 +277,6 @@ Item {
         return had
     }
 
-    // Warm cache for cameras on the grid (NX-style)
     function prefetchGridTimelineCameras() {
         if (!frigateRef || !mainWindow || !mainWindow.cameraList)
             return
@@ -318,7 +317,6 @@ Item {
             tl.allowAutoReveal = true
             tl.collapsed = false
 
-            // NX: paint cache without blanking; only clear if no cache yet
             if (!applyCachedTimeline(tl, id))
                 clearGridTimelineTrack(tl)
 
@@ -341,6 +339,36 @@ Item {
             cameraGrid.enterFullscreen(timelineCameraId)
     }
 
+    // Attach timeline chrome to the window so it spans full width over sidebar + events
+    function attachTimelineToWindow() {
+        if (!mainWindow || !mainWindow.contentItem)
+            return
+        if (timelineLayer.parent === mainWindow.contentItem)
+            return
+        timelineLayer.parent = mainWindow.contentItem
+        timelineLayer.z = 10050
+        timelineLayer.anchors.left = mainWindow.contentItem.left
+        timelineLayer.anchors.right = mainWindow.contentItem.right
+        timelineLayer.anchors.bottom = mainWindow.contentItem.bottom
+        timelineLayer.anchors.top = undefined
+    }
+
+    function detachTimelineFromWindow() {
+        if (timelineLayer.parent === root)
+            return
+        timelineLayer.anchors.left = undefined
+        timelineLayer.anchors.right = undefined
+        timelineLayer.anchors.bottom = undefined
+        timelineLayer.parent = root
+        timelineLayer.z = 10050
+        timelineLayer.anchors.left = root.left
+        timelineLayer.anchors.right = root.right
+        timelineLayer.anchors.bottom = root.bottom
+    }
+
+    onMainWindowChanged: Qt.callLater(attachTimelineToWindow)
+    Component.onCompleted: Qt.callLater(attachTimelineToWindow)
+
     onTimelineCameraIdChanged: {
         if (!hideGridTimeline)
             Qt.callLater(applyGridTimelineCamera)
@@ -351,63 +379,82 @@ Item {
             Qt.callLater(applyGridTimelineCamera)
     }
 
-    Column {
+    // Camera grid fills ServerView; only shrinks when timeline is expanded
+    Loader {
+        id: gridLoader
         anchors.fill: parent
-        spacing: 0
+        anchors.bottomMargin: root.timelineBarHeight
+        active: false
+        z: 1
 
-        Loader {
-            id: gridLoader
-            width: parent.width
-            height: parent.height - root.timelineBarHeight
-            active: false
-            z: 1
+        Behavior on anchors.bottomMargin {
+            NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
+        }
 
-            onLoaded: {
-                if (!item)
-                    return
+        onLoaded: {
+            if (!item)
+                return
 
-                item.width = Qt.binding(function() { return gridLoader.width })
-                item.height = Qt.binding(function() { return gridLoader.height })
-                item.mainWindow = root.mainWindow
-                item.frigateRef = root.frigateRef
-                item.serverViewRoot = root
-                if (root.mainWindow)
-                    item.cameraList = root.mainWindow.cameraList
+            item.width = Qt.binding(function() { return gridLoader.width })
+            item.height = Qt.binding(function() { return gridLoader.height })
+            item.mainWindow = root.mainWindow
+            item.frigateRef = root.frigateRef
+            item.serverViewRoot = root
+            if (root.mainWindow)
+                item.cameraList = root.mainWindow.cameraList
 
-                root.cameraGrid = item
-                root.gridReady()
+            root.cameraGrid = item
+            root.gridReady()
 
-                if (root.frigateRef && root.mainWindow && root.mainWindow.cameraList) {
-                    for (var i = 0; i < root.mainWindow.cameraList.length; i++) {
-                        var cam = root.mainWindow.cameraList[i]
-                        var name = (typeof cam === "string") ? cam : (cam.name || cam.id || "")
-                        if (!name)
-                            continue
-                        if (root.frigateRef.isCameraOnline(name)) {
-                            if (item.cameraOnline)
-                                item.cameraOnline(name)
-                        } else if (item.cameraOffline) {
-                            item.cameraOffline(name)
-                        }
+            if (root.frigateRef && root.mainWindow && root.mainWindow.cameraList) {
+                for (var i = 0; i < root.mainWindow.cameraList.length; i++) {
+                    var cam = root.mainWindow.cameraList[i]
+                    var name = (typeof cam === "string") ? cam : (cam.name || cam.id || "")
+                    if (!name)
+                        continue
+                    if (root.frigateRef.isCameraOnline(name)) {
+                        if (item.cameraOnline)
+                            item.cameraOnline(name)
+                    } else if (item.cameraOffline) {
+                        item.cameraOffline(name)
                     }
                 }
-
-                Qt.callLater(function() {
-                    root.refreshLayouts()
-                    root.loadLayout()
-                    root.prefetchGridTimelineCameras()
-                })
             }
+
+            Qt.callLater(function() {
+                root.refreshLayouts()
+                root.loadLayout()
+                root.prefetchGridTimelineCameras()
+            })
+        }
+    }
+
+    // Full-width bottom layer (reparented to MainWindow when possible)
+    Item {
+        id: timelineLayer
+        // Default anchors until attachTimelineToWindow runs
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: root.timelineBarHeight > 0 ? root.timelineBarHeight : 36
+        z: 10050
+        // Always keep a thin hit area for the arrow when collapsed
+        visible: !root.hideGridTimeline
+                 && root.mainWindow
+                 && !root.mainWindow.cameraFullscreenActive
+
+        Behavior on height {
+            NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
         }
 
         Item {
             id: timelineHost
-            width: parent.width
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
             height: root.timelineBarHeight
             visible: height > 0
             clip: true
-
-            Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
             Loader {
                 id: gridTimelineLoader
@@ -428,47 +475,38 @@ Item {
                 }
             }
         }
-    }
 
-    Text {
-        id: collapsedCamName
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 40
-        z: 10001
-        visible: root.timelineCollapsed
-                 && root.timelineCameraId.length > 0
-                 && !root.hideGridTimeline
-                 && root.mainWindow
-                 && !root.mainWindow.cameraFullscreenActive
-        text: root.timelineCameraId
-        color: "#C8C8D0"
-        font.pixelSize: 12
-        font.bold: true
-    }
+        Text {
+            id: collapsedCamName
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 40
+            z: 2
+            visible: root.timelineCollapsed
+                     && root.timelineCameraId.length > 0
+                     && !root.hideGridTimeline
+            text: root.timelineCameraId
+            color: "#C8C8D0"
+            font.pixelSize: 12
+            font.bold: true
+        }
 
-    IconButton {
-        id: timelineArrow
-        width: 32
-        height: 32
-        z: 10001
+        IconButton {
+            id: timelineArrow
+            width: 32
+            height: 32
+            z: 3
 
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: root.timelineCollapsed ? 4 : (root.timelineBarHeight + 4)
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: root.timelineCollapsed ? 4 : 4
 
-        icon: root.timelineCollapsed
-              ? "qrc:/app/assets/icons/nx/arrow-up.svg"
-              : "qrc:/app/assets/icons/nx/arrow-down.svg"
+            icon: root.timelineCollapsed
+                  ? "qrc:/app/assets/icons/nx/arrow-up.svg"
+                  : "qrc:/app/assets/icons/nx/arrow-down.svg"
 
-        visible: !root.hideGridTimeline
-                 && root.mainWindow
-                 && !root.mainWindow.cameraFullscreenActive
-
-        onClicked: root.timelineCollapsed = !root.timelineCollapsed
-
-        Behavior on anchors.bottomMargin {
-            NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
+            visible: !root.hideGridTimeline
+            onClicked: root.timelineCollapsed = !root.timelineCollapsed
         }
     }
 
@@ -480,6 +518,7 @@ Item {
         gridLoader.source = ""
         gridLoader.source = "qrc:/app/resources/qml/components/CameraGrid.qml"
         gridLoader.active = true
+        Qt.callLater(attachTimelineToWindow)
     }
 
     function updateCameras(list) {

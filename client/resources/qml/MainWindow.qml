@@ -38,6 +38,17 @@ ApplicationWindow {
     property bool isFullscreen: false
     property bool cameraFullscreenActive: false
 
+    // Used only so sidebar/events stop above the full-width timeline when expanded.
+    // contentLoader does NOT use this as bottomMargin (avoids gap under timeline).
+    readonly property real gridTimelineReserve: {
+        if (!onServerView || cameraFullscreenActive)
+            return 0
+        var sv = contentLoader.item
+        if (sv && sv.timelineBarHeight !== undefined)
+            return Number(sv.timelineBarHeight) || 0
+        return 0
+    }
+
     property alias skipNextAutoConnect: session.skipNextAutoConnect
     property alias appSettings: session.settings
 
@@ -81,11 +92,9 @@ ApplicationWindow {
             return
         _timelinePrefetchCam = id
 
-        // Calendar day list
         if (typeof frigateRef.loadRecordingDays === "function")
             frigateRef.loadRecordingDays(id)
 
-        // Last 24h — same family of calls FullscreenTimeline uses
         var nowSec = Math.floor(Date.now() / 1000)
         var afterSec = nowSec - (24 * 3600)
 
@@ -113,7 +122,6 @@ ApplicationWindow {
         })
     }
 
-    // Fullscreen + FFmpeg seek via CameraGrid.enterFullscreenAndSeek → FullscreenCamera.onTimelineSeek
     function viewEvent(cameraId, startSec) {
         if (!cameraId || !(("" + cameraId).length))
             return
@@ -125,7 +133,6 @@ ApplicationWindow {
         var ms = Math.floor(sec * 1000)
         var name = "" + cameraId
 
-        // Ensure this camera’s timeline data is loading (or already cached)
         prefetchTimelineForCamera(name)
 
         var sv = null
@@ -143,7 +150,6 @@ ApplicationWindow {
             }
         }
 
-        // Fallback: FFmpeg only (no fullscreen UI / queue bind)
         if (frigateRef && typeof frigateRef.startPlayback === "function")
             frigateRef.startPlayback(name, ms)
     }
@@ -220,6 +226,48 @@ ApplicationWindow {
         }
     }
 
+    // Grid between sidebar and events; margins track live panel widths.
+    Loader {
+        id: contentLoader
+        anchors.fill: parent
+        z: 2
+        anchors.topMargin: (topbar.collapsed || mainWindow.cameraFullscreenActive) ? 0 : topbar.height
+
+        // 0 when sidebar collapsed / startup / fullscreen; else actual width
+        anchors.leftMargin: (topbar.isStartupPage || mainWindow.cameraFullscreenActive)
+                            ? 0
+                            : (sidebarWrapper.collapsed ? 0 : sidebarWrapper.width)
+
+        // Track eventsPanel.width (0 collapsed → grid expands right; 300 open)
+        anchors.rightMargin: (topbar.isStartupPage || mainWindow.cameraFullscreenActive)
+                             ? 0
+                             : eventsPanel.width
+
+        // No bottomMargin — full-width timeline is overlaid by ServerView
+
+        Behavior on anchors.leftMargin {
+            NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
+        }
+        Behavior on anchors.rightMargin {
+            NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
+        }
+
+        property bool startupDone: false
+
+        source: startupDone
+                ? "qrc:/app/resources/qml/components/ServerView.qml"
+                : "qrc:/app/resources/qml/StartupPage.qml"
+
+        onLoaded: {
+            if (!item)
+                return
+            if (item.objectName === "StartupPage")
+                session.bindStartupPage(item)
+            if (item.objectName === "ServerView")
+                session.bindServerView(item)
+        }
+    }
+
     TopBar {
         id: topbar
         width: parent.width
@@ -272,7 +320,10 @@ ApplicationWindow {
         objectName: "Sidebar"
         frigateRef: mainWindow.frigateRef
         width: 260
-        height: mainWindow.height - (mainWindow.cameraFullscreenActive ? 0 : topbar.height)
+        height: {
+            var top = mainWindow.cameraFullscreenActive ? 0 : topbar.height
+            return mainWindow.height - top - mainWindow.gridTimelineReserve
+        }
         y: mainWindow.cameraFullscreenActive ? 0 : topbar.height
         z: 9998
 
@@ -323,7 +374,7 @@ ApplicationWindow {
         x: sidebarWrapper.collapsed
             ? 4
             : sidebarWrapper.x + sidebarWrapper.width - 36
-        y: topbar.height + (mainWindow.height - topbar.height) / 2 - height / 2
+        y: topbar.height + (mainWindow.height - topbar.height - mainWindow.gridTimelineReserve) / 2 - height / 2
         z: 10001
         icon: sidebarWrapper.collapsed
               ? "qrc:/app/assets/icons/nx/arrow-right.svg"
@@ -346,7 +397,10 @@ ApplicationWindow {
         width: collapsed ? 0 : 300
         Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
-        height: mainWindow.height - (mainWindow.cameraFullscreenActive ? 0 : topbar.height)
+        height: {
+            var top = mainWindow.cameraFullscreenActive ? 0 : topbar.height
+            return mainWindow.height - top - mainWindow.gridTimelineReserve
+        }
         y: mainWindow.cameraFullscreenActive ? 0 : topbar.height
         anchors.right: parent.right
         z: 9998
@@ -367,7 +421,7 @@ ApplicationWindow {
             ? (mainWindow.width - width - 4)
             : (mainWindow.width - eventsPanel.width + 4)
 
-        y: topbar.height + (mainWindow.height - topbar.height) / 2 - height / 2
+        y: topbar.height + (mainWindow.height - topbar.height - mainWindow.gridTimelineReserve) / 2 - height / 2
 
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
@@ -377,33 +431,6 @@ ApplicationWindow {
 
         visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
         onClicked: eventsPanel.collapsed = !eventsPanel.collapsed
-    }
-
-    Loader {
-        id: contentLoader
-        anchors.fill: parent
-        z: 2
-        anchors.topMargin: (topbar.collapsed || mainWindow.cameraFullscreenActive) ? 0 : topbar.height
-        anchors.leftMargin: (sidebarWrapper.collapsed || topbar.isStartupPage
-                             || mainWindow.cameraFullscreenActive) ? 0 : sidebarWrapper.width
-        anchors.rightMargin: (!eventsPanel.visible || eventsPanel.collapsed
-                              || topbar.isStartupPage
-                              || mainWindow.cameraFullscreenActive) ? 0 : 300
-
-        property bool startupDone: false
-
-        source: startupDone
-                ? "qrc:/app/resources/qml/components/ServerView.qml"
-                : "qrc:/app/resources/qml/StartupPage.qml"
-
-        onLoaded: {
-            if (!item)
-                return
-            if (item.objectName === "StartupPage")
-                session.bindStartupPage(item)
-            if (item.objectName === "ServerView")
-                session.bindServerView(item)
-        }
     }
 
     PopupManager {
