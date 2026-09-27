@@ -80,7 +80,8 @@ ApplicationWindow {
         _timelinePrefetchCam = ""
     }
 
-    // Warm FrigateTimeline caches while still on the grid (NX-style)
+    // Warm timeline caches on the grid: recordings + motion ticks only.
+    // Events load only when the Events panel is open (EventList.refresh).
     function prefetchTimelineForCamera(cameraId) {
         if (!frigateRef || !cameraId || !(("" + cameraId).length))
             return
@@ -96,22 +97,20 @@ ApplicationWindow {
             frigateRef.loadRecordingDays(id)
 
         var nowSec = Math.floor(Date.now() / 1000)
-        var afterSec = nowSec - (24 * 3600)
+        var afterSec = nowSec - (6 * 3600)
 
         if (typeof frigateRef.loadRecordingsRange === "function")
             frigateRef.loadRecordingsRange(id, afterSec, nowSec)
         else if (typeof frigateRef.loadRecordings === "function")
             frigateRef.loadRecordings(id)
 
+        // Motion ticks on the timeline
         if (typeof frigateRef.loadMotionActivityRange === "function")
             frigateRef.loadMotionActivityRange(id, afterSec, nowSec)
         else if (typeof frigateRef.loadMotionActivity === "function")
             frigateRef.loadMotionActivity(id)
 
-        if (typeof frigateRef.loadEventsRange === "function")
-            frigateRef.loadEventsRange(id, afterSec, nowSec)
-        else if (typeof frigateRef.loadEvents === "function")
-            frigateRef.loadEvents(id)
+        // Do NOT load events here — EventList does that when the panel is open
     }
 
     onSelectedCameraIdChanged: {
@@ -233,17 +232,13 @@ ApplicationWindow {
         z: 2
         anchors.topMargin: (topbar.collapsed || mainWindow.cameraFullscreenActive) ? 0 : topbar.height
 
-        // 0 when sidebar collapsed / startup / fullscreen; else actual width
         anchors.leftMargin: (topbar.isStartupPage || mainWindow.cameraFullscreenActive)
                             ? 0
                             : (sidebarWrapper.collapsed ? 0 : sidebarWrapper.width)
 
-        // Track eventsPanel.width (0 collapsed → grid expands right; 300 open)
         anchors.rightMargin: (topbar.isStartupPage || mainWindow.cameraFullscreenActive)
                              ? 0
                              : eventsPanel.width
-
-        // No bottomMargin — full-width timeline is overlaid by ServerView
 
         Behavior on anchors.leftMargin {
             NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }

@@ -143,6 +143,12 @@ Item {
             applyRecordings(segments)
         }
 
+        function onMotionActivityLoaded(id, points) {
+            if (id !== root.cameraId && id !== root.cameraName)
+                return
+            applyMotion(points)
+        }
+
         function onPlaybackStarted(id) {
             if (id !== root.cameraId && id !== root.cameraName)
                 return
@@ -440,6 +446,15 @@ Item {
         }
     }
 
+    function applyMotion(points) {
+        if (!timelineLoader.item)
+            return
+        if (typeof timelineLoader.item.applyMotionPoints === "function")
+            timelineLoader.item.applyMotionPoints(points || [])
+        else
+            timelineLoader.item.motionPoints = points || []
+    }
+
     function onTimelineSeek(tsMs) {
         if (!frigateRef)
             return
@@ -532,7 +547,7 @@ Item {
         })
     }
 
-    // Fast path: recordings (+ days) only — no events / motion on open
+    // Recordings + motion ticks. Events only via Events panel when open.
     function loadTimelineData() {
         if (!frigateRef)
             return
@@ -546,10 +561,20 @@ Item {
                 applyRecordings(cached)
         }
 
+        // Cached motion for instant ticks
+        if (typeof frigateRef.getMotionActivity === "function") {
+            var mot = frigateRef.getMotionActivity(id)
+            if (mot && mot.length > 0)
+                applyMotion(mot)
+        }
+
         if (typeof frigateRef.loadRecordings === "function")
             frigateRef.loadRecordings(id)
         if (typeof frigateRef.loadRecordingDays === "function")
             frigateRef.loadRecordingDays(id)
+
+        if (typeof frigateRef.loadMotionActivity === "function")
+            frigateRef.loadMotionActivity(id)
 
         recordingsPollTimer.tries = 0
         recordingsPollTimer.start()
