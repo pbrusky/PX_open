@@ -31,6 +31,10 @@ Item {
         return timelineExpandedHeight
     }
 
+    // Staggered recordings-only prefetch
+    property var _prefetchQueue: []
+    property int _prefetchIndex: 0
+
     signal camerasLoadedToMain(var list)
     signal gridReady()
     signal layoutsChanged()
@@ -38,6 +42,13 @@ Item {
     Settings {
         id: layoutSettings
         category: "gridLayouts"
+    }
+
+    Timer {
+        id: prefetchTimer
+        interval: 400
+        repeat: true
+        onTriggered: root.prefetchStep()
     }
 
     function layoutStorageKey() {
@@ -214,18 +225,23 @@ Item {
         )
     }
 
+    // Fast path: recordings + calendar days only (no events / motion)
     function loadGridTimelineData() {
         if (!frigateRef || !timelineCameraId.length)
             return
         var id = timelineCameraId
         if (typeof frigateRef.loadRecordings === "function")
             frigateRef.loadRecordings(id)
-        if (typeof frigateRef.loadEvents === "function")
-            frigateRef.loadEvents(id)
-        if (typeof frigateRef.loadMotionActivity === "function")
-            frigateRef.loadMotionActivity(id)
         if (typeof frigateRef.loadRecordingDays === "function")
             frigateRef.loadRecordingDays(id)
+    }
+
+    // Optional later (Motion button)
+    function loadGridTimelineMotion() {
+        if (!frigateRef || !timelineCameraId.length)
+            return
+        if (typeof frigateRef.loadMotionActivity === "function")
+            frigateRef.loadMotionActivity(timelineCameraId)
     }
 
     function clearGridTimelineTrack(tl) {
@@ -255,50 +271,54 @@ Item {
                 had = true
             }
         }
-        if (typeof root.frigateRef.getEventsForCamera === "function") {
-            var e = root.frigateRef.getEventsForCamera(id) || []
-            if (e.length) {
-                tl.events = e
-                had = true
-            }
-        }
-        if (typeof root.frigateRef.getMotionActivityForCamera === "function") {
-            var m = root.frigateRef.getMotionActivityForCamera(id) || []
-            if (m.length) {
-                tl.motionPoints = m
-                had = true
-            }
-        }
         if (typeof root.frigateRef.getRecordingDaysForCamera === "function") {
             var d = root.frigateRef.getRecordingDaysForCamera(id) || []
             if (d.length)
                 tl.recordingDays = d
         }
+        // Skip events/motion on switch — keeps camera changes cheap
         return had
+    }
+
+    function prefetchStep() {
+        if (!frigateRef || _prefetchIndex >= _prefetchQueue.length) {
+            prefetchTimer.stop()
+            return
+        }
+        var id = _prefetchQueue[_prefetchIndex++]
+        if (!id || !id.length)
+            return
+        var hasRec = false
+        if (typeof frigateRef.getRecordingsForCamera === "function") {
+            var r = frigateRef.getRecordingsForCamera(id)
+            hasRec = r && r.length > 0
+        }
+        if (!hasRec && typeof frigateRef.loadRecordings === "function")
+            frigateRef.loadRecordings(id)
     }
 
     function prefetchGridTimelineCameras() {
         if (!frigateRef || !mainWindow || !mainWindow.cameraList)
             return
+
+        _prefetchQueue = []
+        _prefetchIndex = 0
+
+        if (timelineCameraId && timelineCameraId.length)
+            _prefetchQueue.push(timelineCameraId)
+
         var list = mainWindow.cameraList
         var n = Math.min(list.length, 12)
         for (var i = 0; i < n; i++) {
             var cam = list[i]
             var id = (typeof cam === "string") ? cam : (cam.id || cam.name || "")
-            if (!id.length)
+            if (!id.length || id === timelineCameraId)
                 continue
-            var hasRec = false
-            if (typeof frigateRef.getRecordingsForCamera === "function") {
-                var r = frigateRef.getRecordingsForCamera(id)
-                hasRec = r && r.length > 0
-            }
-            if (hasRec)
-                continue
-            if (typeof frigateRef.loadRecordings === "function")
-                frigateRef.loadRecordings(id)
-            if (typeof frigateRef.loadMotionActivity === "function")
-                frigateRef.loadMotionActivity(id)
+            _prefetchQueue.push(id)
         }
+
+        prefetchTimer.start()
+        prefetchStep()
     }
 
     function applyGridTimelineCamera() {
@@ -317,6 +337,7 @@ Item {
             tl.allowAutoReveal = true
             tl.collapsed = false
 
+            // Paint cache if present; only blank if never loaded
             if (!applyCachedTimeline(tl, id))
                 clearGridTimelineTrack(tl)
 
@@ -339,7 +360,6 @@ Item {
             cameraGrid.enterFullscreen(timelineCameraId)
     }
 
-    // Attach timeline chrome to the window so it spans full width over sidebar + events
     function attachTimelineToWindow() {
         if (!mainWindow || !mainWindow.contentItem)
             return
@@ -379,7 +399,6 @@ Item {
             Qt.callLater(applyGridTimelineCamera)
     }
 
-    // Camera grid fills ServerView; only shrinks when timeline is expanded
     Loader {
         id: gridLoader
         anchors.fill: parent
@@ -429,16 +448,13 @@ Item {
         }
     }
 
-    // Full-width bottom layer (reparented to MainWindow when possible)
     Item {
         id: timelineLayer
-        // Default anchors until attachTimelineToWindow runs
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: root.timelineBarHeight > 0 ? root.timelineBarHeight : 36
         z: 10050
-        // Always keep a thin hit area for the arrow when collapsed
         visible: !root.hideGridTimeline
                  && root.mainWindow
                  && !root.mainWindow.cameraFullscreenActive
@@ -499,7 +515,7 @@ Item {
 
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: root.timelineCollapsed ? 4 : 4
+            anchors.bottomMargin: 4
 
             icon: root.timelineCollapsed
                   ? "qrc:/app/assets/icons/nx/arrow-up.svg"

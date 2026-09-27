@@ -102,15 +102,16 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         return;
     }
 
-    // NX-style: serve memory cache immediately, then soft-refresh from network
+    // NX-style: paint cache first, then soft-refresh
     if (m_recordingsByCamera.contains(cameraId))
         emit recordingsLoaded(cameraId, m_recordingsByCamera.value(cameraId));
     if (m_recordingDaysByCamera.contains(cameraId))
         emit recordingDaysLoaded(cameraId, m_recordingDaysByCamera.value(cameraId));
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    loadRecordingsRange(cameraId, nowSec - 24 * 3600, nowSec);
-    loadRecordingDays(cameraId);
+    // First paint: last 6 hours (calendar / range APIs load more when needed)
+    loadRecordingsRange(cameraId, nowSec - 6 * 3600, nowSec);
+    // Do not call loadRecordingDays here — calendar opens it on demand
 }
 
 void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
@@ -171,6 +172,10 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
         emit recordingDaysLoaded(cameraId, QStringList());
         return;
     }
+
+    // Serve cache immediately
+    if (m_recordingDaysByCamera.contains(cameraId))
+        emit recordingDaysLoaded(cameraId, m_recordingDaysByCamera.value(cameraId));
 
     QUrl url(QStringLiteral("%1/api/recordings/summary").arg(m_server));
     QUrlQuery query;
@@ -257,7 +262,8 @@ void FrigateTimeline::loadEvents(const QString& cameraId)
         emit eventsLoaded(cameraId, m_eventsByCamera.value(key));
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    loadEventsRange(cameraId, nowSec - 24 * 3600, nowSec);
+    // Default window 6h — EventList can request a longer range via loadEventsRange
+    loadEventsRange(cameraId, nowSec - 6 * 3600, nowSec);
 }
 
 void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
@@ -269,7 +275,7 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
         return;
     }
 
-    // Panel/timeline: show cached list immediately, then soft-refresh
+    // Show cache immediately, then soft-refresh
     const QString cacheKey = cameraId.isEmpty() ? QStringLiteral("__all__") : cameraId;
     if (m_eventsByCamera.contains(cacheKey))
         emit eventsLoaded(cameraId, m_eventsByCamera.value(cacheKey));
@@ -280,10 +286,9 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
         query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
     query.addQueryItem(QStringLiteral("before"), QString::number(beforeSec));
-    // Panel-sized set; base64 thumbs make very large limits expensive
-    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("150"));
-    // Embed thumbnails in JSON — avoids N separate /thumbnail.jpg requests
-    query.addQueryItem(QStringLiteral("include_thumbnails"), QStringLiteral("1"));
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("100"));
+    // Fast JSON: UI loads thumbs via URL for visible rows only
+    query.addQueryItem(QStringLiteral("include_thumbnails"), QStringLiteral("0"));
     url.setQuery(query);
 
     QNetworkRequest req(url);
@@ -336,22 +341,11 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
                     ev.insert(QStringLiteral("has_clip"),
                               o.value(QStringLiteral("has_clip")).toBool());
 
-                    // Prefer embedded base64 from include_thumbnails=1
-                    const QString thumbField = o.value(QStringLiteral("thumbnail")).toString();
-                    if (!thumbField.isEmpty()) {
-                        if (thumbField.startsWith(QLatin1String("data:")))
-                            ev.insert(QStringLiteral("thumbnail"), thumbField);
-                        else
-                            ev.insert(QStringLiteral("thumbnail"),
-                                      QStringLiteral("data:image/jpeg;base64,") + thumbField);
-                    } else if (!id.isEmpty() && !base.isEmpty()) {
-                        // Fallback: separate HTTP (older Frigate / no thumb on event)
+                    // URL only — EventList loads WebP/JPEG per visible row
+                    if (!id.isEmpty() && !base.isEmpty()) {
                         ev.insert(QStringLiteral("thumbnail"),
                                   base + QStringLiteral("/api/events/") + id
                                       + QStringLiteral("/thumbnail.jpg"));
-                    }
-
-                    if (!id.isEmpty() && !base.isEmpty()) {
                         ev.insert(QStringLiteral("snapshot"),
                                   base + QStringLiteral("/api/events/") + id
                                       + QStringLiteral("/snapshot.jpg"));
@@ -379,7 +373,7 @@ void FrigateTimeline::loadMotionActivity(const QString& cameraId)
         emit motionActivityLoaded(cameraId, m_motionByCamera.value(cameraId));
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    loadMotionActivityRange(cameraId, nowSec - 24 * 3600, nowSec);
+    loadMotionActivityRange(cameraId, nowSec - 6 * 3600, nowSec);
 }
 
 void FrigateTimeline::loadMotionActivityRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)

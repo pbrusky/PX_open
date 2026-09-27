@@ -19,7 +19,8 @@ Item {
 
     property string filterLabel: ""
     property real filterMinScore: 0
-    property int filterHours: 24
+    // Match FrigateTimeline default window (faster first load)
+    property int filterHours: 6
 
     signal requestToggleCollapse()
 
@@ -483,10 +484,8 @@ Item {
             spacing: 8
             model: root.eventsModel
 
-            // Keep ~2 screens of delegates; thumbs still gated by inView
             cacheBuffer: Math.max(200, height * 2)
 
-            // Bump so inView bindings re-evaluate while scrolling
             property real _viewTick: 0
             onContentYChanged: _viewTick = contentY
             onHeightChanged: _viewTick = contentY
@@ -547,8 +546,6 @@ Item {
                     return srv + "/api/events/" + evId + "/thumbnail.jpg"
                 }
 
-                // Load only when near the viewport (±1 screen). Depends on list._viewTick
-                // so it updates while scrolling without loading every off-screen row.
                 readonly property bool inView: {
                     var _ = list._viewTick
                     var cy = list.contentY
@@ -597,12 +594,10 @@ Item {
                             id: thumb
                             anchors.fill: parent
                             anchors.margins: 1
-                            // Lazy: empty source when off-screen → no network request
                             source: (rowRect.inView && rowRect.thumbUrl.length) ? rowRect.thumbUrl : ""
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
                             cache: true
-                            // Decode closer to display size (less CPU/RAM)
                             sourceSize.width: 200
                             sourceSize.height: 112
                         }

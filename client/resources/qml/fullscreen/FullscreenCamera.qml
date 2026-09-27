@@ -63,7 +63,6 @@ Item {
             return false
         if (timelineLoader.item.exportUiOpen)
             return true
-        // Fallback if property not yet on older timeline builds
         if (timelineLoader.item.exportBusy)
             return true
         if (timelineLoader.item.exportConfirm && timelineLoader.item.exportConfirm.visible)
@@ -90,7 +89,6 @@ Item {
         mainQueue: root.mainQueue
         isPlayback: root.isPlayback
         playbackReady: root.playbackReady
-        // Live visible while loading clip; hide only after first playback frame
         visible: !root.playbackReady
         opacity: root.playbackReady ? 0 : 1
     }
@@ -252,7 +250,6 @@ Item {
                 return
             if (timelineLoader.item.calendarOpen)
                 return
-            // Do not auto-hide during export confirm / range / download
             if (root.timelineExportUiOpen())
                 return
             if (typeof timelineLoader.item.hideTimeline === "function")
@@ -535,6 +532,7 @@ Item {
         })
     }
 
+    // Fast path: recordings (+ days) only — no events / motion on open
     function loadTimelineData() {
         if (!frigateRef)
             return
@@ -550,10 +548,9 @@ Item {
 
         if (typeof frigateRef.loadRecordings === "function")
             frigateRef.loadRecordings(id)
-        if (typeof frigateRef.loadEvents === "function")
-            frigateRef.loadEvents(id)
-        if (typeof frigateRef.loadMotionActivity === "function")
-            frigateRef.loadMotionActivity(id)
+        if (typeof frigateRef.loadRecordingDays === "function")
+            frigateRef.loadRecordingDays(id)
+
         recordingsPollTimer.tries = 0
         recordingsPollTimer.start()
     }
@@ -594,7 +591,6 @@ Item {
         liveLayers.cameraName = root.cameraName
         liveLayers.frigateRef = root.frigateRef
 
-        // ── Event / seek path: live underlay + LOADING CLIP + start playback ──
         if (pending > 0 && id !== "") {
             root.isPlayback = true
             root.playbackReady = false
@@ -624,7 +620,6 @@ Item {
             return
         }
 
-        // ── Normal live fullscreen ──
         liveLayers.subQueue = root.subQueue
         liveLayers.mainQueue = root.mainQueue
 
