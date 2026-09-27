@@ -483,6 +483,14 @@ Item {
             spacing: 8
             model: root.eventsModel
 
+            // Keep ~2 screens of delegates; thumbs still gated by inView
+            cacheBuffer: Math.max(200, height * 2)
+
+            // Bump so inView bindings re-evaluate while scrolling
+            property real _viewTick: 0
+            onContentYChanged: _viewTick = contentY
+            onHeightChanged: _viewTick = contentY
+
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
                 contentItem: Rectangle {
@@ -539,6 +547,19 @@ Item {
                     return srv + "/api/events/" + evId + "/thumbnail.jpg"
                 }
 
+                // Load only when near the viewport (±1 screen). Depends on list._viewTick
+                // so it updates while scrolling without loading every off-screen row.
+                readonly property bool inView: {
+                    var _ = list._viewTick
+                    var cy = list.contentY
+                    var vh = list.height
+                    var y = rowRect.y
+                    var h = rowRect.height
+                    if (vh <= 0)
+                        return false
+                    return (y + h > cy - vh) && (y < cy + vh * 2)
+                }
+
                 function formatTs(sec) {
                     if (!sec || sec <= 0)
                         return ""
@@ -576,10 +597,14 @@ Item {
                             id: thumb
                             anchors.fill: parent
                             anchors.margins: 1
-                            source: rowRect.thumbUrl
+                            // Lazy: empty source when off-screen → no network request
+                            source: (rowRect.inView && rowRect.thumbUrl.length) ? rowRect.thumbUrl : ""
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
                             cache: true
+                            // Decode closer to display size (less CPU/RAM)
+                            sourceSize.width: 200
+                            sourceSize.height: 112
                         }
 
                         Text {
@@ -592,7 +617,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             visible: thumb.status === Image.Error
-                                     || (thumb.status === Image.Null && !rowRect.thumbUrl.length)
+                                     || (thumb.status === Image.Null && rowRect.inView && !rowRect.thumbUrl.length)
                             text: "No img"
                             color: "#555"
                             font.pixelSize: 10
