@@ -31,7 +31,7 @@ Item {
         return timelineExpandedHeight
     }
 
-    // Staggered recordings-only prefetch
+    // Staggered recordings-only prefetch (motion loads for selected camera only)
     property var _prefetchQueue: []
     property int _prefetchIndex: 0
 
@@ -225,23 +225,45 @@ Item {
         )
     }
 
-    // Fast path: recordings + calendar days only (no events / motion)
+    // Recordings + motion ticks + days. Events stay on the Events panel.
     function loadGridTimelineData() {
         if (!frigateRef || !timelineCameraId.length)
             return
         var id = timelineCameraId
         if (typeof frigateRef.loadRecordings === "function")
             frigateRef.loadRecordings(id)
+        if (typeof frigateRef.loadMotionActivity === "function")
+            frigateRef.loadMotionActivity(id)
         if (typeof frigateRef.loadRecordingDays === "function")
             frigateRef.loadRecordingDays(id)
     }
 
-    // Optional later (Motion button)
-    function loadGridTimelineMotion() {
-        if (!frigateRef || !timelineCameraId.length)
+    function fetchMotionList(id) {
+        if (!root.frigateRef || !id.length)
+            return []
+        if (typeof root.frigateRef.getMotionActivityForCamera === "function") {
+            var m = root.frigateRef.getMotionActivityForCamera(id)
+            if (m && m.length)
+                return m
+        }
+        if (typeof root.frigateRef.getMotionActivity === "function") {
+            var m2 = root.frigateRef.getMotionActivity(id)
+            if (m2 && m2.length)
+                return m2
+        }
+        return []
+    }
+
+    function applyMotionToGrid(id, points) {
+        var tl = gridTimelineLoader.item
+        if (!tl || !id.length)
             return
-        if (typeof frigateRef.loadMotionActivity === "function")
-            frigateRef.loadMotionActivity(timelineCameraId)
+        if (tl.cameraId !== id && tl.cameraName !== id)
+            return
+        if (typeof tl.applyMotionPoints === "function")
+            tl.applyMotionPoints(points || [])
+        else
+            tl.motionPoints = points || []
     }
 
     function clearGridTimelineTrack(tl) {
@@ -264,19 +286,35 @@ Item {
         if (!tl || !root.frigateRef || !id.length)
             return false
         var had = false
+
         if (typeof root.frigateRef.getRecordingsForCamera === "function") {
             var r = root.frigateRef.getRecordingsForCamera(id) || []
             if (r.length) {
                 tl.recordings = r
+                if (r.length > 0) {
+                    tl.startTs = Number(r[0].start)
+                    tl.endTs = Number(r[r.length - 1].end)
+                }
                 had = true
             }
         }
+
         if (typeof root.frigateRef.getRecordingDaysForCamera === "function") {
             var d = root.frigateRef.getRecordingDaysForCamera(id) || []
             if (d.length)
                 tl.recordingDays = d
         }
-        // Skip events/motion on switch — keeps camera changes cheap
+
+        // Motion ticks from RAM/disk cache
+        var m = root.fetchMotionList(id)
+        if (m.length) {
+            if (typeof tl.applyMotionPoints === "function")
+                tl.applyMotionPoints(m)
+            else
+                tl.motionPoints = m
+            had = true
+        }
+
         return had
     }
 
@@ -326,6 +364,7 @@ Item {
         if (!tl)
             return
 
+        // Set API first so Connections on the timeline can receive signals
         if (root.frigateRef)
             tl.frigateRef = root.frigateRef
 
@@ -337,13 +376,18 @@ Item {
             tl.allowAutoReveal = true
             tl.collapsed = false
 
-            // Paint cache if present; only blank if never loaded
-            if (!applyCachedTimeline(tl, id))
-                clearGridTimelineTrack(tl)
+            clearGridTimelineTrack(tl)
+            applyCachedTimeline(tl, id)
 
             Qt.callLater(function() {
-                if (root.timelineCameraId === id)
-                    root.loadGridTimelineData()
+                if (root.timelineCameraId !== id)
+                    return
+                root.loadGridTimelineData()
+                // After load* may fill cache synchronously from disk
+                Qt.callLater(function() {
+                    if (root.timelineCameraId === id && gridTimelineLoader.item)
+                        root.applyCachedTimeline(gridTimelineLoader.item, id)
+                })
             })
         } else {
             tl.allowAutoReveal = false
@@ -397,6 +441,41 @@ Item {
     onTimelineCollapsedChanged: {
         if (!timelineCollapsed && !hideGridTimeline)
             Qt.callLater(applyGridTimelineCamera)
+    }
+
+    onHideGridTimelineChanged: {
+        // Leaving fullscreen recreates the timeline Loader — re-apply motion
+        if (!hideGridTimeline)
+            Qt.callLater(applyGridTimelineCamera)
+    }
+
+    // Push motion/recordings onto grid timeline when API signals fire
+    // (Loader is often destroyed during fullscreen; this path still works)
+    Connections {
+        target: root.frigateRef
+        ignoreUnknownSignals: true
+
+        function onMotionActivityLoaded(camId, points) {
+            root.applyMotionToGrid(camId, points)
+        }
+
+        function onRecordingsLoaded(camId, segments) {
+            var tl = gridTimelineLoader.item
+            if (!tl || (camId !== tl.cameraId && camId !== tl.cameraName))
+                return
+            tl.recordings = segments || []
+            if (tl.recordings.length > 0) {
+                tl.startTs = Number(tl.recordings[0].start)
+                tl.endTs = Number(tl.recordings[tl.recordings.length - 1].end)
+            }
+        }
+
+        function onRecordingDaysLoaded(camId, days) {
+            var tl = gridTimelineLoader.item
+            if (!tl || (camId !== tl.cameraId && camId !== tl.cameraName))
+                return
+            tl.recordingDays = days || []
+        }
     }
 
     Loader {
