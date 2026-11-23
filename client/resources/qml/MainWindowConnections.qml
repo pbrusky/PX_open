@@ -226,6 +226,8 @@ Item {
                 mainWindow.selectedCameraId = ""
                 mainWindow.serverName = ""
                 mainWindow.pendingRemoveCameraId = ""
+                mainWindow.wasFullscreenBeforeMinimize = false
+                mainWindow.isFullscreen = false
             }
             if (sidebarWrapper)
                 sidebarWrapper.cameraList = []
@@ -256,16 +258,26 @@ Item {
         }
 
         function onMinimizeRequested() {
+            if (mainWindow)
+                mainWindow.wasFullscreenBeforeMinimize = mainWindow.isFullscreen
             mainWindow.showMinimized()
         }
 
         function onMaximizeRequested() {
-            mainWindow.showMaximized()
+            if (mainWindow && typeof mainWindow.enterTrueFullscreen === "function") {
+                mainWindow.enterTrueFullscreen()
+            } else {
+                mainWindow.showMaximized()
+            }
             topbar.isMaximized = true
         }
 
         function onRestoreRequested() {
-            mainWindow.showNormal()
+            if (mainWindow && typeof mainWindow.exitTrueFullscreen === "function") {
+                mainWindow.exitTrueFullscreen()
+            } else {
+                mainWindow.showNormal()
+            }
 
             mainWindow.width = 1400
             mainWindow.height = 900

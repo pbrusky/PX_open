@@ -35,6 +35,8 @@ ApplicationWindow {
 
     property bool isFullscreen: false
     property bool cameraFullscreenActive: false
+    property bool wasFullscreenBeforeMinimize: false
+    property int previousVisibility: Window.Windowed
 
     readonly property real gridTimelineReserve: {
         if (!onServerView || cameraFullscreenActive) return 0
@@ -46,8 +48,16 @@ ApplicationWindow {
     property alias skipNextAutoConnect: session.skipNextAutoConnect
     property alias appSettings: session.settings
 
-    function enterTrueFullscreen() { isFullscreen = true; flags = Qt.FramelessWindowHint | Qt.Window; showFullScreen() }
-    function exitTrueFullscreen() { isFullscreen = false; showNormal() }
+    function enterTrueFullscreen() {
+        isFullscreen = true
+        flags = Qt.FramelessWindowHint | Qt.Window
+        showFullScreen()
+    }
+    function exitTrueFullscreen() {
+        isFullscreen = false
+        wasFullscreenBeforeMinimize = false
+        showNormal()
+    }
     function noteUserActivity() { FullscreenHelper.noteUserActivity() }
     function collapseChrome() { session.collapseChrome() }
     function rememberFullscreenCamera(n) { session.rememberFullscreenCamera(n) }
@@ -77,6 +87,32 @@ ApplicationWindow {
     onSelectedCameraIdChanged: {
         if (selectedCameraId && selectedCameraId.length)
             Qt.callLater(function() { mainWindow.prefetchTimelineForCamera(mainWindow.selectedCameraId) })
+    }
+
+    // Only re-enter fullscreen when leaving Minimized (taskbar restore)
+    onVisibilityChanged: {
+        var vis = mainWindow.visibility
+
+        if (vis === Window.Minimized) {
+            wasFullscreenBeforeMinimize = isFullscreen
+        } else if (previousVisibility === Window.Minimized
+                   && vis !== Window.Hidden
+                   && wasFullscreenBeforeMinimize) {
+            wasFullscreenBeforeMinimize = false
+            restoreFullscreenTimer.restart()
+        }
+
+        previousVisibility = vis
+    }
+
+    Timer {
+        id: restoreFullscreenTimer
+        interval: 50
+        repeat: false
+        onTriggered: {
+            enterTrueFullscreen()
+            topbar.isMaximized = true
+        }
     }
 
     function viewEvent(cameraId, startSec) {
@@ -128,7 +164,12 @@ ApplicationWindow {
         serverName: mainWindow.serverName
         onAboutRequested: popupManager.openPopup("qrc:/app/resources/qml/components/popups/AboutPopup.qml", { mainWindow: mainWindow })
         onSettingsRequested: contentLoader.source = "qrc:/app/resources/qml/generalSettings.qml"
-        onDisconnectRequested: session.disconnectFromServer(); onExitRequested: Qt.quit(); onMinimizeRequested: mainWindow.showMinimized()
+        onDisconnectRequested: session.disconnectFromServer()
+        onExitRequested: Qt.quit()
+        onMinimizeRequested: {
+            mainWindow.wasFullscreenBeforeMinimize = mainWindow.isFullscreen
+            mainWindow.showMinimized()
+        }
     }
 
     Rectangle {
