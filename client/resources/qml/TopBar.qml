@@ -22,7 +22,7 @@ Item {
     signal maximizeRequested()
     signal addCameraRequested()
     signal aboutRequested()
-    signal settingsRequested()   // ← new
+    signal settingsRequested()
 
     //
     // Right‑click menu on server name
@@ -193,8 +193,12 @@ Item {
             }
 
             MouseArea {
+                id: minimizeMouseArea
                 anchors.fill: parent
                 hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+
                 onEntered: minimizeButton.hovered = true
                 onExited: minimizeButton.hovered = false
                 onClicked: topbarWrapper.minimizeRequested()
@@ -223,6 +227,9 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+
                 onEntered: maximizeRestoreButton.hovered = true
                 onExited: maximizeRestoreButton.hovered = false
                 onClicked: {
@@ -259,6 +266,9 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+
                 onEntered: exitButton.hovered = true
                 onExited: exitButton.hovered = false
                 onClicked: topbarWrapper.exitRequested()
