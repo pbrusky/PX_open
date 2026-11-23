@@ -10,7 +10,7 @@ Rectangle {
     property bool collapsed: true
     property bool allowAutoReveal: false
     property bool pointerInside: false
-    property bool calendarOpen: calendarPopup.visible
+    property bool calendarOpen: false
     property real minMotion: 15
 
     property real dataStartTs: 0
@@ -23,6 +23,12 @@ Rectangle {
 
     property bool _viewLock: false
     property bool _fixedDayMode: false
+    property bool _lastHoverActive: false
+    property bool _hoverEmitPending: false
+    property bool _pendingHoverValue: false
+    property bool _activated: false
+    property bool _backendDrivesPlayhead: false
+    readonly property int maxMotionPoints: 800
 
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
@@ -30,7 +36,6 @@ Rectangle {
     property real exportStartMs: -1
     property real exportEndMs: -1
     property bool exportBusy: false
-    // -1 = unknown size (indeterminate); 0..100 when total known / finished
     property real exportPercent: 0
     property string exportStatusMessage: ""
     property real _lastProgressUiAt: 0
@@ -39,26 +44,63 @@ Rectangle {
     property real exportEtaSec: -1
     property real _progressSampleBytes: 0
     property real _progressSampleAt: 0
+    property bool exportUiOpen: false
 
-    readonly property bool exportUiOpen: (exportConfirm && exportConfirm.visible)
-                                         || exportBusy
-                                         || (exportEndMs > exportStartMs)
+    function isExportUiOpen() {
+        if (exportBusy)
+            return true
+        if (exportEndMs > exportStartMs)
+            return true
+        if (exportConfirmLoader.item && exportConfirmLoader.item.visible)
+            return true
+        return false
+    }
+
+    function refreshExportUiOpen() {
+        exportUiOpen = isExportUiOpen()
+    }
+
+    function activate() {
+        if (_activated)
+            return
+        _activated = true
+    }
+
+    function emitHover(active) {
+        active = !!active
+        if (active === _lastHoverActive && !_hoverEmitPending)
+            return
+        _lastHoverActive = active
+        _pendingHoverValue = active
+        if (_hoverEmitPending)
+            return
+        _hoverEmitPending = true
+        Qt.callLater(function() {
+            _hoverEmitPending = false
+            hoverActiveChanged(_pendingHoverValue)
+        })
+    }
 
     function showTimeline() {
         if (!allowAutoReveal)
             return
+        activate()
         collapsed = false
     }
 
     function hideTimeline() {
-        if (exportUiOpen)
+        if (isExportUiOpen())
             return
         collapsed = true
         hoverTsMs = -1
         pointerInside = false
-        calendarPopup.visible = false
-        if (exportConfirm.visible)
-            exportConfirm.close()
+        if (calendarPopup.visible)
+            calendarPopup.visible = false
+        calendarOpen = false
+        if (exportConfirmLoader.item && exportConfirmLoader.item.visible)
+            exportConfirmLoader.item.close()
+        refreshExportUiOpen()
+        emitHover(false)
     }
 
     height: collapsed ? 4 : 150
@@ -85,11 +127,13 @@ Rectangle {
     property real currentTimeMs: Date.now()
     property real playheadTsMs: 0
 
+    property alias exportConfirm: exportConfirmLoader
+
     function updatePlayhead() {
-        if (isPlayback && playbackPositionMs > 0)
-            playheadTsMs = playbackPositionMs
-        else
-            playheadTsMs = currentTimeMs
+        var next = (isPlayback && playbackPositionMs > 0) ? playbackPositionMs : currentTimeMs
+        if (Math.abs(next - playheadTsMs) < 1)
+            return
+        playheadTsMs = next
     }
 
     function exportSpanLabel() {
@@ -106,6 +150,7 @@ Rectangle {
     function clearExportRange() {
         exportStartMs = -1
         exportEndMs = -1
+        refreshExportUiOpen()
     }
 
     function cancelExport() {
@@ -114,7 +159,6 @@ Rectangle {
         exportStallTimer.stop()
         if (frigateRef && typeof frigateRef.cancelExport === "function")
             frigateRef.cancelExport()
-        // Status/UI finish via onExportFinished("Export cancelled")
     }
 
     function defaultExportFileName() {
@@ -134,25 +178,34 @@ Rectangle {
             return
         if (typeof frigateRef.exportClip !== "function")
             return
+        activate()
         allowAutoReveal = true
         collapsed = false
-        hoverActiveChanged(true)
-        var cam = cameraName !== "" ? cameraName : cameraId
-        exportConfirm.openWith(cam, exportStartMs, exportEndMs)
+        emitHover(true)
+        exportConfirmLoader.active = true
+        Qt.callLater(function() {
+            if (!exportConfirmLoader.item)
+                return
+            var cam = cameraName !== "" ? cameraName : cameraId
+            exportConfirmLoader.item.openWith(cam, exportStartMs, exportEndMs)
+            refreshExportUiOpen()
+        })
     }
 
     function startExportDownload(sMs, eMs) {
         exportStartMs = sMs
         exportEndMs = eMs
+        activate()
         allowAutoReveal = true
         collapsed = false
+        refreshExportUiOpen()
         exportFileDialog.selectedFile = "file:///" + defaultExportFileName()
         exportFileDialog.open()
     }
 
     Timer {
         interval: 1000
-        running: true
+        running: _activated
         repeat: true
         onTriggered: {
             currentTimeMs = Date.now()
@@ -163,7 +216,7 @@ Rectangle {
 
     Timer {
         interval: 250
-        running: !collapsed && isPlayback && playbackPositionMs > 0
+        running: _activated && !collapsed && isPlayback && playbackPositionMs > 0 && !_backendDrivesPlayhead
         repeat: true
         onTriggered: {
             var next = playbackPositionMs + interval
@@ -187,6 +240,7 @@ Rectangle {
             exportBytesPerSec = 0
             exportEtaSec = -1
             exportBusy = false
+            refreshExportUiOpen()
         }
     }
 
@@ -210,11 +264,12 @@ Rectangle {
     }
 
     HoverHandler {
+        enabled: !timeline.collapsed
         onHoveredChanged: {
             if (timeline.collapsed)
                 return
             pointerInside = hovered
-            hoverActiveChanged(hovered || timeline.exportUiOpen)
+            emitHover(hovered || timeline.isExportUiOpen())
             if (!hovered)
                 hoverTsMs = -1
         }
@@ -259,6 +314,7 @@ Rectangle {
         function onPlaybackPositionChanged(id, posMs) {
             if (id !== cameraId && id !== cameraName)
                 return
+            _backendDrivesPlayhead = true
             if (Math.abs(posMs - playbackPositionMs) > 1) {
                 playbackPositionMs = posMs
                 updatePlayhead()
@@ -311,11 +367,11 @@ Rectangle {
                     exportEtaSec = -1
                 exportStatusMessage = sizeStr + rateStr
             } else {
-                // No Content-Length — no invented %
                 exportPercent = -1
                 exportEtaSec = -1
                 exportStatusMessage = sizeStr + rateStr
             }
+            refreshExportUiOpen()
         }
 
         function onExportFinished(ok, message, path) {
@@ -325,12 +381,26 @@ Rectangle {
             exportBytesPerSec = 0
             exportEtaSec = -1
             exportStatusMessage = message || (ok ? "Saved" : "Failed")
-            // Clear range on success or cancel
             var msg = (message || "").toLowerCase()
             if (ok || msg.indexOf("cancel") >= 0)
                 clearExportRange()
             exportDoneClearTimer.restart()
+            refreshExportUiOpen()
         }
+    }
+
+    onIsPlaybackChanged: {
+        if (!isPlayback) {
+            _backendDrivesPlayhead = false
+            updatePlayhead()
+        } else {
+            activate()
+        }
+    }
+
+    onCollapsedChanged: {
+        if (!collapsed)
+            activate()
     }
 
     function normalizeSec(t) {
@@ -455,7 +525,19 @@ Rectangle {
     }
 
     function applyMotionPoints(points) {
-        motionPoints = points || []
+        points = points || []
+        if (points.length <= maxMotionPoints) {
+            motionPoints = points
+            return
+        }
+        var step = points.length / maxMotionPoints
+        var out = []
+        var i
+        for (i = 0; i < maxMotionPoints; ++i) {
+            var idx = Math.min(points.length - 1, Math.floor(i * step))
+            out.push(points[idx])
+        }
+        motionPoints = out
     }
 
     function effectiveStartTs() {
@@ -475,6 +557,8 @@ Rectangle {
     }
 
     function zoomAt(cursorX, factor) {
+        if (_viewLock)
+            return
         var s = effectiveStartTs()
         var e = effectiveEndTs()
         var w = mapWidth()
@@ -491,6 +575,8 @@ Rectangle {
     }
 
     function panByPixels(dx) {
+        if (_viewLock)
+            return
         var s = effectiveStartTs()
         var e = effectiveEndTs()
         var w = mapWidth()
@@ -501,15 +587,36 @@ Rectangle {
         clampView()
     }
 
+    // Must NOT be named such that onResetZoom: resetZoom() re-emits the signal
     function resetZoom() {
+        if (_viewLock)
+            return
         _fixedDayMode = false
-        applyDefaultView()
+        _viewLock = true
+
+        var nowSec = Date.now() / 1000
+        var de = dataEndBound()
+        var ds = dataStartBound()
+        var end = Math.min(de, nowSec)
+        var start = end - defaultViewSpan
+        if (start < ds)
+            start = ds
+        if (end <= start)
+            end = start + minViewSpan
+
+        viewStartTs = start
+        viewEndTs = end
+        _viewLock = false
     }
 
     function timestampToX(tsMs) {
-        var s = effectiveStartTs()
-        var e = effectiveEndTs()
-        var w = mapWidth()
+        var s = viewStartTs
+        var e = viewEndTs
+        if (!(e > s)) {
+            s = dataStartBound()
+            e = dataEndBound()
+        }
+        var w = Math.max(1, width - 8)
         if (e <= s)
             return 0
         var ratio = (tsMs - s * 1000) / ((e - s) * 1000)
@@ -517,9 +624,13 @@ Rectangle {
     }
 
     function xToTimestamp(x) {
-        var s = effectiveStartTs()
-        var e = effectiveEndTs()
-        var w = mapWidth()
+        var s = viewStartTs
+        var e = viewEndTs
+        if (!(e > s)) {
+            s = dataStartBound()
+            e = dataEndBound()
+        }
+        var w = Math.max(1, width - 8)
         var ratio = Math.max(0, Math.min(1, x / w))
         return (s + ratio * (e - s)) * 1000
     }
@@ -586,6 +697,7 @@ Rectangle {
         viewEndTs = dayEnd
         clampView()
         calendarPopup.visible = false
+        calendarOpen = false
 
         var id = cameraId !== "" ? cameraId : cameraName
         if (frigateRef && id !== "") {
@@ -598,7 +710,9 @@ Rectangle {
         }
     }
 
-    Component.onCompleted: updatePlayhead()
+    Component.onCompleted: {
+        Qt.callLater(updatePlayhead)
+    }
 
     TimelineStatusBar {
         id: statusBar
@@ -613,7 +727,7 @@ Rectangle {
         exportPercent: timeline.exportPercent
         onCalendarToggled: {
             if (!calendarPopup.visible) {
-                var d = new Date(effectiveStartTs() * 1000)
+                var d = new Date(timeline.effectiveStartTs() * 1000)
                 calendarPopup.calYear = d.getFullYear()
                 calendarPopup.calMonth = d.getMonth() + 1
                 var id = cameraId !== "" ? cameraId : cameraName
@@ -622,9 +736,10 @@ Rectangle {
             }
             calendarPopup.visible = !calendarPopup.visible
         }
-        onZoomOut: zoomAt(mapWidth() / 2, 0.7)
-        onZoomIn: zoomAt(mapWidth() / 2, 1.4)
-        onResetZoom: resetZoom()
+        // Qualify with timeline. — bare resetZoom() re-emits statusBar's signal (stack overflow)
+        onZoomOut: timeline.zoomAt(timeline.mapWidth() / 2, 0.7)
+        onZoomIn: timeline.zoomAt(timeline.mapWidth() / 2, 1.4)
+        onResetZoom: timeline.resetZoom()
         onExportRequested: timeline.requestExport()
         onClearExportRange: timeline.clearExportRange()
         onCancelExportRequested: timeline.cancelExport()
@@ -636,8 +751,8 @@ Rectangle {
         anchors.right: parent.right
         anchors.top: statusBar.bottom
         anchors.topMargin: 2
-        startTs: timeline.effectiveStartTs()
-        endTs: timeline.effectiveEndTs()
+        startTs: timeline.viewStartTs > 0 ? timeline.viewStartTs : 0
+        endTs: timeline.viewEndTs > timeline.viewStartTs ? timeline.viewEndTs : 1
         segmentCount: 12
         visible: !collapsed
         z: 5
@@ -656,8 +771,6 @@ Rectangle {
         timeline: timeline
         minMotion: timeline.minMotion
         onSeekRequested: function(tsMs) {
-            timeline.playbackPositionMs = tsMs
-            timeline.updatePlayhead()
             timeline.seekRequested(tsMs)
         }
         onHoverTimeChanged: function(tsMs) {
@@ -713,7 +826,10 @@ Rectangle {
         anchors.bottomMargin: 28
         z: 200
         timeline: timeline
-        onVisibleChanged: timeline.hoverActiveChanged(visible || timeline.pointerInside || timeline.exportUiOpen)
+        onVisibleChanged: {
+            timeline.calendarOpen = visible
+            emitHover(visible || timeline.pointerInside || timeline.isExportUiOpen())
+        }
         onDaySelected: function(y, m, d) {
             jumpToDay(y, m, d)
         }
@@ -736,17 +852,22 @@ Rectangle {
         z: 5
     }
 
-    ExportConfirmPopup {
-        id: exportConfirm
-        onConfirmed: function(sMs, eMs) {
-            timeline.startExportDownload(sMs, eMs)
-        }
-        onVisibleChanged: {
-            if (visible) {
-                timeline.allowAutoReveal = true
-                timeline.collapsed = false
-            }
-            timeline.hoverActiveChanged(timeline.pointerInside || timeline.exportUiOpen)
+    Loader {
+        id: exportConfirmLoader
+        active: false
+        source: "qrc:/app/resources/qml/fullscreen/ExportConfirmPopup.qml"
+        onLoaded: {
+            item.confirmed.connect(function(sMs, eMs) {
+                timeline.startExportDownload(sMs, eMs)
+            })
+            item.visibleChanged.connect(function() {
+                if (item.visible) {
+                    timeline.allowAutoReveal = true
+                    timeline.collapsed = false
+                }
+                timeline.refreshExportUiOpen()
+                emitHover(timeline.pointerInside || timeline.isExportUiOpen())
+            })
         }
     }
 
@@ -781,10 +902,12 @@ Rectangle {
             _lastProgressUiAt = 0
             _progressSampleAt = 0
             _progressSampleBytes = 0
+            refreshExportUiOpen()
             frigateRef.exportClip(id, startSec, endSec, path)
         }
         onRejected: {
-            hoverActiveChanged(pointerInside || exportUiOpen)
+            refreshExportUiOpen()
+            emitHover(pointerInside || isExportUiOpen())
         }
     }
 }

@@ -3,13 +3,21 @@ import QtQuick 2.15
 Item {
     id: segments
 
-    property var recordings
-    property real startTs
-    property real endTs
-    property real zoom
-    property real pan
-    property real timelineWidth
-    property var timestampToX
+    property var recordings: []
+    property var timeline: null
+    property real viewStart: 0
+    property real viewEnd: 0
+    property real contentWidth: 1
+
+    function mapX(tsMs) {
+        var s = viewStart
+        var e = viewEnd
+        var w = Math.max(1, contentWidth)
+        if (e <= s)
+            return 0
+        var ratio = (tsMs - s * 1000) / ((e - s) * 1000)
+        return Math.max(0, Math.min(w, ratio * w))
+    }
 
     Repeater {
         model: recordings
@@ -22,13 +30,11 @@ Item {
             opacity: 0.85
 
             width: {
-                if (!timestampToX)
-                    return 4
-                var x1 = timestampToX(modelData.start * 1000)
-                var x2 = timestampToX(modelData.end * 1000)
+                var x1 = segments.mapX(Number(modelData.start) * 1000)
+                var x2 = segments.mapX(Number(modelData.end) * 1000)
                 return Math.max(2, x2 - x1)
             }
-            x: timestampToX ? timestampToX(modelData.start * 1000) : 0
+            x: segments.mapX(Number(modelData.start) * 1000)
         }
     }
 }
