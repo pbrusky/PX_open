@@ -33,6 +33,10 @@ Item {
     readonly property color muted: "#8A8A96"
     readonly property color softBorder: "#3A3A44"
 
+    // Internal state guards
+    property bool _isRebuildingLabels: false
+    property int _refreshGen: 0
+
     clip: true
 
     function cameraForRequest() {
@@ -65,6 +69,7 @@ Item {
         }
 
         statusText = "Loading…"
+        root._refreshGen++
 
         var nowSec = Math.floor(Date.now() / 1000)
         var afterSec = nowSec - (filterHours * 3600)
@@ -120,6 +125,12 @@ Item {
         return h + "h"
     }
 
+    function formatTs(sec) {
+        if (!sec || sec <= 0)
+            return ""
+        return Qt.formatDateTime(new Date(sec * 1000), "MM/dd hh:mm:ss")
+    }
+
     function availableLabels() {
         var map = ({})
         var src = eventsRaw || []
@@ -137,6 +148,7 @@ Item {
     }
 
     function rebuildLabelModel() {
+        root._isRebuildingLabels = true
         var prev = root.filterLabel
         labelModel.clear()
         labelModel.append({ text: "All object types", value: "" })
@@ -153,6 +165,7 @@ Item {
                 if (selectIdx === 0)
                     root.filterLabel = ""
             }
+            root._isRebuildingLabels = false
         })
     }
 
@@ -374,6 +387,8 @@ Item {
                 elide: Text.ElideRight
             }
             onActivated: {
+                if (root._isRebuildingLabels)
+                    return
                 if (currentIndex < 0 || currentIndex >= labelModel.count) {
                     root.filterLabel = ""
                     return
@@ -479,16 +494,12 @@ Item {
         ListView {
             id: list
             width: parent.width
-            height: Math.max(50, col.height - 250)
+            height: Math.max(50, col.height - list.y)
             clip: true
             spacing: 8
             model: root.eventsModel
 
             cacheBuffer: Math.max(200, height * 2)
-
-            property real _viewTick: 0
-            onContentYChanged: _viewTick = contentY
-            onHeightChanged: _viewTick = contentY
 
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -535,32 +546,23 @@ Item {
                         return ""
                     var srv = ""
                     try {
-                        srv = "" + (root.frigateRef.server || "")
+                        srv = ("" + (root.frigateRef.server || "")).replace(/\/+$/, "")
                     } catch (e) {
                         return ""
                     }
                     if (!srv.length)
                         return ""
-                    while (srv.length && srv.charAt(srv.length - 1) === "/")
-                        srv = srv.substring(0, srv.length - 1)
                     return srv + "/api/events/" + evId + "/thumbnail.jpg"
                 }
 
                 readonly property bool inView: {
-                    var _ = list._viewTick
                     var cy = list.contentY
                     var vh = list.height
-                    var y = rowRect.y
+                    var yPos = rowRect.y
                     var h = rowRect.height
                     if (vh <= 0)
                         return false
-                    return (y + h > cy - vh) && (y < cy + vh * 2)
-                }
-
-                function formatTs(sec) {
-                    if (!sec || sec <= 0)
-                        return ""
-                    return Qt.formatDateTime(new Date(sec * 1000), "MM/dd hh:mm:ss")
+                    return (yPos + h > cy - vh) && (yPos < cy + vh * 2)
                 }
 
                 Rectangle {
@@ -659,7 +661,7 @@ Item {
                         }
 
                         Text {
-                            text: rowRect.formatTs(rowRect.evStart)
+                            text: root.formatTs(rowRect.evStart)
                             color: "#FFFFFF"
                             font.pixelSize: 12
                         }
