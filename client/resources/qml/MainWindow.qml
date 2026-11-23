@@ -295,19 +295,40 @@ ApplicationWindow {
         onMinimizeRequested: mainWindow.showMinimized()
     }
 
-    IconButton {
+    // High-visibility top pull-tab handle for TopBar
+    Rectangle {
         id: topbarArrow
-        width: 32
-        height: 32
-        x: (mainWindow.width / 2) - (width / 2)
-        y: topbar.collapsed ? 4 : topbar.height + 4
+        width: 44
+        height: 24
+        radius: 6
+        color: topbarArrowArea.containsMouse ? "#3A3A4D" : "#1B1B22"
+        border.color: topbarArrowArea.containsMouse ? "#6A8AFF" : "#4A4A58"
+        border.width: 1.5
         z: 10000
-        icon: topbar.collapsed
-              ? "qrc:/app/assets/icons/nx/arrow-down.svg"
-              : "qrc:/app/assets/icons/nx/arrow-up.svg"
-        visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
-        onClicked: topbar.collapsed = !topbar.collapsed
+
+        x: (mainWindow.width / 2) - (width / 2)
+        y: topbar.collapsed ? -2 : (topbar.height - (height / 2))
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.InOutQuad } }
+
+        Image {
+            anchors.centerIn: parent
+            width: 16
+            height: 16
+            source: topbar.collapsed
+                  ? "qrc:/app/assets/icons/nx/arrow-down.svg"
+                  : "qrc:/app/assets/icons/nx/arrow-up.svg"
+            fillMode: Image.PreserveAspectFit
+        }
+
+        MouseArea {
+            id: topbarArrowArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: topbar.collapsed = !topbar.collapsed
+        }
+
+        visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
     }
 
     Sidebar {
@@ -362,21 +383,44 @@ ApplicationWindow {
         }
     }
 
-    IconButton {
+    // High-visibility side handle tab for the Sidebar
+    Rectangle {
         id: sidebarReturnArrow
         width: 32
-        height: 32
-        x: sidebarWrapper.collapsed
-            ? 4
-            : sidebarWrapper.x + sidebarWrapper.width - 36
-        y: topbar.height + (mainWindow.height - topbar.height - mainWindow.gridTimelineReserve) / 2 - height / 2
+        height: 44
+        radius: 8
+        color: sidebarArrowArea.containsMouse ? "#3A3A4D" : "#1B1B22"
+        border.color: sidebarArrowArea.containsMouse ? "#6A8AFF" : "#4A4A58"
+        border.width: 1.5
         z: 10001
-        icon: sidebarWrapper.collapsed
-              ? "qrc:/app/assets/icons/nx/arrow-right.svg"
-              : "qrc:/app/assets/icons/nx/arrow-left.svg"
-        visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
-        onClicked: sidebarWrapper.collapsed = !sidebarWrapper.collapsed
+
+        x: sidebarWrapper.collapsed
+            ? -4
+            : (sidebarWrapper.x + sidebarWrapper.width - (width / 2))
+
+        y: topbar.height + (mainWindow.height - topbar.height - mainWindow.gridTimelineReserve) / 2 - height / 2
+
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+
+        Image {
+            anchors.centerIn: parent
+            width: 16
+            height: 16
+            source: sidebarWrapper.collapsed
+                  ? "qrc:/app/assets/icons/nx/arrow-right.svg"
+                  : "qrc:/app/assets/icons/nx/arrow-left.svg"
+            fillMode: Image.PreserveAspectFit
+        }
+
+        MouseArea {
+            id: sidebarArrowArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: sidebarWrapper.collapsed = !sidebarWrapper.collapsed
+        }
+
+        visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
     }
 
     EventList {
@@ -406,26 +450,44 @@ ApplicationWindow {
         onRequestToggleCollapse: eventsPanel.collapsed = !eventsPanel.collapsed
     }
 
-    IconButton {
+    // High-visibility side handle tab for the Events Panel
+    Rectangle {
         id: eventsArrow
         width: 32
-        height: 32
+        height: 44
+        radius: 8
+        color: eventsArrowArea.containsMouse ? "#3A3A4D" : "#1B1B22"
+        border.color: eventsArrowArea.containsMouse ? "#6A8AFF" : "#4A4A58"
+        border.width: 1.5
         z: 10001
 
         x: eventsPanel.collapsed
-            ? (mainWindow.width - width - 4)
-            : (mainWindow.width - eventsPanel.width + 4)
+            ? (mainWindow.width - width + 4)
+            : (mainWindow.width - eventsPanel.width - (width / 2))
 
         y: topbar.height + (mainWindow.height - topbar.height - mainWindow.gridTimelineReserve) / 2 - height / 2
 
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
 
-        icon: eventsPanel.collapsed
-              ? "qrc:/app/assets/icons/nx/arrow-left.svg"
-              : "qrc:/app/assets/icons/nx/arrow-right.svg"
+        Image {
+            anchors.centerIn: parent
+            width: 16
+            height: 16
+            source: eventsPanel.collapsed
+                  ? "qrc:/app/assets/icons/nx/arrow-left.svg"
+                  : "qrc:/app/assets/icons/nx/arrow-right.svg"
+            fillMode: Image.PreserveAspectFit
+        }
+
+        MouseArea {
+            id: eventsArrowArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: eventsPanel.collapsed = !eventsPanel.collapsed
+        }
 
         visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
-        onClicked: eventsPanel.collapsed = !eventsPanel.collapsed
     }
 
     PopupManager {
