@@ -30,7 +30,8 @@ Item {
             if (timeline && timeline.pointerInside)
                 return
 
-            timeline.collapsed = true
+            if (timeline)
+                timeline.collapsed = true
         }
     }
 
@@ -55,44 +56,14 @@ Item {
         z: 99999
 
         onEntered: {
-            timeline.collapsed = false
+            if (timeline)
+                timeline.collapsed = false
             autoHideTimer.restart()
             autoHide.mouseNearBottom()
         }
 
         onExited: {
             autoHide.mouseAway()
-        }
-    }
-
-    Rectangle {
-        id: collapseHandle
-        width: 32
-        height: 16
-        radius: 8
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        color: "#222"
-        border.color: "#444"
-        border.width: 1
-        z: 200
-        visible: !timeline.collapsed
-
-        Text {
-            anchors.centerIn: parent
-            text: "▼"
-            color: "#ccc"
-            font.pixelSize: 12
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            onClicked: {
-                forceVisible = !forceVisible
-                timeline.collapsed = !timeline.collapsed
-                if (!timeline.collapsed)
-                    autoHideTimer.restart()
-            }
         }
     }
 }

@@ -585,24 +585,6 @@ Item {
             font.pixelSize: 12
             font.bold: true
         }
-
-        IconButton {
-            id: timelineArrow
-            width: 32
-            height: 32
-            z: 3
-
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 4
-
-            icon: root.timelineCollapsed
-                  ? "qrc:/app/assets/icons/nx/arrow-up.svg"
-                  : "qrc:/app/assets/icons/nx/arrow-down.svg"
-
-            visible: !root.hideGridTimeline
-            onClicked: root.timelineCollapsed = !root.timelineCollapsed
-        }
     }
 
     function initializeGrid() {

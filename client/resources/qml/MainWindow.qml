@@ -490,6 +490,56 @@ ApplicationWindow {
         visible: !topbar.isStartupPage && !mainWindow.cameraFullscreenActive
     }
 
+    // High-visibility bottom pull-tab handle for the Timeline
+    Rectangle {
+        id: timelineArrow
+        width: 44
+        height: 24
+        radius: 6
+        color: timelineArrowArea.containsMouse ? "#3A3A4D" : "#1B1B22"
+        border.color: timelineArrowArea.containsMouse ? "#6A8AFF" : "#4A4A58"
+        border.width: 1.5
+        z: 10000
+
+        x: (mainWindow.width / 2) - (width / 2)
+        y: mainWindow.gridTimelineReserve > 0
+            ? (mainWindow.height - mainWindow.gridTimelineReserve - (height / 2))
+            : (mainWindow.height - height + 2)
+
+        Behavior on y { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
+
+        Image {
+            anchors.centerIn: parent
+            width: 16
+            height: 16
+            source: mainWindow.gridTimelineReserve > 0
+                  ? "qrc:/app/assets/icons/nx/arrow-down.svg"
+                  : "qrc:/app/assets/icons/nx/arrow-up.svg"
+            fillMode: Image.PreserveAspectFit
+        }
+
+        MouseArea {
+            id: timelineArrowArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                var sv = contentLoader.item
+                if (!sv)
+                    return
+                if (typeof sv.toggleTimeline === "function") {
+                    sv.toggleTimeline()
+                } else if (sv.timeline && sv.timeline.collapsed !== undefined) {
+                    sv.timeline.collapsed = !sv.timeline.collapsed
+                } else if (sv.timelineCollapsed !== undefined) {
+                    sv.timelineCollapsed = !sv.timelineCollapsed
+                }
+            }
+        }
+
+        visible: mainWindow.onServerView && !mainWindow.cameraFullscreenActive
+    }
+
     PopupManager {
         id: popupManager
         anchors.fill: parent
