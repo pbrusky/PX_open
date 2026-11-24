@@ -26,10 +26,6 @@ Item {
     property var cameraOnlineMap: ({})
     property bool _skipStreamStopOnRemove: false
 
-    // Pending event seek (ms). FullscreenCamera shows live while clip loads, then seeks.
-    property real pendingSeekMs: -1
-    property string pendingSeekCamera: ""
-
     function setChromeHidden(hidden) {
         if (mainWindow)
             mainWindow.cameraFullscreenActive = !!hidden
@@ -322,15 +318,9 @@ Item {
         }
     }
 
-    // keepPendingSeek: true when opening from an event (preserve pendingSeekMs)
-    function enterFullscreen(cameraName, keepPendingSeek) {
+    function enterFullscreen(cameraName) {
         if (!cameraName || cameraName === "")
             return
-
-        if (!keepPendingSeek) {
-            pendingSeekMs = -1
-            pendingSeekCamera = ""
-        }
 
         var prevName = fullscreenName
         if (prevName !== "" && prevName !== cameraName &&
@@ -370,7 +360,7 @@ Item {
         }
     }
 
-    // Open fullscreen with live queues + pending seek (live shows while clip loads)
+    // Open fullscreen, then seek via FullscreenCamera.onTimelineSeek (binds playback queue)
     function enterFullscreenAndSeek(cameraName, timestampMs) {
         if (!cameraName || cameraName === "")
             return
@@ -378,29 +368,17 @@ Item {
         if (!(ts > 0))
             return
 
-        var name = "" + cameraName
-        var ms = Math.floor(ts)
-
-        pendingSeekCamera = name
-        pendingSeekMs = ms
-
         seekFromEventTimer.stop()
-        seekFromEventTimer.cameraName = name
-        seekFromEventTimer.timestampMs = ms
+        seekFromEventTimer.cameraName = "" + cameraName
+        seekFromEventTimer.timestampMs = Math.floor(ts)
 
-        if (frigateRef && typeof frigateRef.startPlayback === "function")
-            frigateRef.startPlayback(name, ms)
-
-        // Live sub/main queues + keep pendingSeek for FullscreenCamera.open()
-        enterFullscreen(name, true)
-
-        seekFromEventTimer.interval = 200
+        enterFullscreen(cameraName)
         seekFromEventTimer.restart()
     }
 
     Timer {
         id: seekFromEventTimer
-        interval: 200
+        interval: 750
         repeat: false
         property real timestampMs: 0
         property string cameraName: ""
@@ -413,14 +391,12 @@ Item {
             if (item.cameraName !== name && item.cameraId !== name)
                 return
 
+            // open() arms seek after ~600ms; force arm so event seek is accepted
             item.seekArmed = true
             if (typeof item.onTimelineSeek === "function")
                 item.onTimelineSeek(timestampMs)
             else if (frigateRef && typeof frigateRef.startPlayback === "function")
                 frigateRef.startPlayback(name, Math.floor(timestampMs))
-
-            gridContainer.pendingSeekMs = -1
-            gridContainer.pendingSeekCamera = ""
         }
     }
 
@@ -449,13 +425,6 @@ Item {
         item.mainQueue = (mainQ !== undefined) ? mainQ : null
         item.mainReady = false
 
-        if (typeof item.pendingSeekMs !== "undefined") {
-            if (pendingSeekCamera === name && pendingSeekMs > 0)
-                item.pendingSeekMs = pendingSeekMs
-            else
-                item.pendingSeekMs = -1
-        }
-
         item.open()
     }
 
@@ -464,8 +433,6 @@ Item {
             return
 
         seekFromEventTimer.stop()
-        pendingSeekMs = -1
-        pendingSeekCamera = ""
 
         var name = fullscreenName
         if (fullscreenLoader.item)
@@ -488,12 +455,9 @@ Item {
             frigateRef.stopFullscreenStream(name)
         }
 
-        if (mainWindow) {
-            if (typeof mainWindow.enterTrueFullscreen === "function")
-                mainWindow.enterTrueFullscreen()
-            else if (typeof mainWindow.showFullScreen === "function")
-                mainWindow.showFullScreen()
-        }
+        // Do NOT force the main window into true fullscreen here.
+        // The window should stay in whatever state it was already in
+        // (normal or true fullscreen). Chrome is restored via setChromeHidden(false).
     }
 
     function openEditCamera(id) {
