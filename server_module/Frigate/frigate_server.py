@@ -290,7 +290,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     "id": MODULE_ID,
                     "systemId": SYSTEM_ID,
                     "name": SYSTEM_NAME,
-                    "version": "1.0",
+                    "version": "1.0.8",
                     "status": "online",
                     "httpPort": HTTP_PORT,
                     "httpsPort": HTTPS_PORT,
