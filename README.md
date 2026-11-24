@@ -37,8 +37,8 @@ The server module should run on the **same LAN host** that runs Frigate (or a ho
 2. Install **Docker Desktop** if Frigate/go2rtc run in Docker.
 3. Open a terminal in the server module folder:
 
-       cd C:\path\to\PX_open\server_module\Frigate
-       pip install pyyaml psutil requests
+       cd path\to\PX_open\server_module\Frigate
+       pip install pyyaml psutil requests cryptography
 
 4. Configure `config.json` (created on first run if missing). Important fields:
 
@@ -58,6 +58,8 @@ The server module should run on the **same LAN host** that runs Frigate (or a ho
 
 You should see discovery broadcast and HTTP listening, for example: `http://<LAN-IP>:8001`
 
+On first run the module automatically generates a self-signed certificate (`cert.pem` + `key.pem`) for HTTPS (port 8002). These files are created next to the script and are **not** stored in the repository.
+
 Optional: if you ship a `frigate_server.exe`, place `config.json` beside it and run the exe instead of the `.py` file.
 
 ### 1.2 Linux
@@ -67,22 +69,24 @@ Optional: if you ship a `frigate_server.exe`, place `config.json` beside it and 
        sudo apt update
        sudo apt install -y python3 python3-pip python3-venv python3-yaml python3-psutil python3-requests
 
-If Frigate runs in Docker:
-
-       sudo apt install -y docker.io
-
-If `pip install` fails with externally-managed-environment, prefer the `python3-*` packages above, or use a venv:
+   Or use a virtual environment:
 
        cd /path/to/PX_open/server_module/Frigate
        python3 -m venv .venv
        source .venv/bin/activate
-       pip install pyyaml psutil requests
+       pip install pyyaml psutil requests cryptography
+
+   If Frigate runs in Docker:
+
+       sudo apt install -y docker.io
 
 2. Start:
 
        python3 frigate_server.py
 
 On first run, `config.json` may be created or adjusted for Linux paths. Verify Frigate and go2rtc config paths and container names (`docker ps`).
+
+The module will also generate a self-signed certificate (`cert.pem` + `key.pem`) for HTTPS on first run.
 
 3. Allow firewall access if needed: TCP **8001** / **8002**, and UDP discovery (client listens on **3666**).
 
@@ -106,8 +110,8 @@ A normal Release package includes required runtimes; you do not need to install 
 
 - Visual Studio (with C++), Qt 6.5+, CMake, FFmpeg (e.g. C:\ffmpeg)
 - Build the client project (Release for daily use)
-- Run e.g. build\client\Release\px_open.exe
-- Optional: place version.txt next to the exe so About shows the version
+- Run e.g. `build\client\Release\px_open.exe`
+- Optional: place `version.txt` next to the exe so About shows the version
 
 ---
 
@@ -115,9 +119,9 @@ A normal Release package includes required runtimes; you do not need to install 
 
 ### Option A – .deb package (recommended)
 
-The release .deb installs under /opt/px-open, adds a PX Open menu entry, and bundles Qt 6.5.x plus many FFmpeg/codec libraries. You do not need a full Qt SDK only to run the app.
+The release `.deb` installs under `/opt/px-open`, adds a PX Open menu entry, and bundles Qt 6.5.x plus many FFmpeg/codec libraries. You do not need a full Qt SDK only to run the app.
 
-1. Download px-open_*_amd64.deb from https://github.com/pbrusky/PX_open/releases
+1. Download `px-open_*_amd64.deb` from https://github.com/pbrusky/PX_open/releases
 2. Install:
 
        sudo dpkg -i px-open_*.deb
@@ -131,7 +135,7 @@ The release .deb installs under /opt/px-open, adds a PX Open menu entry, and bun
 
        sudo apt remove px-open
 
-Most heavy libraries ship inside the .deb. Remaining depends are normal desktop libraries (OpenGL, xcb, fontconfig, nss, etc.). Use `apt-get install -f` to install them.
+Most heavy libraries ship inside the `.deb`. Remaining depends are normal desktop libraries (OpenGL, xcb, fontconfig, nss, etc.). Use `apt-get install -f` to install them.
 
 If the app does not start:
 
@@ -150,7 +154,7 @@ On weak GPUs (e.g. some Intel Atom systems):
        cmake --build build -j$(nproc)
        ./build/px_open
 
-Optional: produce a .deb with packaging/package_deb.sh using a Release binary.
+Optional: produce a `.deb` with `packaging/package_deb.sh` using a Release binary.
 
 WSL is useful for compiling; UDP discovery often fails under WSL NAT — use manual server IP or test on real Windows/Linux.
 
@@ -173,7 +177,7 @@ WSL is useful for compiling; UDP discovery often fails under WSL NAT — use man
 | Frigate API | 5000 | Typical compose mapping |
 | go2rtc RTSP | 8554 | Live streams for the client |
 | Server module HTTP | 8001 | Configurable in config.json |
-| Server module HTTPS | 8002 | Configurable |
+| Server module HTTPS | 8002 | Configurable (auto-generates self-signed certificate) |
 | Client discovery | UDP 3666 | Client listens; module broadcasts |
 
 ---
@@ -183,11 +187,12 @@ WSL is useful for compiling; UDP discovery often fails under WSL NAT — use man
 | Issue | What to try |
 |--------|-------------|
 | No servers in discovery | Module running? Same LAN? Firewall? Try manual IP. WSL often blocks broadcast. |
-| .deb dependency errors | sudo dpkg -i … then sudo apt-get install -f -y |
-| Client missing .so libraries | Install matching release .deb; check with ldd as above |
-| Black / empty window | QT_QUICK_BACKEND=software |
-| About Version unknown | Ensure version.txt is next to the binary |
+| .deb dependency errors | `sudo dpkg -i …` then `sudo apt-get install -f -y` |
+| Client missing .so libraries | Install matching release `.deb`; check with `ldd` as above |
+| Black / empty window | `QT_QUICK_BACKEND=software` |
+| About Version unknown | Ensure `version.txt` is next to the binary |
 | Add/remove camera fails | Module must reach Docker and correct Frigate + go2rtc paths |
+| HTTPS not starting | Make sure `cryptography` is installed (`pip install cryptography`) |
 
 ---
 
@@ -195,12 +200,12 @@ WSL is useful for compiling; UDP discovery often fails under WSL NAT — use man
 
 | Path | Contents |
 |------|----------|
-| client/ | Qt/QML desktop application |
-| server_module/Frigate/ | Frigate integration module |
-| packaging/ | Linux .deb packaging script (if present) |
+| `client/` | Qt/QML desktop application |
+| `server_module/Frigate/` | Frigate integration module |
+| `packaging/` | Linux `.deb` packaging script (if present) |
 
 ---
 
 ## License
 
-See the repository for license terms.
+This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
