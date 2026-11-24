@@ -160,7 +160,6 @@ int main(int argc, char *argv[])
         const QStringList iconCandidates = {
             QDir(QCoreApplication::applicationDirPath()).filePath("icon.ico"),
             QDir(QCoreApplication::applicationDirPath()).filePath("../assets/icon.ico"),
-            QStringLiteral("C:/PX/px_open/client/assets/icon.ico"),
         };
 
         HICON hIcon = nullptr;
