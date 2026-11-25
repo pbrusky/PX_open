@@ -17,7 +17,9 @@ signals:
                      const QString& container,
                      const QString& systemId,
                      const QString& moduleId,
-                     const QString& type);
+                     const QString& type,
+                     const QString& version);
+
 };
 
 #endif // DISCOVERYPROXY_H

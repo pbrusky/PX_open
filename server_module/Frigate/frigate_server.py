@@ -13,6 +13,7 @@ from config import (
     FRIGATE_CONFIG_PATH, FRIGATE_MEDIA_PATH, FRIGATE_CACHE_PATH,
     GO2RTC_CONFIG_PATH,
     CONFIG_FILE,
+    FRIGATE_VERSION,
 )
 
 from https_server import start_https_server
@@ -67,6 +68,7 @@ def broadcast_discovery():
         "port": HTTP_PORT,
         "type": "frigate",
         "address": LAN_IP,
+        "version": FRIGATE_VERSION,
     }).encode("utf-8")
 
     print(f"[Discovery] Broadcasting as {SYSTEM_NAME} @ {LAN_IP}:{HTTP_PORT}")
@@ -291,6 +293,7 @@ class VMSHandler(http.server.BaseHTTPRequestHandler):
                     "systemId": SYSTEM_ID,
                     "name": SYSTEM_NAME,
                     "version": "1.0.8",
+                    "frigateVersion": FRIGATE_VERSION,
                     "status": "online",
                     "httpPort": HTTP_PORT,
                     "httpsPort": HTTPS_PORT,

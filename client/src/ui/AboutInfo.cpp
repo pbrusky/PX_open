@@ -35,7 +35,7 @@ void AboutInfo::detectGpus()
         QStringList lines;
 
 #ifdef Q_OS_WIN
-        // Instant GPU lookup via Win32 EnumDisplayDevices
+        // Instant native Win32 GPU lookup (<1ms, no powershell process needed)
         DISPLAY_DEVICEW dd;
         dd.cb = sizeof(dd);
         DWORD deviceIndex = 0;
@@ -94,7 +94,7 @@ void AboutInfo::detectCpu()
         QString name = QStringLiteral("Unknown");
 
 #ifdef Q_OS_WIN
-        // Instant CPU lookup via Windows Registry (< 1ms vs PowerShell 1000ms+)
+        // Instant Registry CPU lookup (<1ms, no powershell process needed)
         QSettings reg(QStringLiteral("HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"), QSettings::NativeFormat);
         name = reg.value(QStringLiteral("ProcessorNameString")).toString().trimmed();
         if (name.isEmpty())
@@ -183,7 +183,6 @@ void AboutInfo::detectMemory()
         qint64 totalBytes = 0;
         qint64 availBytes = 0;
 
-        // Try /proc/meminfo first on Linux for accurate "MemAvailable" (including cache/buffers)
         QFile f(QStringLiteral("/proc/meminfo"));
         if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
             qint64 totalKb = 0;
@@ -204,7 +203,6 @@ void AboutInfo::detectMemory()
             availBytes = availKb * 1024;
         }
 
-        // Fallback to sysconf if /proc/meminfo failed
         if (totalBytes <= 0) {
 #if defined(_SC_PHYS_PAGES) && defined(_SC_PAGESIZE)
             const long pages = sysconf(_SC_PHYS_PAGES);

@@ -65,6 +65,9 @@ void DiscoveryListener::processPendingDatagrams()
         QString systemId   = obj.value(QStringLiteral("systemId")).toString();
         QString moduleId   = obj.value(QStringLiteral("id")).toString();
         QString type       = obj.value(QStringLiteral("type")).toString();
+        QString version    = obj.value(QStringLiteral("version")).toString();
+        if (version.isEmpty())
+            version = obj.value(QStringLiteral("frigate_version")).toString();
 
         if (port <= 0 || (name.isEmpty() && systemId.isEmpty()))
             continue;
@@ -87,6 +90,8 @@ void DiscoveryListener::processPendingDatagrams()
                          container,
                          systemId,
                          moduleId,
-                         type);
+                         type,
+                         version);
+
     }
 }
