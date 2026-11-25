@@ -13,6 +13,7 @@
 #include <QNetworkReply>
 #include <QFile>
 #include <QUrl>
+#include <memory>
 
 FrigateAPI::FrigateAPI(QObject* parent)
     : QObject(parent)
@@ -23,6 +24,9 @@ FrigateAPI::FrigateAPI(QObject* parent)
     m_playback      = new FrigatePlayback(this);
     m_onvif         = new FrigateOnvif(this);
     m_exportNet     = new QNetworkAccessManager(this);
+
+    // Automatically cancel active clip export when this API instance is destroyed
+    connect(this, &QObject::destroyed, this, &FrigateAPI::cancelExport);
 
     connect(m_cameraManager, &FrigateCameraManager::camerasLoaded,
             this, &FrigateAPI::camerasLoaded);
@@ -359,6 +363,16 @@ void FrigateAPI::testRtsp(const QString& url)
          << "-";
 
     QProcess* ff = new QProcess(this);
+
+    connect(ff, &QProcess::errorOccurred, this, [this, ff](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            emit rtspTestResult(false, QStringLiteral("RTSP Test Failed: FFmpeg executable not found"));
+        } else {
+            emit rtspTestResult(false, QStringLiteral("RTSP Test Failed: Process execution error"));
+        }
+        ff->deleteLater();
+    });
+
     connect(ff, &QProcess::finished, this, [this, ff](int exitCode, QProcess::ExitStatus status) {
         QByteArray err = ff->readAllStandardError();
         QString errorText = QString(err);
@@ -386,6 +400,7 @@ void FrigateAPI::testRtsp(const QString& url)
 
         ff->deleteLater();
     });
+
     ff->start(program, args);
 }
 
@@ -488,6 +503,8 @@ void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 end
     m_exportBytes = 0;
     m_exportActive = true;
 
+    auto totalBytes = std::make_shared<qint64>(-1);
+
     m_exportFile = new QFile(savePath);
     if (!m_exportFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         const QString err = m_exportFile->errorString();
@@ -500,6 +517,10 @@ void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 end
     QString base = m_server;
     while (base.endsWith(QLatin1Char('/')))
         base.chop(1);
+
+    if (!base.startsWith(QLatin1String("http://")) && !base.startsWith(QLatin1String("https://"))) {
+        base.prepend(QLatin1String("http://"));
+    }
 
     const QString cam = QString::fromUtf8(QUrl::toPercentEncoding(cameraId));
     const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
@@ -516,14 +537,15 @@ void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 end
     m_exportReply = m_exportNet->get(req);
 
     connect(m_exportReply, &QNetworkReply::downloadProgress, this,
-            [this, gen](qint64 rec, qint64 tot) {
+            [this, gen, totalBytes](qint64 rec, qint64 tot) {
         if (gen != m_exportGen || !m_exportActive)
             return;
+        *totalBytes = tot;
         const qint64 shown = m_exportBytes > 0 ? m_exportBytes : rec;
-        emit exportProgress(shown, tot);
+        emit exportProgress(shown, *totalBytes);
     });
 
-    connect(m_exportReply, &QNetworkReply::readyRead, this, [this, gen]() {
+    connect(m_exportReply, &QNetworkReply::readyRead, this, [this, gen, totalBytes]() {
         if (gen != m_exportGen || !m_exportActive || !m_exportFile || !m_exportReply)
             return;
         const QByteArray chunk = m_exportReply->readAll();
@@ -532,7 +554,7 @@ void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 end
         const qint64 n = m_exportFile->write(chunk);
         if (n > 0)
             m_exportBytes += n;
-        emit exportProgress(m_exportBytes, -1);
+        emit exportProgress(m_exportBytes, *totalBytes);
     });
 
     connect(m_exportReply, &QNetworkReply::finished, this, [this, gen, savePath]() {
