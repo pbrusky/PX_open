@@ -110,7 +110,6 @@ Rectangle {
 
             delegate: Rectangle {
                 width: ListView.view.width
-                // Dynamic height so card grows cleanly with contents
                 height: cardColumn.height + 24
                 radius: 8
                 color: "#0F355C"
@@ -156,7 +155,6 @@ Rectangle {
                             text: "Container: " + container
                             color: "#aaa"
                             font.pixelSize: 12
-                            // Only show container line if container string is not empty
                             visible: container && container.length > 0
                         }
                     }
