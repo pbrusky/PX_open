@@ -25,19 +25,20 @@ class FrigateAPI : public QObject
 
 public:
     explicit FrigateAPI(QObject* parent = nullptr);
+    ~FrigateAPI() override;
 
     QString server() const { return m_server; }
     QString moduleServer() const { return m_moduleServer; }
     QString serverIp() const { return m_serverIp; }
 
-    Q_INVOKABLE void setServer(QString server);
-    Q_INVOKABLE void setModuleServer(QString server);
-    Q_INVOKABLE void setServerIp(QString ip);
+    Q_INVOKABLE void setServer(const QString& server);
+    Q_INVOKABLE void setModuleServer(const QString& server);
+    Q_INVOKABLE void setServerIp(const QString& ip);
 
     Q_INVOKABLE void loadCameras();
-    Q_INVOKABLE void addCamera(QString id, QString mainUrl, QString subUrl, bool record);
-    Q_INVOKABLE void editCamera(QString id, QString url);
-    Q_INVOKABLE void removeCamera(QString id);
+    Q_INVOKABLE void addCamera(const QString& id, const QString& mainUrl, const QString& subUrl, bool record);
+    Q_INVOKABLE void editCamera(const QString& id, const QString& url);
+    Q_INVOKABLE void removeCamera(const QString& id);
     Q_INVOKABLE bool isCameraOnline(const QString& id) const;
     Q_INVOKABLE QVariantList getCameraList() const;
 
@@ -154,19 +155,20 @@ private:
     QString m_moduleServer;
     QString m_serverIp;
 
-    FrigateCameraManager* m_cameraManager;
-    FrigateStreamManager* m_streamManager;
-    FrigateTimeline* m_timeline;
-    FrigatePlayback* m_playback;
-    FrigateOnvif* m_onvif;
+    FrigateCameraManager* m_cameraManager = nullptr;
+    FrigateStreamManager* m_streamManager = nullptr;
+    FrigateTimeline* m_timeline = nullptr;
+    FrigatePlayback* m_playback = nullptr;
+    FrigateOnvif* m_onvif = nullptr;
 
     QNetworkAccessManager* m_exportNet = nullptr;
     QNetworkReply* m_exportReply = nullptr;
     QFile* m_exportFile = nullptr;
     QString m_exportPath;
     qint64 m_exportBytes = 0;
+    qint64 m_exportTotalBytes = -1;
     int m_exportGen = 0;
     bool m_exportActive = false;
 };
 
-#endif
+#endif // FRIGATEAPI_H

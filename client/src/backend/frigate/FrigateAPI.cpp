@@ -13,7 +13,6 @@
 #include <QNetworkReply>
 #include <QFile>
 #include <QUrl>
-#include <memory>
 
 FrigateAPI::FrigateAPI(QObject* parent)
     : QObject(parent)
@@ -24,9 +23,6 @@ FrigateAPI::FrigateAPI(QObject* parent)
     m_playback      = new FrigatePlayback(this);
     m_onvif         = new FrigateOnvif(this);
     m_exportNet     = new QNetworkAccessManager(this);
-
-    // Automatically cancel active clip export when this API instance is destroyed
-    connect(this, &QObject::destroyed, this, &FrigateAPI::cancelExport);
 
     connect(m_cameraManager, &FrigateCameraManager::camerasLoaded,
             this, &FrigateAPI::camerasLoaded);
@@ -117,7 +113,12 @@ FrigateAPI::FrigateAPI(QObject* parent)
             this, &FrigateAPI::moduleInformationReceived);
 }
 
-void FrigateAPI::setServer(QString server)
+FrigateAPI::~FrigateAPI()
+{
+    cancelExport();
+}
+
+void FrigateAPI::setServer(const QString& server)
 {
     if (m_server == server)
         return;
@@ -129,7 +130,7 @@ void FrigateAPI::setServer(QString server)
     emit serverChanged();
 }
 
-void FrigateAPI::setModuleServer(QString server)
+void FrigateAPI::setModuleServer(const QString& server)
 {
     if (m_moduleServer == server)
         return;
@@ -141,7 +142,7 @@ void FrigateAPI::setModuleServer(QString server)
     emit moduleServerChanged();
 }
 
-void FrigateAPI::setServerIp(QString ip)
+void FrigateAPI::setServerIp(const QString& ip)
 {
     if (m_serverIp == ip)
         return;
@@ -162,17 +163,17 @@ void FrigateAPI::loadCameras()
     m_cameraManager->loadCameras();
 }
 
-void FrigateAPI::addCamera(QString id, QString mainUrl, QString subUrl, bool record)
+void FrigateAPI::addCamera(const QString& id, const QString& mainUrl, const QString& subUrl, bool record)
 {
     m_cameraManager->addCamera(id, mainUrl, subUrl, record);
 }
 
-void FrigateAPI::editCamera(QString id, QString url)
+void FrigateAPI::editCamera(const QString& id, const QString& url)
 {
     m_cameraManager->editCamera(id, url);
 }
 
-void FrigateAPI::removeCamera(QString id)
+void FrigateAPI::removeCamera(const QString& id)
 {
     m_cameraManager->removeCamera(id);
 }
@@ -501,9 +502,8 @@ void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 end
     const int gen = m_exportGen;
     m_exportPath = savePath;
     m_exportBytes = 0;
+    m_exportTotalBytes = -1;
     m_exportActive = true;
-
-    auto totalBytes = std::make_shared<qint64>(-1);
 
     m_exportFile = new QFile(savePath);
     if (!m_exportFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -537,15 +537,15 @@ void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 end
     m_exportReply = m_exportNet->get(req);
 
     connect(m_exportReply, &QNetworkReply::downloadProgress, this,
-            [this, gen, totalBytes](qint64 rec, qint64 tot) {
+            [this, gen](qint64 rec, qint64 tot) {
         if (gen != m_exportGen || !m_exportActive)
             return;
-        *totalBytes = tot;
+        m_exportTotalBytes = tot;
         const qint64 shown = m_exportBytes > 0 ? m_exportBytes : rec;
-        emit exportProgress(shown, *totalBytes);
+        emit exportProgress(shown, m_exportTotalBytes);
     });
 
-    connect(m_exportReply, &QNetworkReply::readyRead, this, [this, gen, totalBytes]() {
+    connect(m_exportReply, &QNetworkReply::readyRead, this, [this, gen]() {
         if (gen != m_exportGen || !m_exportActive || !m_exportFile || !m_exportReply)
             return;
         const QByteArray chunk = m_exportReply->readAll();
@@ -554,7 +554,7 @@ void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 end
         const qint64 n = m_exportFile->write(chunk);
         if (n > 0)
             m_exportBytes += n;
-        emit exportProgress(m_exportBytes, *totalBytes);
+        emit exportProgress(m_exportBytes, m_exportTotalBytes);
     });
 
     connect(m_exportReply, &QNetworkReply::finished, this, [this, gen, savePath]() {
