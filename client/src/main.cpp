@@ -6,7 +6,6 @@
 #include <QThread>
 #include <QCoreApplication>
 #include <QDir>
-
 #include <QtWebEngineQuick>
 #include <QQuickStyle>
 #include <QIcon>
@@ -38,13 +37,14 @@ extern "C" {
 #include <libavutil/log.h>
 }
 
-// GPU check — Windows uses WMIC; Linux uses lspci if available (optional)
 bool isAmdGpuPresent()
 {
 #ifdef Q_OS_WIN
+    // Use PowerShell instead of deprecated 'wmic'
     QProcess p;
-    p.start("wmic", QStringList() << "path" << "win32_VideoController" << "get" << "Name");
-    p.waitForFinished(3000);
+    p.start("powershell", QStringList() << "-Command" << "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name");
+    if (!p.waitForFinished(2000))
+        return false;
     const QString output = QString::fromLocal8Bit(p.readAllStandardOutput()).toLower();
     return output.contains("amd") || output.contains("radeon");
 #else
@@ -60,6 +60,7 @@ bool isAmdGpuPresent()
 int main(int argc, char *argv[])
 {
     if (isAmdGpuPresent()) {
+        // Warning: This forces software rendering for all AMD GPUs, which affects video playback.
         qputenv("QT_OPENGL", "software");
     }
 
@@ -122,10 +123,13 @@ int main(int argc, char *argv[])
     FrigateStreamManager* frigateStream = new FrigateStreamManager(&engine);
 
     DiscoveryListener* discovery = new DiscoveryListener();
-    DiscoveryProxy* discoveryProxy = new DiscoveryProxy();
+    DiscoveryProxy* discoveryProxy = new DiscoveryProxy(&engine); // Parented to engine
+    QThread* discoveryThread = new QThread(&app);                 // Parented to app
 
-    QThread* discoveryThread = new QThread;
     discovery->moveToThread(discoveryThread);
+
+    // Auto-delete discovery object when thread finishes
+    QObject::connect(discoveryThread, &QThread::finished, discovery, &QObject::deleteLater);
 
     QObject::connect(discoveryThread, &QThread::started,
                      discovery, &DiscoveryListener::startDiscovery);
@@ -152,6 +156,11 @@ int main(int argc, char *argv[])
 
     QObject* mainWindowObj = engine.rootObjects().first();
     QWindow* mainWindow = qobject_cast<QWindow*>(mainWindowObj);
+
+    // FIX: Set Qt window flags BEFORE applying native Win32 window styles
+    if (mainWindow) {
+        mainWindow->setFlags(Qt::FramelessWindowHint | Qt::Window);
+    }
 
 #ifdef Q_OS_WIN
     if (mainWindow) {
@@ -191,10 +200,6 @@ int main(int argc, char *argv[])
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     }
 #endif
-
-    if (mainWindow) {
-        mainWindow->setFlags(Qt::FramelessWindowHint | Qt::Window);
-    }
 
     engine.rootContext()->setContextProperty("mainWindow", mainWindowObj);
 
