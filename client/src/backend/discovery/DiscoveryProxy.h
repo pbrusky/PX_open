@@ -11,13 +11,13 @@ public:
     explicit DiscoveryProxy(QObject* parent = nullptr) : QObject(parent) {}
 
 signals:
-    void serverFound(QString name,
-                     QString address,
+    void serverFound(const QString& name,
+                     const QString& address,
                      int port,
-                     QString container,
-                     QString systemId,
-                     QString moduleId,
-                     QString type);
+                     const QString& container,
+                     const QString& systemId,
+                     const QString& moduleId,
+                     const QString& type);
 };
 
 #endif // DISCOVERYPROXY_H
