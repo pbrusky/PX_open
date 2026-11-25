@@ -1,4 +1,6 @@
 #include "DiscoveryListener.h"
+
+#include <QUdpSocket>
 #include <QNetworkDatagram>
 #include <QJsonDocument>
 #include <QJsonObject>
