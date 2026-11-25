@@ -21,9 +21,10 @@ Desktop client for Frigate NVR, plus a **Frigate Server Module** that runs on th
 - Network access between the client PC and this host
 
 ### Client PC
-
-- **Windows:** Windows 10/11 (64-bit)
-- **Linux:** 64-bit (x86_64). The release `.deb` bundles Qt and most FFmpeg libraries; a few system packages are still required (see Client – Linux).
+- **Windows:** Windows 10/11 (64-bit).
+- **Linux:** 64-bit (x86_64) Debian/Ubuntu recommended.
+- **FFmpeg:** Required in system PATH for the "RTSP Test" feature in the camera editor.
+- **Network:** Must be on the same subnet as the Server Module for auto-discovery (UDP 3666).
 
 ---
 
