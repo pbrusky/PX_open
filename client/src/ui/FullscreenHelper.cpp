@@ -21,7 +21,7 @@ FullscreenHelper::FullscreenHelper(QObject* parent)
         setCursorHidden(true);
     });
 
-    // Cleanup cursor when this object is destroyed without needing to modify FullscreenHelper.h
+    // Cleanup cursor when this object is destroyed
     connect(this, &QObject::destroyed, this, [this]() {
         stopIdleCursor();
     });
@@ -118,8 +118,11 @@ QQuickWindow* FullscreenHelper::openFullscreen(QQmlEngine* engine,
         }
     }
 
-    // Auto-delete window when closed to prevent memory leaks (Qt Quick compatible)
+    // Auto-delete window when closed to prevent memory leaks
     QObject::connect(win, &QQuickWindow::closing, win, &QObject::deleteLater);
+
+    // Stop idle cursor filtering when the window closes
+    QObject::connect(win, &QQuickWindow::closing, this, &FullscreenHelper::stopIdleCursor);
 
     win->setFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
 
