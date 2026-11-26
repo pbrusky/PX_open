@@ -381,7 +381,7 @@ void FFmpegWorker::decodeLoop()
             if (ret < 0)
                 break;
 
-            // Optional: keep AVFrame for future GPU path
+            // Always push AVFrame (preferred path)
             if (m_queue) {
                 AVFrame* clone = av_frame_clone(frame);
                 if (clone) {
@@ -390,59 +390,62 @@ void FFmpegWorker::decodeLoop()
                 }
             }
 
-            // ===== Software RGB path (this makes the video appear) =====
-            int dstW = frame->width;
-            int dstH = frame->height;
+            // Only do expensive RGB conversion for non-live streams
+            const bool needRgb = !isRtsp;
 
-            if (dstW > kMaxOutW || dstH > kMaxOutH) {
-                const float scale = qMin(float(kMaxOutW) / float(dstW),
-                                         float(kMaxOutH) / float(dstH));
-                dstW = int(dstW * scale) & ~1;
-                dstH = int(dstH * scale) & ~1;
-            }
+            if (needRgb && m_queue) {
+                int dstW = frame->width;
+                int dstH = frame->height;
 
-            if (dstW >= 2 && dstH >= 2) {
-                if (!rgbSws ||
-                    lastSrcW != frame->width || lastSrcH != frame->height ||
-                    lastDstW != dstW || lastDstH != dstH) {
-
-                    if (rgbSws)
-                        sws_freeContext(rgbSws);
-
-                    rgbSws = sws_getContext(
-                        frame->width, frame->height,
-                        static_cast<AVPixelFormat>(frame->format),
-                        dstW, dstH,
-                        AV_PIX_FMT_BGRA,
-                        swsFlags, nullptr, nullptr, nullptr);
-
-                    lastSrcW = frame->width;
-                    lastSrcH = frame->height;
-                    lastDstW = dstW;
-                    lastDstH = dstH;
+                if (dstW > kMaxOutW || dstH > kMaxOutH) {
+                    const float scale = qMin(float(kMaxOutW) / float(dstW),
+                                             float(kMaxOutH) / float(dstH));
+                    dstW = int(dstW * scale) & ~1;
+                    dstH = int(dstH * scale) & ~1;
                 }
 
-                if (rgbSws) {
-                    QImage img(dstW, dstH, QImage::Format_RGB32);
-                    if (!img.isNull()) {
-                        uint8_t* dest[4] = { img.bits(), nullptr, nullptr, nullptr };
-                        int destStride[4] = { int(img.bytesPerLine()), 0, 0, 0 };
+                if (dstW >= 2 && dstH >= 2) {
+                    if (!rgbSws ||
+                        lastSrcW != frame->width || lastSrcH != frame->height ||
+                        lastDstW != dstW || lastDstH != dstH) {
 
-                        sws_scale(rgbSws,
-                                  frame->data,
-                                  frame->linesize,
-                                  0,
-                                  frame->height,
-                                  dest,
-                                  destStride);
+                        if (rgbSws)
+                            sws_freeContext(rgbSws);
 
-                        if (m_queue)
+                        rgbSws = sws_getContext(
+                            frame->width, frame->height,
+                            static_cast<AVPixelFormat>(frame->format),
+                            dstW, dstH,
+                            AV_PIX_FMT_BGRA,
+                            swsFlags, nullptr, nullptr, nullptr);
+
+                        lastSrcW = frame->width;
+                        lastSrcH = frame->height;
+                        lastDstW = dstW;
+                        lastDstH = dstH;
+                    }
+
+                    if (rgbSws) {
+                        QImage img(dstW, dstH, QImage::Format_RGB32);
+                        if (!img.isNull()) {
+                            uint8_t* dest[4] = { img.bits(), nullptr, nullptr, nullptr };
+                            int destStride[4] = { int(img.bytesPerLine()), 0, 0, 0 };
+
+                            sws_scale(rgbSws,
+                                      frame->data,
+                                      frame->linesize,
+                                      0,
+                                      frame->height,
+                                      dest,
+                                      destStride);
+
                             m_queue->pushImage(img);
+                        }
                     }
                 }
             }
 
-            // Stats update
+            // Stats
             if (!statsSent) {
                 statsSent = true;
                 updateStats(fmtCtx, codecCtx, videoStream);
@@ -455,7 +458,7 @@ void FFmpegWorker::decodeLoop()
                 }
             }
 
-            // Pace only for non-live (file / HTTP playback)
+            // Pace non-live playback
             if (!isRtsp && !m_abort.load()) {
                 int64_t pts = frame->best_effort_timestamp;
                 if (pts == AV_NOPTS_VALUE)
