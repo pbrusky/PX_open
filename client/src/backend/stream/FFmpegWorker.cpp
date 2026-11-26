@@ -69,14 +69,22 @@ void FFmpegWorker::clearHw()
 enum AVPixelFormat FFmpegWorker::getHwFormat(AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts)
 {
     FFmpegWorker* self = static_cast<FFmpegWorker*>(ctx->opaque);
-    if (!self)
-        return AV_PIX_FMT_NONE;
 
-    for (const enum AVPixelFormat* p = pix_fmts; *p != AV_PIX_FMT_NONE; p++) {
-        if (*p == self->m_hwPixFmt)
-            return *p;
+    if (self) {
+        for (const enum AVPixelFormat* p = pix_fmts; *p != AV_PIX_FMT_NONE; p++) {
+            if (*p == self->m_hwPixFmt) {
+                self->m_usingHw = true;
+                return *p;
+            }
+        }
+
+        // This camera/codec/profile may not support hardware acceleration even
+        // though the GPU device itself was created. Keep decoding in software
+        // instead of leaving libavcodec without a usable output format.
+        self->m_usingHw = false;
     }
-    return AV_PIX_FMT_NONE;
+
+    return avcodec_default_get_format(ctx, pix_fmts);
 }
 
 bool FFmpegWorker::initHwDevice(AVCodecContext* ctx)
@@ -141,13 +149,17 @@ bool FFmpegWorker::openCodec(AVCodecContext** codecCtx,
         (*codecCtx)->thread_count = 2;
     }
 
-    if (tryHw) {
-        initHwDevice(*codecCtx);
-    }
+    const bool hardwareRequested = tryHw && initHwDevice(*codecCtx);
 
     if (avcodec_open2(*codecCtx, codec, nullptr) < 0) {
         avcodec_free_context(codecCtx);
         clearHw();
+
+        // Hardware support can vary by camera, codec profile, and resolution.
+        // Retry this camera once with a normal software decoder.
+        if (hardwareRequested)
+            return openCodec(codecCtx, codec, params, false);
+
         return false;
     }
 
