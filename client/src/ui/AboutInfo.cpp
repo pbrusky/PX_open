@@ -2,19 +2,19 @@
 
 #include <QQuickWindow>
 #include <QSGRendererInterface>
-#include <QProcess> // Keep QProcess include for Linux lspci/lscpu and general usage
+#include <QProcess>
 #include <QSysInfo>
 #include <QtConcurrent>
 #include <QMetaObject>
 #include <QFile>
 #include <QTextStream>
 #include <QPointer>
-#include <QSettings> // Required for native Windows CPU detection
+#include <QSettings>
 
 #ifdef Q_OS_WIN
-#  include <windows.h> // Required for native Windows GPU & Memory detection
+#  include <windows.h>
 #else
-#  include <unistd.h> // Required for Linux sysconf
+#  include <unistd.h>
 #endif
 
 AboutInfo::AboutInfo(QObject* parent)
@@ -35,12 +35,10 @@ void AboutInfo::detectGpus()
         QStringList lines;
 
 #ifdef Q_OS_WIN
-        // Instant native Win32 GPU lookup (<1ms, no powershell process needed)
         DISPLAY_DEVICEW dd;
         dd.cb = sizeof(dd);
         DWORD deviceIndex = 0;
         while (EnumDisplayDevicesW(NULL, deviceIndex, &dd, 0)) {
-            // Only consider active/desktop attached devices
             if (dd.StateFlags & DISPLAY_DEVICE_ACTIVE || dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) {
                 QString gpuName = QString::fromWCharArray(dd.DeviceString).trimmed();
                 if (!gpuName.isEmpty() && !lines.contains(gpuName)) {
@@ -53,15 +51,14 @@ void AboutInfo::detectGpus()
             lines.append(QStringLiteral("Unknown GPU"));
         }
 #else
-        // Linux: Use lspci
         QProcess p;
         p.start(QStringLiteral("lspci"), QStringList());
-        if (!p.waitForFinished(3000)) { // Add timeout for safety
-            p.kill(); // Ensure process is terminated on timeout
+        if (!p.waitForFinished(3000)) {
+            p.kill();
             p.waitForFinished(500);
             lines.append(QStringLiteral("lspci timed out or failed"));
         } else {
-            const QString output = QString::fromLocal10Bit(p.readAllStandardOutput()); // Use Local10Bit for lspci
+            const QString output = QString::fromLocal8Bit(p.readAllStandardOutput());
             const QStringList all = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
             for (const QString& line : all) {
                 const QString lower = line.toLower();
@@ -100,13 +97,11 @@ void AboutInfo::detectCpu()
         QString name = QStringLiteral("Unknown");
 
 #ifdef Q_OS_WIN
-        // Instant Registry CPU lookup (<1ms, no powershell process needed)
         QSettings reg(QStringLiteral("HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"), QSettings::NativeFormat);
         name = reg.value(QStringLiteral("ProcessorNameString")).toString().trimmed();
         if (name.isEmpty())
             name = QStringLiteral("Unknown CPU");
 #else
-        // Linux: Try /proc/cpuinfo first, then lscpu
         auto readCpuFromProc = []() -> QString {
             QFile f(QStringLiteral("/proc/cpuinfo"));
             if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
@@ -140,8 +135,8 @@ void AboutInfo::detectCpu()
         if (name.isEmpty()) {
             QProcess p;
             p.start(QStringLiteral("lscpu"), QStringList());
-            if (!p.waitForFinished(3000)) { // Add timeout for safety
-                p.kill(); // Ensure process is terminated on timeout
+            if (!p.waitForFinished(3000)) {
+                p.kill();
                 p.waitForFinished(500);
             } else {
                 const QString out = QString::fromUtf8(p.readAllStandardOutput());
@@ -193,7 +188,6 @@ void AboutInfo::detectMemory()
         qint64 totalBytes = 0;
         qint64 availBytes = 0;
 
-        // Try /proc/meminfo first on Linux for accurate "MemAvailable" (including cache/buffers)
         QFile f(QStringLiteral("/proc/meminfo"));
         if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
             qint64 totalKb = 0;
@@ -214,19 +208,18 @@ void AboutInfo::detectMemory()
             availBytes = availKb * 1024;
         }
 
-        // Fallback to sysconf if /proc/meminfo failed or didn't provide enough info
         if (totalBytes <= 0) {
 #if defined(_SC_PHYS_PAGES) && defined(_SC_PAGESIZE)
-            const long pages = sysconf(_SC_PHYS_PAGES);
-            const long pageSize = sysconf(_SC_PAGESIZE);
-            if (pages > 0 && pageSize > 0)
-                totalBytes = qint64(pages) * qint64(pageSize);
+            const long physPages = sysconf(_SC_PHYS_PAGES);
+            const long physPageSize = sysconf(_SC_PAGESIZE);
+            if (physPages > 0 && physPageSize > 0)
+                totalBytes = qint64(physPages) * qint64(physPageSize);
 #endif
 #if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
-            const long pages = sysconf(_SC_AVPHYS_PAGES);
-            const long pageSize = sysconf(_SC_PAGESIZE);
-            if (pages > 0 && pageSize > 0)
-                availBytes = qint64(pages) * qint64(pageSize);
+            const long availPages = sysconf(_SC_AVPHYS_PAGES);
+            const long availPageSize = sysconf(_SC_PAGESIZE);
+            if (availPages > 0 && availPageSize > 0)
+                availBytes = qint64(availPages) * qint64(availPageSize);
 #endif
         }
 
@@ -276,7 +269,6 @@ QString AboutInfo::graphicsApi() const
     default:                               return QStringLiteral("Unknown");
     }
 #else
-    // For Qt5 compatibility, since graphicsApi() is a Qt6+ feature
     return QStringLiteral("Qt 5 SceneGraph (OpenGL)");
 #endif
 }
@@ -292,4 +284,4 @@ QString AboutInfo::osName() const
     if (!pretty.isEmpty())
         return pretty;
     return QSysInfo::productType() + QLatin1Char(' ') + QSysInfo::productVersion();
-}
+}   
