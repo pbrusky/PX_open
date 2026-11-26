@@ -15,93 +15,124 @@ Rectangle {
 
     signal seekRequested(real tsMs)
     signal hoverTimeChanged(real tsMs)
-    property alias panActive: panHandler.active
+
+    property bool panActive: false
+
+    // Cached view — updated from timeline, not via function bindings
+    property real viewStart: timeline && timeline.viewStartTs > 0 ? timeline.viewStartTs : 0
+    property real viewEnd: timeline && timeline.viewEndTs > timeline.viewStartTs ? timeline.viewEndTs : 1
+    property real contentWidth: Math.max(1, width)
+
+    function mapX(tsMs) {
+        var s = viewStart
+        var e = viewEnd
+        var w = contentWidth
+        if (e <= s)
+            return 0
+        var ratio = (tsMs - s * 1000) / ((e - s) * 1000)
+        return Math.max(0, Math.min(w, ratio * w))
+    }
+
+    onViewStartChanged: ticks.requestPaint()
+    onViewEndChanged: ticks.requestPaint()
+    onContentWidthChanged: ticks.requestPaint()
+
+    Connections {
+        target: timeline
+        function onMotionPointsChanged() { ticks.requestPaint() }
+        function onEventsChanged() { ticks.requestPaint() }
+        function onViewStartTsChanged() { ticks.requestPaint() }
+        function onViewEndTsChanged() { ticks.requestPaint() }
+        function onPlayheadTsMsChanged() { ticks.requestPaint() }
+        function onExportStartMsChanged() { ticks.requestPaint() }
+        function onExportEndMsChanged() { ticks.requestPaint() }
+        function onIsPlaybackChanged() { ticks.requestPaint() }
+    }
 
     TimelineSegments {
         anchors.fill: parent
         recordings: timeline ? timeline.recordings : []
-        startTs: timeline ? timeline.effectiveStartTs() : 0
-        endTs: timeline ? timeline.effectiveEndTs() : 0
-        zoom: 1.0
-        pan: 0
-        timelineWidth: timeline ? Math.max(1, timeline.width - 8) : width
-        timestampToX: timeline ? timeline.timestampToX : function(t) { return 0 }
+        timeline: trackBg.timeline
+        viewStart: trackBg.viewStart
+        viewEnd: trackBg.viewEnd
+        contentWidth: trackBg.contentWidth
         z: 1
     }
 
-    Repeater {
-        model: timeline ? timeline.motionPoints : []
+    // Single canvas instead of hundreds/thousands of Repeater bindings
+    Canvas {
+        id: ticks
+        anchors.fill: parent
         z: 5
+        antialiasing: false
 
-        Rectangle {
-            property real sec: {
-                var t = 0
-                if (typeof start !== "undefined" && start)
-                    t = Number(start)
-                else if (modelData)
-                    t = Number(modelData.start || modelData.start_time || 0)
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            if (!timeline)
+                return
+
+            var h = height
+            var w = width
+            var s = trackBg.viewStart
+            var e = trackBg.viewEnd
+            if (e <= s)
+                return
+
+            function xOf(tsMs) {
+                var ratio = (tsMs - s * 1000) / ((e - s) * 1000)
+                return Math.max(0, Math.min(w, ratio * w))
+            }
+
+            // Motion
+            var pts = timeline.motionPoints || []
+            var minM = trackBg.minMotion
+            ctx.fillStyle = "#FF6D00"
+            for (var i = 0; i < pts.length; ++i) {
+                var p = pts[i]
+                var mot = Number(p.motion || 0)
+                if (mot < minM)
+                    continue
+                var t = Number(p.start || p.start_time || 0)
                 if (t > 100000000000)
                     t = t / 1000
-                return t
-            }
-            property real mot: {
-                if (typeof motion !== "undefined" && motion)
-                    return Number(motion)
-                if (modelData)
-                    return Number(modelData.motion || 0)
-                return 0
+                if (t < s || t > e)
+                    continue
+                var mh = Math.min(h - 4, 14 + Math.min(22, mot / 8.0))
+                var mx = xOf(t * 1000)
+                ctx.fillRect(mx - 1, h - 2 - mh, 3, mh)
             }
 
-            width: 3
-            height: Math.min(parent.height - 4, 14 + Math.min(22, mot / 8.0))
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 2
-            color: "#FF6D00"
-            x: timeline ? timeline.timestampToX(sec * 1000) - 1 : 0
-            visible: timeline && sec > 0 && mot >= minMotion
-                     && sec >= timeline.effectiveStartTs()
-                     && sec <= timeline.effectiveEndTs()
+            // Events
+            var evs = timeline.events || []
+            ctx.fillStyle = "#FFC107"
+            for (var j = 0; j < evs.length; ++j) {
+                var et = Number(evs[j].start || 0)
+                if (et > 100000000000)
+                    et = et / 1000
+                if (et < s || et > e)
+                    continue
+                var ex = xOf(et * 1000)
+                ctx.fillRect(ex - 1, 2, 3, 18)
+            }
+
+            // Export range
+            if (timeline.exportStartMs > 0 && timeline.exportEndMs > timeline.exportStartMs) {
+                var x1 = xOf(timeline.exportStartMs)
+                var x2 = xOf(timeline.exportEndMs)
+                ctx.fillStyle = "rgba(58,106,255,0.33)"
+                ctx.fillRect(x1, 0, Math.max(2, x2 - x1), h)
+                ctx.strokeStyle = "#6A8AFF"
+                ctx.strokeRect(x1, 0, Math.max(2, x2 - x1), h)
+            }
+
+            // Playhead
+            if (timeline.playheadTsMs > 0) {
+                var px = xOf(timeline.playheadTsMs)
+                ctx.fillStyle = timeline.isPlayback ? "#FFFFFF" : "#90CAF9"
+                ctx.fillRect(px - 1.5, 0, 3, h)
+            }
         }
-    }
-
-    Repeater {
-        model: timeline ? timeline.events : []
-        z: 6
-
-        Rectangle {
-            property real sec: {
-                var t = 0
-                if (typeof start !== "undefined" && start)
-                    t = Number(start)
-                else if (modelData)
-                    t = Number(modelData.start || 0)
-                if (t > 100000000000)
-                    t = t / 1000
-                return t
-            }
-
-            width: 3
-            height: 18
-            y: 2
-            radius: 1
-            color: "#FFC107"
-            x: timeline ? timeline.timestampToX(sec * 1000) - 1 : 0
-            visible: timeline && sec > 0
-                     && sec >= timeline.effectiveStartTs()
-                     && sec <= timeline.effectiveEndTs()
-        }
-    }
-
-    Rectangle {
-        width: 3
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        x: timeline ? timeline.timestampToX(timeline.playheadTsMs) - width / 2 : 0
-        color: (timeline && timeline.isPlayback) ? "#FFFFFF" : "#90CAF9"
-        border.color: "#000000"
-        border.width: 1
-        visible: timeline && timeline.playheadTsMs > 0
-        z: 80
     }
 
     WheelHandler {
@@ -115,51 +146,100 @@ Rectangle {
         }
     }
 
-    DragHandler {
-        id: panHandler
+    MouseArea {
+        id: mouse
+        anchors.fill: parent
+        hoverEnabled: true
         acceptedButtons: Qt.LeftButton
-        acceptedModifiers: Qt.ShiftModifier
-        target: null
-        property real lastX: 0
-        onActiveChanged: {
-            if (active)
-                lastX = centroid.position.x
-        }
-        onTranslationChanged: {
-            if (!active || !timeline)
-                return
-            var dx = centroid.position.x - lastX
-            lastX = centroid.position.x
-            if (Math.abs(dx) > 0.5)
-                timeline.panByPixels(dx)
-        }
-    }
+        preventStealing: true
+        z: 50
 
-    TapHandler {
-        acceptedButtons: Qt.LeftButton
-        onDoubleTapped: {
+        property real pressX: 0
+        property real lastX: 0
+        property bool dragging: false
+        property bool panning: false
+        property real dragThreshold: 6
+
+        onPositionChanged: function(event) {
+            if (!timeline)
+                return
+
+            var ts = timeline.xToTimestamp(event.x)
+            trackBg.hoverTimeChanged(ts)
+
+            if (!(event.buttons & Qt.LeftButton))
+                return
+
+            var dx = event.x - pressX
+
+            if (event.modifiers & Qt.ShiftModifier) {
+                panning = true
+                dragging = false
+                trackBg.panActive = true
+                var step = event.x - lastX
+                lastX = event.x
+                if (Math.abs(step) > 0.5)
+                    timeline.panByPixels(step)
+                return
+            }
+
+            if (!dragging && Math.abs(dx) >= dragThreshold) {
+                dragging = true
+                var startTs = timeline.xToTimestamp(pressX)
+                timeline.exportStartMs = startTs
+                timeline.exportEndMs = startTs
+            }
+
+            if (dragging)
+                timeline.exportEndMs = timeline.xToTimestamp(event.x)
+        }
+
+        onPressed: function(event) {
+            pressX = event.x
+            lastX = event.x
+            dragging = false
+            panning = false
+            trackBg.panActive = false
+        }
+
+        onReleased: function(event) {
+            if (!timeline) {
+                dragging = false
+                panning = false
+                trackBg.panActive = false
+                return
+            }
+
+            if (panning) {
+                panning = false
+                trackBg.panActive = false
+                return
+            }
+
+            if (dragging) {
+                if (timeline.exportEndMs < timeline.exportStartMs) {
+                    var tmp = timeline.exportStartMs
+                    timeline.exportStartMs = timeline.exportEndMs
+                    timeline.exportEndMs = tmp
+                }
+                if (timeline.exportEndMs - timeline.exportStartMs < 2000) {
+                    timeline.exportStartMs = -1
+                    timeline.exportEndMs = -1
+                }
+                dragging = false
+                return
+            }
+
+            var ts = timeline.xToTimestamp(event.x)
+            if (ts > 0)
+                trackBg.seekRequested(ts)
+        }
+
+        onExited: trackBg.hoverTimeChanged(-1)
+
+        onDoubleClicked: {
             if (timeline)
                 timeline.resetZoom()
-        }
-    }
-
-    TimelineMouseHandler {
-        anchors.fill: parent
-        z: 50
-        scrubber: null
-        hoverPreview: null
-        pan: 0
-        xToTimestamp: function(x) {
-            return timeline ? timeline.xToTimestamp(x) : 0
-        }
-        trackHeight: trackBg.height
-        enabled: !panHandler.active
-
-        onSeekRequested: function(tsMs) {
-            trackBg.seekRequested(tsMs)
-        }
-        onHoverTimeChanged: function(tsMs) {
-            trackBg.hoverTimeChanged(tsMs)
         }
     }
 }

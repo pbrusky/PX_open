@@ -8,9 +8,17 @@
 #include <QUrlQuery>
 #include <QDateTime>
 #include <QTimeZone>
+#include <QStandardPaths>
+#include <QDir>
+#include <QFile>
+#include <QUrl>
 #include <algorithm>
 
 namespace {
+
+// Soft-refresh window. Disk is always used for instant paint after restart;
+// network still runs when this expires (or when forced).
+constexpr qint64 kCacheTtlMs = 30 * 60 * 1000; // 30 minutes
 
 QVariantList mergeTouchingOnly(QVariantList blocks, double gapTol = 120.0)
 {
@@ -72,6 +80,167 @@ QString systemTzName()
     return QStringLiteral("UTC");
 }
 
+QString sanitizeKey(QString s)
+{
+    for (QChar& c : s) {
+        if (!c.isLetterOrNumber() && c != QLatin1Char('-') && c != QLatin1Char('_')
+            && c != QLatin1Char('.'))
+            c = QLatin1Char('_');
+    }
+    if (s.isEmpty())
+        s = QStringLiteral("default");
+    return s;
+}
+
+QString serverKey(const QString& server)
+{
+    QUrl u(server);
+    QString host = u.host();
+    if (host.isEmpty())
+        host = server;
+    const int port = u.port(80);
+    return sanitizeKey(host + QLatin1Char('_') + QString::number(port));
+}
+
+QString cacheRoot()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    const QString dir = base + QStringLiteral("/timeline_cache");
+    QDir().mkpath(dir);
+    return dir;
+}
+
+QString cacheFilePath(const QString& server, const QString& kind, const QString& cameraKey)
+{
+    const QString dir = cacheRoot() + QLatin1Char('/') + serverKey(server);
+    QDir().mkpath(dir);
+    return dir + QLatin1Char('/') + sanitizeKey(kind) + QLatin1Char('_')
+         + sanitizeKey(cameraKey) + QStringLiteral(".json");
+}
+
+bool readCacheFile(const QString& path, QJsonObject* outObj, qint64* outSavedAtMs)
+{
+    if (!outObj)
+        return false;
+    QFile f(path);
+    if (!f.exists() || !f.open(QIODevice::ReadOnly))
+        return false;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    f.close();
+    if (!doc.isObject())
+        return false;
+    const QJsonObject root = doc.object();
+    if (outSavedAtMs)
+        *outSavedAtMs = static_cast<qint64>(root.value(QStringLiteral("savedAt")).toDouble(0));
+    *outObj = root;
+    return true;
+}
+
+void writeCacheFile(const QString& path, const QJsonObject& payload)
+{
+    QJsonObject root = payload;
+    root.insert(QStringLiteral("savedAt"),
+                static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    f.close();
+}
+
+bool cacheIsFresh(qint64 savedAtMs)
+{
+    if (savedAtMs <= 0)
+        return false;
+    return (QDateTime::currentMSecsSinceEpoch() - savedAtMs) < kCacheTtlMs;
+}
+
+bool diskCacheFresh(const QString& server, const QString& kind, const QString& cameraKey)
+{
+    if (server.isEmpty())
+        return false;
+    QJsonObject root;
+    qint64 savedAt = 0;
+    if (!readCacheFile(cacheFilePath(server, kind, cameraKey), &root, &savedAt))
+        return false;
+    return cacheIsFresh(savedAt);
+}
+
+QVariantList jsonArrayToList(const QJsonArray& arr)
+{
+    QVariantList list;
+    list.reserve(arr.size());
+    for (const QJsonValue& v : arr)
+        list.append(v.toVariant());
+    return list;
+}
+
+QJsonArray listToJsonArray(const QVariantList& list)
+{
+    return QJsonArray::fromVariantList(list);
+}
+
+bool loadListFromDisk(const QString& server, const QString& kind, const QString& key,
+                      QVariantList* out)
+{
+    if (!out || server.isEmpty())
+        return false;
+    QJsonObject root;
+    qint64 savedAt = 0;
+    if (!readCacheFile(cacheFilePath(server, kind, key), &root, &savedAt))
+        return false;
+    *out = jsonArrayToList(root.value(QStringLiteral("data")).toArray());
+    return !out->isEmpty() || root.contains(QStringLiteral("data"));
+}
+
+bool loadStringListFromDisk(const QString& server, const QString& kind, const QString& key,
+                            QStringList* out)
+{
+    if (!out || server.isEmpty())
+        return false;
+    QJsonObject root;
+    qint64 savedAt = 0;
+    if (!readCacheFile(cacheFilePath(server, kind, key), &root, &savedAt))
+        return false;
+    out->clear();
+    for (const QJsonValue& v : root.value(QStringLiteral("data")).toArray())
+        out->append(v.toString());
+    return true;
+}
+
+void saveListToDisk(const QString& server, const QString& kind, const QString& key,
+                    const QVariantList& data)
+{
+    if (server.isEmpty())
+        return;
+    QJsonObject payload;
+    payload.insert(QStringLiteral("data"), listToJsonArray(data));
+    writeCacheFile(cacheFilePath(server, kind, key), payload);
+}
+
+void saveStringListToDisk(const QString& server, const QString& kind, const QString& key,
+                          const QStringList& data)
+{
+    if (server.isEmpty())
+        return;
+    QJsonArray arr;
+    for (const QString& d : data)
+        arr.append(d);
+    QJsonObject payload;
+    payload.insert(QStringLiteral("data"), arr);
+    writeCacheFile(cacheFilePath(server, kind, key), payload);
+}
+
+void removeCameraDiskFiles(const QString& server, const QString& cameraId)
+{
+    if (server.isEmpty() || cameraId.isEmpty())
+        return;
+    QFile::remove(cacheFilePath(server, QStringLiteral("rec"), cameraId));
+    QFile::remove(cacheFilePath(server, QStringLiteral("days"), cameraId));
+    QFile::remove(cacheFilePath(server, QStringLiteral("evt"), cameraId));
+    QFile::remove(cacheFilePath(server, QStringLiteral("mot"), cameraId));
+}
+
 } // namespace
 
 FrigateTimeline::FrigateTimeline(QObject* parent)
@@ -101,9 +270,37 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         emit recordingsLoaded(cameraId, QVariantList());
         return;
     }
+
+    // Memory → disk → emit immediately (survives app restart)
+    if (m_recordingsByCamera.contains(cameraId)) {
+        emit recordingsLoaded(cameraId, m_recordingsByCamera.value(cameraId));
+    } else {
+        QVariantList fromDisk;
+        if (loadListFromDisk(m_server, QStringLiteral("rec"), cameraId, &fromDisk)) {
+            m_recordingsByCamera[cameraId] = fromDisk;
+            emit recordingsLoaded(cameraId, fromDisk);
+        }
+    }
+
+    if (m_recordingDaysByCamera.contains(cameraId)) {
+        emit recordingDaysLoaded(cameraId, m_recordingDaysByCamera.value(cameraId));
+    } else {
+        QStringList daysDisk;
+        if (loadStringListFromDisk(m_server, QStringLiteral("days"), cameraId, &daysDisk)) {
+            m_recordingDaysByCamera[cameraId] = daysDisk;
+            emit recordingDaysLoaded(cameraId, daysDisk);
+        }
+    }
+
+    // Always keep calendar days reasonably fresh
+    if (!diskCacheFresh(m_server, QStringLiteral("days"), cameraId))
+        loadRecordingDays(cameraId);
+
+    if (diskCacheFresh(m_server, QStringLiteral("rec"), cameraId))
+        return;
+
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    loadRecordingsRange(cameraId, nowSec - 24 * 3600, nowSec);
-    loadRecordingDays(cameraId);
+    loadRecordingsRange(cameraId, nowSec - 6 * 3600, nowSec);
 }
 
 void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
@@ -153,6 +350,7 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
 
         segments = mergeTouchingOnly(segments, 120.0);
         m_recordingsByCamera[cameraId] = segments;
+        saveListToDisk(m_server, QStringLiteral("rec"), cameraId, segments);
         emit recordingsLoaded(cameraId, segments);
     });
 }
@@ -164,6 +362,19 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
         emit recordingDaysLoaded(cameraId, QStringList());
         return;
     }
+
+    if (m_recordingDaysByCamera.contains(cameraId)) {
+        emit recordingDaysLoaded(cameraId, m_recordingDaysByCamera.value(cameraId));
+    } else {
+        QStringList daysDisk;
+        if (loadStringListFromDisk(m_server, QStringLiteral("days"), cameraId, &daysDisk)) {
+            m_recordingDaysByCamera[cameraId] = daysDisk;
+            emit recordingDaysLoaded(cameraId, daysDisk);
+        }
+    }
+
+    if (diskCacheFresh(m_server, QStringLiteral("days"), cameraId))
+        return;
 
     QUrl url(QStringLiteral("%1/api/recordings/summary").arg(m_server));
     QUrlQuery query;
@@ -195,6 +406,7 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
             days.removeDuplicates();
             days.sort();
             m_recordingDaysByCamera[cameraId] = days;
+            saveStringListToDisk(m_server, QStringLiteral("days"), cameraId, days);
             emit recordingDaysLoaded(cameraId, days);
             return;
         }
@@ -238,6 +450,7 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
             days2.removeDuplicates();
             days2.sort();
             m_recordingDaysByCamera[cameraId] = days2;
+            saveStringListToDisk(m_server, QStringLiteral("days"), cameraId, days2);
             emit recordingDaysLoaded(cameraId, days2);
         });
     });
@@ -245,17 +458,42 @@ void FrigateTimeline::loadRecordingDays(const QString& cameraId)
 
 void FrigateTimeline::loadEvents(const QString& cameraId)
 {
+    const QString key = cameraId.isEmpty() ? QStringLiteral("__all__") : cameraId;
+
+    if (m_eventsByCamera.contains(key)) {
+        emit eventsLoaded(cameraId, m_eventsByCamera.value(key));
+    } else {
+        QVariantList fromDisk;
+        if (loadListFromDisk(m_server, QStringLiteral("evt"), key, &fromDisk)) {
+            m_eventsByCamera[key] = fromDisk;
+            emit eventsLoaded(cameraId, fromDisk);
+        }
+    }
+
+    if (diskCacheFresh(m_server, QStringLiteral("evt"), key))
+        return;
+
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    loadEventsRange(cameraId, nowSec - 24 * 3600, nowSec);
+    loadEventsRange(cameraId, nowSec - 6 * 3600, nowSec);
 }
 
 void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
 {
-    // Empty cameraId => all cameras on this Frigate server
     if (m_server.isEmpty()) {
         m_eventsByCamera[cameraId] = QVariantList();
         emit eventsLoaded(cameraId, QVariantList());
         return;
+    }
+
+    const QString cacheKey = cameraId.isEmpty() ? QStringLiteral("__all__") : cameraId;
+    if (m_eventsByCamera.contains(cacheKey)) {
+        emit eventsLoaded(cameraId, m_eventsByCamera.value(cacheKey));
+    } else {
+        QVariantList fromDisk;
+        if (loadListFromDisk(m_server, QStringLiteral("evt"), cacheKey, &fromDisk)) {
+            m_eventsByCamera[cacheKey] = fromDisk;
+            emit eventsLoaded(cameraId, fromDisk);
+        }
     }
 
     QUrl url(QStringLiteral("%1/api/events").arg(m_server));
@@ -264,7 +502,7 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
         query.addQueryItem(QStringLiteral("cameras"), cameraId);
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
     query.addQueryItem(QStringLiteral("before"), QString::number(beforeSec));
-    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("5000"));
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("100"));
     query.addQueryItem(QStringLiteral("include_thumbnails"), QStringLiteral("0"));
     url.setQuery(query);
 
@@ -339,14 +577,39 @@ void FrigateTimeline::loadEventsRange(const QString& cameraId, qint64 afterSec, 
 
         const QString key = cameraId.isEmpty() ? QStringLiteral("__all__") : cameraId;
         m_eventsByCamera[key] = events;
+        saveListToDisk(m_server, QStringLiteral("evt"), key, events);
         emit eventsLoaded(cameraId, events);
     });
 }
 
 void FrigateTimeline::loadMotionActivity(const QString& cameraId)
 {
+    if (cameraId.isEmpty())
+        return;
+
+    // 1) RAM  2) disk  3) emit so ticks show after app restart
+    if (m_motionByCamera.contains(cameraId)) {
+        emit motionActivityLoaded(cameraId, m_motionByCamera.value(cameraId));
+    } else if (!m_server.isEmpty()) {
+        QVariantList fromDisk;
+        if (loadListFromDisk(m_server, QStringLiteral("mot"), cameraId, &fromDisk)
+            && !fromDisk.isEmpty()) {
+            m_motionByCamera[cameraId] = fromDisk;
+            emit motionActivityLoaded(cameraId, fromDisk);
+        }
+    }
+
+    if (m_server.isEmpty())
+        return;
+
+    // Skip network only while disk/RAM is still fresh
+    if (diskCacheFresh(m_server, QStringLiteral("mot"), cameraId)
+        && m_motionByCamera.contains(cameraId)
+        && !m_motionByCamera.value(cameraId).isEmpty())
+        return;
+
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    loadMotionActivityRange(cameraId, nowSec - 24 * 3600, nowSec);
+    loadMotionActivityRange(cameraId, nowSec - 6 * 3600, nowSec);
 }
 
 void FrigateTimeline::loadMotionActivityRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
@@ -355,6 +618,18 @@ void FrigateTimeline::loadMotionActivityRange(const QString& cameraId, qint64 af
         m_motionByCamera[cameraId] = QVariantList();
         emit motionActivityLoaded(cameraId, QVariantList());
         return;
+    }
+
+    // Instant paint from memory/disk before network returns
+    if (m_motionByCamera.contains(cameraId)) {
+        emit motionActivityLoaded(cameraId, m_motionByCamera.value(cameraId));
+    } else {
+        QVariantList fromDisk;
+        if (loadListFromDisk(m_server, QStringLiteral("mot"), cameraId, &fromDisk)
+            && !fromDisk.isEmpty()) {
+            m_motionByCamera[cameraId] = fromDisk;
+            emit motionActivityLoaded(cameraId, fromDisk);
+        }
     }
 
     QUrl url(QStringLiteral("%1/api/review/activity/motion").arg(m_server));
@@ -401,30 +676,73 @@ void FrigateTimeline::loadMotionActivityRange(const QString& cameraId, qint64 af
             }
         }
 
+        // Keep previous disk/RAM ticks if network failed or returned empty
+        if (points.isEmpty() && m_motionByCamera.contains(cameraId)
+            && !m_motionByCamera.value(cameraId).isEmpty()) {
+            emit motionActivityLoaded(cameraId, m_motionByCamera.value(cameraId));
+            return;
+        }
+
         points = capMotionPoints(points, 400);
         m_motionByCamera[cameraId] = points;
+        saveListToDisk(m_server, QStringLiteral("mot"), cameraId, points);
         emit motionActivityLoaded(cameraId, points);
     });
 }
 
 QVariantList FrigateTimeline::getRecordings(const QString& cameraId) const
 {
-    return m_recordingsByCamera.value(cameraId);
+    if (m_recordingsByCamera.contains(cameraId))
+        return m_recordingsByCamera.value(cameraId);
+
+    // Hydrate from disk so QML can paint without waiting for load*()
+    if (!m_server.isEmpty() && !cameraId.isEmpty()) {
+        QVariantList fromDisk;
+        if (loadListFromDisk(m_server, QStringLiteral("rec"), cameraId, &fromDisk))
+            return fromDisk;
+    }
+    return {};
 }
 
 QVariantList FrigateTimeline::getEvents(const QString& cameraId) const
 {
-    return m_eventsByCamera.value(cameraId);
+    const QString key = cameraId.isEmpty() ? QStringLiteral("__all__") : cameraId;
+    if (m_eventsByCamera.contains(key))
+        return m_eventsByCamera.value(key);
+
+    if (!m_server.isEmpty()) {
+        QVariantList fromDisk;
+        if (loadListFromDisk(m_server, QStringLiteral("evt"), key, &fromDisk))
+            return fromDisk;
+    }
+    return {};
 }
 
 QVariantList FrigateTimeline::getMotionActivity(const QString& cameraId) const
 {
-    return m_motionByCamera.value(cameraId);
+    if (m_motionByCamera.contains(cameraId))
+        return m_motionByCamera.value(cameraId);
+
+    // Critical for ticks after app restart when QML calls getMotionActivity first
+    if (!m_server.isEmpty() && !cameraId.isEmpty()) {
+        QVariantList fromDisk;
+        if (loadListFromDisk(m_server, QStringLiteral("mot"), cameraId, &fromDisk))
+            return fromDisk;
+    }
+    return {};
 }
 
 QStringList FrigateTimeline::getRecordingDays(const QString& cameraId) const
 {
-    return m_recordingDaysByCamera.value(cameraId);
+    if (m_recordingDaysByCamera.contains(cameraId))
+        return m_recordingDaysByCamera.value(cameraId);
+
+    if (!m_server.isEmpty() && !cameraId.isEmpty()) {
+        QStringList fromDisk;
+        if (loadStringListFromDisk(m_server, QStringLiteral("days"), cameraId, &fromDisk))
+            return fromDisk;
+    }
+    return {};
 }
 
 void FrigateTimeline::loadPlaybackWindow(const QString& cameraId, qint64 timestampMs)
@@ -447,4 +765,5 @@ void FrigateTimeline::clearCamera(const QString& cameraId)
     m_eventsByCamera.remove(cameraId);
     m_motionByCamera.remove(cameraId);
     m_recordingDaysByCamera.remove(cameraId);
+    removeCameraDiskFiles(m_server, cameraId);
 }

@@ -3,8 +3,10 @@
 #include <QObject>
 #include <QString>
 #include <QImage>
-#include <QSet>
 #include <atomic>
+#include <memory>
+
+#include "FrameQueue.h"          // ← this brings in AVFramePtr / AVFrameDeleter
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -12,9 +14,8 @@ extern "C" {
 #include <libswscale/swscale.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/pixfmt.h>
+#include <libavutil/frame.h>
 }
-
-class FrameQueue;
 
 class FFmpegWorker : public QObject
 {
@@ -39,7 +40,6 @@ public:
     int bitrateKbps() const { return m_bitrateKbps; }
     QString codec() const { return m_codec; }
 
-    AVPixelFormat hwPixFmt() const { return m_hwPixFmt; }
     bool isAbortRequested() const { return m_abort.load(); }
 
 public slots:
@@ -71,11 +71,13 @@ private:
     void clearHw();
 
     static int decodeInterruptCb(void* opaque);
+    static enum AVPixelFormat getHwFormat(AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts);
 
     QString m_url;
     std::atomic_bool m_abort{false};
     bool m_testMode = false;
     bool m_highQuality = false;
+    bool m_usingHw = false;
 
     FrameQueue* m_queue = nullptr;
 
@@ -86,5 +88,4 @@ private:
 
     AVBufferRef* m_hwDeviceCtx = nullptr;
     AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
-    bool m_usingHw = false;
 };

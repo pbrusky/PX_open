@@ -2,7 +2,9 @@
 #define DISCOVERYLISTENER_H
 
 #include <QObject>
-#include <QUdpSocket>
+#include <QString>
+
+class QUdpSocket;
 
 class DiscoveryListener : public QObject
 {
@@ -16,19 +18,20 @@ public slots:
     void stopDiscovery();
 
 signals:
-    void serverFound(QString name,
-                     QString address,
+    void serverFound(const QString& name,
+                     const QString& address,
                      int port,
-                     QString container,
-                     QString systemId,
-                     QString moduleId,
-                     QString type);
+                     const QString& container,
+                     const QString& systemId,
+                     const QString& moduleId,
+                     const QString& type,
+                     const QString& version);   
 
 private slots:
     void processPendingDatagrams();
 
 private:
-    QUdpSocket* m_socket;
+    QUdpSocket* m_socket = nullptr;
 };
 
 #endif // DISCOVERYLISTENER_H

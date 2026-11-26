@@ -36,24 +36,39 @@ Item {
     property real ghostX: 0
     property real ghostY: 0
 
-    Rectangle {
-        anchors.fill: parent
-        color: "#202020"
+    // Simple dark palette – change here to restyle the whole sidebar
+    QtObject {
+        id: palette
+        readonly property color background: "#202020"
+        readonly property color surface: "#303030"
+        readonly property color surfaceAlt: "#2A2A2A"
+        readonly property color surfaceHover: "#3A3A50"
+        readonly property color selected: "#404060"
+        readonly property color border: "#555555"
+        readonly property color text: "#FFFFFF"
+        readonly property color textMuted: "#AAAAAA"
+        readonly property color accent: "#4060A0"
+        readonly property color online: "#4CAF50"
+        readonly property color offline: "#D32F2F"
+        readonly property color ghostBg: "#2A2A4ADD"
+        readonly property color ghostBorder: "#8B9BFF"
     }
 
-    Column {
+    Rectangle {
+        anchors.fill: parent
+        color: palette.background
+    }
+
+    ColumnLayout {
         id: mainCol
-        spacing: 8
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
+        anchors.fill: parent
         anchors.margins: 8
+        spacing: 8
 
         // Server title
         Item {
-            width: parent.width
-            height: 28
+            Layout.fillWidth: true
+            Layout.preferredHeight: 28
 
             Menu {
                 id: serverNameContextMenu
@@ -84,7 +99,7 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: serverName !== "" ? serverName : "No server"
-                    color: "white"
+                    color: palette.text
                     font.pixelSize: 16
                 }
                 MouseArea {
@@ -100,269 +115,303 @@ Item {
 
         // Cameras header
         Text {
+            Layout.fillWidth: true
             text: "Cameras"
-            color: "#AAAAAA"
+            color: palette.textMuted
             font.pixelSize: 11
             font.bold: true
         }
 
-        ListView {
-            id: cameraListView
-            width: parent.width
-            height: Math.max(120, (mainCol.height - 220) * 0.55)
-            clip: true
-            model: sidebar.cameraList
+        // Camera list (or empty state)
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.preferredHeight: 1   // stretch weight
 
-            delegate: Rectangle {
-                id: cameraRow
-                width: cameraListView.width
-                height: 40
-                radius: 4
+            ListView {
+                id: cameraListView
+                anchors.fill: parent
+                clip: true
+                visible: sidebar.cameraList.length > 0
+                model: sidebar.cameraList
 
-                property string cameraId: modelData.id
-                property string cameraName: modelData.name
-                property bool isOnline: false
+                delegate: Rectangle {
+                    id: cameraRow
+                    width: cameraListView.width
+                    height: 40
+                    radius: 4
 
-                Component.onCompleted: {
-                    isOnline = frigateRef ? frigateRef.isCameraOnline(cameraId) : false
-                }
+                    property string cameraId: modelData.id || ""
+                    property string cameraName: modelData.name || ""
+                    property bool isOnline: false
 
-                Connections {
-                    target: frigateRef
-                    ignoreUnknownSignals: true
-                    function onCameraOnline(name) {
-                        if (name === cameraId || name === cameraName)
-                            cameraRow.isOnline = true
+                    Component.onCompleted: {
+                        isOnline = frigateRef ? frigateRef.isCameraOnline(cameraId) : false
                     }
-                    function onCameraOffline(name) {
-                        if (name === cameraId || name === cameraName)
-                            cameraRow.isOnline = false
-                    }
-                }
 
-                color: (cameraId === sidebar.selectedCameraId)
-                       ? "#404060"
-                       : (sidebar.dragging && sidebar.draggingCameraId === cameraId)
-                         ? "#3A3A50"
-                         : "#303030"
-
-                opacity: (sidebar.dragging && sidebar.draggingCameraId === cameraId) ? 0.5 : 1.0
-
-                Row {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 10
-                    z: 0
-
-                    Item {
-                        width: 22
-                        height: 22
-                        anchors.verticalCenter: parent.verticalCenter
-                        Image {
-                            anchors.centerIn: parent
-                            width: 18
-                            height: 18
-                            source: "qrc:/app/assets/icons/nx/cameras.svg"
-                            fillMode: Image.PreserveAspectFit
-                            opacity: cameraRow.isOnline ? 1.0 : 0.55
+                    Connections {
+                        target: frigateRef
+                        ignoreUnknownSignals: true
+                        function onCameraOnline(name) {
+                            if (name === cameraId || name === cameraName)
+                                cameraRow.isOnline = true
                         }
-                        Rectangle {
-                            width: 7
-                            height: 7
-                            radius: 3.5
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            color: cameraRow.isOnline ? "#4CAF50" : "#D32F2F"
-                            border.color: "#202020"
-                            border.width: 1
+                        function onCameraOffline(name) {
+                            if (name === cameraId || name === cameraName)
+                                cameraRow.isOnline = false
                         }
                     }
 
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: cameraName
-                        color: "white"
-                        font.pixelSize: 14
-                        elide: Text.ElideRight
-                        width: cameraRow.width - 56
-                    }
-                }
+                    color: (cameraId === sidebar.selectedCameraId)
+                           ? palette.selected
+                           : (sidebar.dragging && sidebar.draggingCameraId === cameraId)
+                             ? palette.surfaceHover
+                             : palette.surface
 
-                Menu {
-                    id: sidebarContextMenu
-                    title: cameraName !== "" ? cameraName : "Camera"
-                    MenuItem {
-                        text: "Select"
-                        enabled: cameraName !== ""
-                        onTriggered: {
-                            sidebar.selectedCameraId = cameraId
-                            sidebar.cameraSelected(cameraId)
-                        }
-                    }
-                    MenuItem {
-                        text: "Edit Camera"
-                        enabled: cameraName !== ""
-                        onTriggered: {
-                            sidebar.selectedCameraId = cameraId
-                            sidebar.cameraSelected(cameraId)
-                            sidebar.navigate("editCamera:" + cameraId)
-                        }
-                    }
-                    MenuItem {
-                        text: "Remove Camera"
-                        onTriggered: sidebar.requestRemoveCamera(cameraId)
-                    }
-                    MenuItem {
-                        text: "Add Camera"
-                        onTriggered: sidebar.navigate("addCamera")
-                    }
-                }
+                    opacity: (sidebar.dragging && sidebar.draggingCameraId === cameraId) ? 0.5 : 1.0
 
-                TapHandler {
-                    acceptedButtons: Qt.LeftButton
-                    onTapped: {
-                        sidebar.selectedCameraId = cameraId
-                        sidebar.cameraSelected(cameraId)
-                    }
-                }
+                    Row {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 10
+                        z: 0
 
-                DragHandler {
-                    id: rowDrag
-                    target: null
-                    acceptedButtons: Qt.LeftButton
-                    grabPermissions: PointerHandler.CanTakeOverFromAnything
-                        | PointerHandler.ApprovesTakeOverByAnything
-
-                    function syncGhost() {
-                        if (!rowDrag.centroid)
-                            return
-                        var scene = rowDrag.centroid.scenePosition
-                        if (!scene)
-                            return
-                        var loc = sidebar.mapFromItem(null, scene.x, scene.y)
-                        sidebar.ghostX = loc.x + 10
-                        sidebar.ghostY = loc.y + 10
-                    }
-
-                    onActiveChanged: {
-                        if (active) {
-                            sidebar.dragging = true
-                            sidebar.draggingCameraId = cameraId
-                            sidebar.draggingCameraName = cameraName
-                            syncGhost()
-                        } else if (sidebar.draggingCameraId === cameraId) {
-                            var scene = rowDrag.centroid ? rowDrag.centroid.scenePosition : null
-                            if (scene) {
-                                var loc = sidebar.mapFromItem(null, scene.x, scene.y)
-                                var g = sidebar.mapToGlobal(loc.x, loc.y)
-                                sidebar.cameraDropped(g.x, g.y, sidebar.draggingCameraName)
+                        Item {
+                            width: 22
+                            height: 22
+                            anchors.verticalCenter: parent.verticalCenter
+                            Image {
+                                anchors.centerIn: parent
+                                width: 18
+                                height: 18
+                                source: "qrc:/app/assets/icons/nx/cameras.svg"
+                                fillMode: Image.PreserveAspectFit
+                                opacity: cameraRow.isOnline ? 1.0 : 0.55
                             }
-                            sidebar.dragging = false
-                            sidebar.draggingCameraId = ""
-                            sidebar.draggingCameraName = ""
+                            Rectangle {
+                                width: 7
+                                height: 7
+                                radius: 3.5
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                color: cameraRow.isOnline ? palette.online : palette.offline
+                                border.color: palette.background
+                                border.width: 1
+                            }
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: cameraName
+                            color: palette.text
+                            font.pixelSize: 14
+                            elide: Text.ElideRight
+                            width: cameraRow.width - 56
                         }
                     }
 
-                    onTranslationChanged: {
-                        if (active)
-                            syncGhost()
+                    Menu {
+                        id: sidebarContextMenu
+                        title: cameraName !== "" ? cameraName : "Camera"
+                        MenuItem {
+                            text: "Select"
+                            enabled: cameraName !== ""
+                            onTriggered: {
+                                sidebar.selectedCameraId = cameraId
+                                sidebar.cameraSelected(cameraId)
+                            }
+                        }
+                        MenuItem {
+                            text: "Edit Camera"
+                            enabled: cameraName !== ""
+                            onTriggered: {
+                                sidebar.selectedCameraId = cameraId
+                                sidebar.cameraSelected(cameraId)
+                                sidebar.navigate("editCamera:" + cameraId)
+                            }
+                        }
+                        MenuItem {
+                            text: "Remove Camera"
+                            onTriggered: sidebar.requestRemoveCamera(cameraId)
+                        }
+                        MenuItem {
+                            text: "Add Camera"
+                            onTriggered: sidebar.navigate("addCamera")
+                        }
+                    }
+
+                    TapHandler {
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: {
+                            sidebar.selectedCameraId = cameraId
+                            sidebar.cameraSelected(cameraId)
+                        }
+                    }
+
+                    DragHandler {
+                        id: rowDrag
+                        target: null
+                        acceptedButtons: Qt.LeftButton
+                        grabPermissions: PointerHandler.CanTakeOverFromAnything
+                            | PointerHandler.ApprovesTakeOverByAnything
+
+                        function syncGhost() {
+                            if (!rowDrag.centroid)
+                                return
+                            var scene = rowDrag.centroid.scenePosition
+                            if (!scene)
+                                return
+                            var loc = sidebar.mapFromItem(null, scene.x, scene.y)
+                            sidebar.ghostX = loc.x + 10
+                            sidebar.ghostY = loc.y + 10
+                        }
+
+                        onActiveChanged: {
+                            if (active) {
+                                sidebar.dragging = true
+                                sidebar.draggingCameraId = cameraId
+                                sidebar.draggingCameraName = cameraName
+                                syncGhost()
+                            } else if (sidebar.draggingCameraId === cameraId) {
+                                var scene = rowDrag.centroid ? rowDrag.centroid.scenePosition : null
+                                if (scene) {
+                                    var loc = sidebar.mapFromItem(null, scene.x, scene.y)
+                                    var g = sidebar.mapToGlobal(loc.x, loc.y)
+                                    sidebar.cameraDropped(g.x, g.y, sidebar.draggingCameraName)
+                                }
+                                sidebar.dragging = false
+                                sidebar.draggingCameraId = ""
+                                sidebar.draggingCameraName = ""
+                            }
+                        }
+
+                        onTranslationChanged: {
+                            if (active)
+                                syncGhost()
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.RightButton
+                        z: 10
+                        onClicked: sidebarContextMenu.open()
                     }
                 }
+            }
 
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.RightButton
-                    z: 10
-                    onClicked: sidebarContextMenu.open()
-                }
+            // Empty state for cameras
+            Text {
+                anchors.centerIn: parent
+                visible: sidebar.cameraList.length === 0
+                text: "No cameras"
+                color: palette.textMuted
+                font.pixelSize: 13
             }
         }
 
-        // Layouts header (NX: below cameras)
+        // Layouts header
         Text {
+            Layout.fillWidth: true
             text: "Layouts"
-            color: "#AAAAAA"
+            color: palette.textMuted
             font.pixelSize: 11
             font.bold: true
         }
 
-        ListView {
-            id: layoutListView
-            width: parent.width
-            height: Math.max(80, (mainCol.height - 220) * 0.35)
-            clip: true
-            model: sidebar.layoutList
+        // Layout list (or empty state)
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.preferredHeight: 0.65   // slightly less stretch than cameras
 
-            delegate: Rectangle {
-                id: layoutRow
-                width: layoutListView.width
-                height: 32
-                radius: 4
-                color: (modelData.name === sidebar.selectedLayoutName) ? "#404060" : "#2A2A2A"
+            ListView {
+                id: layoutListView
+                anchors.fill: parent
+                clip: true
+                visible: sidebar.layoutList.length > 0
+                model: sidebar.layoutList
 
-                property string layoutName: modelData.name || ""
+                delegate: Rectangle {
+                    id: layoutRow
+                    width: layoutListView.width
+                    height: 32
+                    radius: 4
+                    color: (modelData.name === sidebar.selectedLayoutName) ? palette.selected : palette.surfaceAlt
 
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 10
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.right: parent.right
-                    anchors.rightMargin: 8
-                    text: layoutRow.layoutName
-                    color: "white"
-                    font.pixelSize: 13
-                    elide: Text.ElideRight
-                }
+                    property string layoutName: modelData.name || ""
 
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onClicked: function(mouse) {
-                        if (mouse.button === Qt.RightButton) {
-                            layoutMenu.layoutName = layoutRow.layoutName
-                            layoutMenu.open()
-                            return
-                        }
-                        sidebar.selectedLayoutName = layoutRow.layoutName
-                        sidebar.navigate("loadLayout:" + layoutRow.layoutName)
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        text: layoutRow.layoutName
+                        color: palette.text
+                        font.pixelSize: 13
+                        elide: Text.ElideRight
                     }
-                }
 
-                Menu {
-                    id: layoutMenu
-                    property string layoutName: ""
-                    MenuItem {
-                        text: "Load"
-                        onTriggered: {
-                            sidebar.selectedLayoutName = layoutMenu.layoutName
-                            sidebar.navigate("loadLayout:" + layoutMenu.layoutName)
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: function(mouse) {
+                            if (mouse.button === Qt.RightButton) {
+                                layoutMenu.layoutName = layoutRow.layoutName
+                                layoutMenu.open()
+                                return
+                            }
+                            sidebar.selectedLayoutName = layoutRow.layoutName
+                            sidebar.navigate("loadLayout:" + layoutRow.layoutName)
                         }
                     }
-                    MenuItem {
-                        text: "Overwrite with current grid"
-                        onTriggered: sidebar.navigate("saveLayoutAs:" + layoutMenu.layoutName)
-                    }
-                    MenuItem {
-                        text: "Delete"
-                        onTriggered: sidebar.navigate("deleteLayout:" + layoutMenu.layoutName)
+
+                    Menu {
+                        id: layoutMenu
+                        property string layoutName: ""
+                        MenuItem {
+                            text: "Load"
+                            onTriggered: {
+                                sidebar.selectedLayoutName = layoutMenu.layoutName
+                                sidebar.navigate("loadLayout:" + layoutMenu.layoutName)
+                            }
+                        }
+                        MenuItem {
+                            text: "Overwrite with current grid"
+                            onTriggered: sidebar.navigate("saveLayoutAs:" + layoutMenu.layoutName)
+                        }
+                        MenuItem {
+                            text: "Delete"
+                            onTriggered: sidebar.navigate("deleteLayout:" + layoutMenu.layoutName)
+                        }
                     }
                 }
+            }
+
+            // Empty state for layouts
+            Text {
+                anchors.centerIn: parent
+                visible: sidebar.layoutList.length === 0
+                text: "No layouts"
+                color: palette.textMuted
+                font.pixelSize: 13
             }
         }
 
         // Save as…
         Rectangle {
-            width: parent.width
-            height: 30
+            Layout.fillWidth: true
+            Layout.preferredHeight: 30
             radius: 4
-            color: saveAsBtn.containsMouse ? "#3A3A50" : "#333333"
-            border.color: "#555555"
+            color: saveAsBtn.containsMouse ? palette.surfaceHover : "#333333"
+            border.color: palette.border
             border.width: 1
 
             Text {
                 anchors.centerIn: parent
                 text: "Save layout as…"
-                color: "white"
+                color: palette.text
                 font.pixelSize: 12
             }
             MouseArea {
@@ -384,8 +433,8 @@ Item {
         height: 110
         padding: 12
         background: Rectangle {
-            color: "#2A2A2A"
-            border.color: "#555"
+            color: palette.surfaceAlt
+            border.color: palette.border
             radius: 6
         }
 
@@ -402,12 +451,12 @@ Item {
                 id: layoutNameField
                 width: parent.width
                 placeholderText: "e.g. Front only"
-                color: "white"
-                selectedTextColor: "white"
-                selectionColor: "#4060A0"
+                color: palette.text
+                selectedTextColor: palette.text
+                selectionColor: palette.accent
                 background: Rectangle {
                     color: "#1A1A1A"
-                    border.color: "#555"
+                    border.color: palette.border
                     radius: 3
                 }
             }
@@ -419,7 +468,7 @@ Item {
                     height: 26
                     radius: 3
                     color: "#444"
-                    Text { anchors.centerIn: parent; text: "Cancel"; color: "white"; font.pixelSize: 12 }
+                    Text { anchors.centerIn: parent; text: "Cancel"; color: palette.text; font.pixelSize: 12 }
                     MouseArea {
                         anchors.fill: parent
                         onClicked: saveAsDialog.close()
@@ -429,8 +478,8 @@ Item {
                     width: 70
                     height: 26
                     radius: 3
-                    color: "#4060A0"
-                    Text { anchors.centerIn: parent; text: "Save"; color: "white"; font.pixelSize: 12 }
+                    color: palette.accent
+                    Text { anchors.centerIn: parent; text: "Save"; color: palette.text; font.pixelSize: 12 }
                     MouseArea {
                         anchors.fill: parent
                         onClicked: {
@@ -449,6 +498,7 @@ Item {
         onOpened: layoutNameField.forceActiveFocus()
     }
 
+    // Drag ghost
     Rectangle {
         id: dragGhost
         visible: sidebar.dragging
@@ -458,8 +508,8 @@ Item {
         z: 100000
         x: sidebar.ghostX
         y: sidebar.ghostY
-        color: "#2A2A4ADD"
-        border.color: "#8B9BFF"
+        color: palette.ghostBg
+        border.color: palette.ghostBorder
         border.width: 1
 
         Row {
@@ -479,7 +529,7 @@ Item {
                 id: ghostLabel
                 anchors.verticalCenter: parent.verticalCenter
                 text: sidebar.draggingCameraName
-                color: "white"
+                color: palette.text
                 font.pixelSize: 13
                 font.bold: true
             }

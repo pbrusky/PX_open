@@ -10,7 +10,7 @@
 #include <QtWebEngineQuick>
 #include <QQuickStyle>
 #include <QIcon>
-#include <QProcess>
+#include <QProcess> // Keep this include for Linux lspci/lscpu
 #include <QLoggingCategory>
 #include <QFile>
 
@@ -31,34 +31,51 @@
 #include "AboutInfo.h"
 
 #ifdef Q_OS_WIN
-#  include <windows.h>
+#  include <windows.h> // REQUIRED for DISPLAY_DEVICEW and EnumDisplayDevicesW
 #endif
 
 extern "C" {
 #include <libavutil/log.h>
 }
 
-// GPU check — Windows uses WMIC; Linux uses lspci if available (optional)
+// Fast native GPU check — Windows uses Win32 EnumDisplayDevices (<1ms); Linux uses lspci
 bool isAmdGpuPresent()
 {
 #ifdef Q_OS_WIN
-    QProcess p;
-    p.start("wmic", QStringList() << "path" << "win32_VideoController" << "get" << "Name");
-    p.waitForFinished(3000);
-    const QString output = QString::fromLocal8Bit(p.readAllStandardOutput()).toLower();
-    return output.contains("amd") || output.contains("radeon");
+    DISPLAY_DEVICEW dd;
+    dd.cb = sizeof(dd);
+    DWORD deviceIndex = 0;
+
+    while (EnumDisplayDevicesW(NULL, deviceIndex, &dd, 0)) {
+        if (dd.StateFlags & DISPLAY_DEVICE_ACTIVE || dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) {
+            const QString gpuName = QString::fromWCharArray(dd.DeviceString).toLower();
+            if (gpuName.contains(QStringLiteral("amd")) ||
+                gpuName.contains(QStringLiteral("radeon")) ||
+                gpuName.contains(QStringLiteral("advanced micro devices")))
+            {
+                return true;
+            }
+        }
+        deviceIndex++;
+    }
+    return false;
 #else
+    // Linux: Use lspci - this part is fine and doesn't use powershell
     QProcess p;
-    p.start("lspci", QStringList());
-    if (!p.waitForFinished(2000))
+    p.start(QStringLiteral("lspci"), QStringList());
+    if (!p.waitForFinished(2000)) {
+        p.kill();
+        p.waitForFinished(500);
         return false;
-    const QString output = QString::fromLocal8Bit(p.readAllStandardOutput()).toLower();
+    }
+    const QString output = QString::fromLocal10Bit(p.readAllStandardOutput()).toLower();
     return output.contains("amd") || output.contains("radeon");
 #endif
 }
 
 int main(int argc, char *argv[])
 {
+    // The problematic call is here, BEFORE QML engine or AboutInfo is created.
     if (isAmdGpuPresent()) {
         qputenv("QT_OPENGL", "software");
     }
@@ -82,6 +99,7 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
 
+    // AboutInfo singleton is created here, but its methods are now fine on Windows
     qmlRegisterSingletonType<AboutInfo>("PxOpen", 1, 0, "AboutInfo",
         [](QQmlEngine*, QJSEngine*) -> QObject* {
             return new AboutInfo();
@@ -122,10 +140,12 @@ int main(int argc, char *argv[])
     FrigateStreamManager* frigateStream = new FrigateStreamManager(&engine);
 
     DiscoveryListener* discovery = new DiscoveryListener();
-    DiscoveryProxy* discoveryProxy = new DiscoveryProxy();
+    DiscoveryProxy* discoveryProxy = new DiscoveryProxy(&engine);
+    QThread* discoveryThread = new QThread(&app);
 
-    QThread* discoveryThread = new QThread;
     discovery->moveToThread(discoveryThread);
+
+    QObject::connect(discoveryThread, &QThread::finished, discovery, &QObject::deleteLater);
 
     QObject::connect(discoveryThread, &QThread::started,
                      discovery, &DiscoveryListener::startDiscovery);
@@ -153,6 +173,10 @@ int main(int argc, char *argv[])
     QObject* mainWindowObj = engine.rootObjects().first();
     QWindow* mainWindow = qobject_cast<QWindow*>(mainWindowObj);
 
+    if (mainWindow) {
+        mainWindow->setFlags(Qt::FramelessWindowHint | Qt::Window);
+    }
+
 #ifdef Q_OS_WIN
     if (mainWindow) {
         const HWND hwnd = reinterpret_cast<HWND>(mainWindow->winId());
@@ -160,7 +184,6 @@ int main(int argc, char *argv[])
         const QStringList iconCandidates = {
             QDir(QCoreApplication::applicationDirPath()).filePath("icon.ico"),
             QDir(QCoreApplication::applicationDirPath()).filePath("../assets/icon.ico"),
-            QStringLiteral("C:/PX/px_open/client/assets/icon.ico"),
         };
 
         HICON hIcon = nullptr;
@@ -181,6 +204,7 @@ int main(int argc, char *argv[])
         if (hIcon) {
             SendMessage(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hIcon));
             SendMessage(hwnd, WM_SETICON, ICON_BIG,   reinterpret_cast<LPARAM>(hIcon));
+            DestroyIcon(hIcon);
         }
 
         LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
@@ -192,10 +216,6 @@ int main(int argc, char *argv[])
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     }
 #endif
-
-    if (mainWindow) {
-        mainWindow->setFlags(Qt::FramelessWindowHint | Qt::Window);
-    }
 
     engine.rootContext()->setContextProperty("mainWindow", mainWindowObj);
 

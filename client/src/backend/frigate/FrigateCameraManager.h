@@ -59,9 +59,13 @@ signals:
     void go2rtcConfigLoaded(bool ok, QString content, QString path, QString message);
     void go2rtcConfigSaved(bool ok, QString message);
 
-private:
+private slots: // Private slots should be declared after signals (convention)
     void refreshCameraStats();
     void applyStatsPayload(const QByteArray& data);
+
+private:
+    // ADDED: Declaration for the helper function to parse RTSP URLs
+    void parseRtspUrl(const QString& url, QString& username, QString& password, QString& ip);
 
     QString m_server;
     QString m_moduleServer;
@@ -75,4 +79,4 @@ private:
     QHash<QString, QVariantMap> m_cameraMetadata;
 };
 
-#endif
+#endif // FRIGATECAMERAMANAGER_H

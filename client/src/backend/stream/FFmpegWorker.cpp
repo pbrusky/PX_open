@@ -6,6 +6,10 @@
 #include <QFileInfo>
 #include <QThread>
 
+#ifdef Q_OS_WIN
+#include <libavutil/hwcontext_d3d11va.h>
+#endif
+
 extern "C" {
 #include <libavutil/error.h>
 #include <libavutil/mathematics.h>
@@ -13,6 +17,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
+#include <libavutil/hwcontext.h>
 }
 
 FFmpegWorker::FFmpegWorker(QObject* parent)
@@ -58,21 +63,67 @@ void FFmpegWorker::clearHw()
         m_hwDeviceCtx = nullptr;
     }
     m_hwPixFmt = AV_PIX_FMT_NONE;
+    m_usingHw = false;
+}
+
+enum AVPixelFormat FFmpegWorker::getHwFormat(AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts)
+{
+    FFmpegWorker* self = static_cast<FFmpegWorker*>(ctx->opaque);
+
+    if (self) {
+        for (const enum AVPixelFormat* p = pix_fmts; *p != AV_PIX_FMT_NONE; p++) {
+            if (*p == self->m_hwPixFmt) {
+                self->m_usingHw = true;
+                return *p;
+            }
+        }
+
+        // This camera/codec/profile may not support hardware acceleration even
+        // though the GPU device itself was created. Keep decoding in software
+        // instead of leaving libavcodec without a usable output format.
+        self->m_usingHw = false;
+    }
+
+    return avcodec_default_get_format(ctx, pix_fmts);
 }
 
 bool FFmpegWorker::initHwDevice(AVCodecContext* ctx)
 {
-    Q_UNUSED(ctx);
     clearHw();
-    return false;
-}
 
-int FFmpegWorker::decodeInterruptCb(void* opaque)
-{
-    FFmpegWorker* self = static_cast<FFmpegWorker*>(opaque);
-    if (!self)
-        return 0;
-    return self->m_abort.load() ? 1 : 0;
+    AVHWDeviceType type = AV_HWDEVICE_TYPE_NONE;
+
+#ifdef Q_OS_WIN
+    type = AV_HWDEVICE_TYPE_D3D11VA;
+#else
+    type = av_hwdevice_find_type_by_name("vaapi");
+    if (type == AV_HWDEVICE_TYPE_NONE)
+        type = av_hwdevice_find_type_by_name("cuda");
+#endif
+
+    if (type == AV_HWDEVICE_TYPE_NONE)
+        return false;
+
+    if (av_hwdevice_ctx_create(&m_hwDeviceCtx, type, nullptr, nullptr, 0) < 0) {
+        clearHw();
+        return false;
+    }
+
+    ctx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
+    ctx->opaque = this;
+    ctx->get_format = getHwFormat;
+
+#ifdef Q_OS_WIN
+    m_hwPixFmt = AV_PIX_FMT_D3D11;
+#else
+    if (type == AV_HWDEVICE_TYPE_CUDA)
+        m_hwPixFmt = AV_PIX_FMT_CUDA;
+    else
+        m_hwPixFmt = AV_PIX_FMT_VAAPI;
+#endif
+
+    m_usingHw = true;
+    return true;
 }
 
 bool FFmpegWorker::openCodec(AVCodecContext** codecCtx,
@@ -80,8 +131,6 @@ bool FFmpegWorker::openCodec(AVCodecContext** codecCtx,
                              AVCodecParameters* params,
                              bool tryHw)
 {
-    Q_UNUSED(tryHw);
-
     *codecCtx = avcodec_alloc_context3(codec);
     if (!*codecCtx)
         return false;
@@ -91,12 +140,26 @@ bool FFmpegWorker::openCodec(AVCodecContext** codecCtx,
         return false;
     }
 
-    (*codecCtx)->flags  |= AV_CODEC_FLAG_LOW_DELAY;
-    (*codecCtx)->flags2 |= AV_CODEC_FLAG2_FAST;
-    (*codecCtx)->thread_count = 2;
+    if (m_highQuality) {
+        (*codecCtx)->thread_count = 4;
+        (*codecCtx)->flags |= AV_CODEC_FLAG_LOW_DELAY;
+    } else {
+        (*codecCtx)->flags  |= AV_CODEC_FLAG_LOW_DELAY;
+        (*codecCtx)->flags2 |= AV_CODEC_FLAG2_FAST;
+        (*codecCtx)->thread_count = 2;
+    }
+
+    const bool hardwareRequested = tryHw && initHwDevice(*codecCtx);
 
     if (avcodec_open2(*codecCtx, codec, nullptr) < 0) {
         avcodec_free_context(codecCtx);
+        clearHw();
+
+        // Hardware support can vary by camera, codec profile, and resolution.
+        // Retry this camera once with a normal software decoder.
+        if (hardwareRequested)
+            return openCodec(codecCtx, codec, params, false);
+
         return false;
     }
 
@@ -129,7 +192,7 @@ void FFmpegWorker::updateStats(AVFormatContext* fmtCtx,
     m_bitrateKbps = br > 0 ? int(br / 1000) : 0;
 
     if (codecCtx->codec && codecCtx->codec->name)
-        m_codec = QString::fromUtf8(codecCtx->codec->name);
+        m_codec = QString::fromUtf8(codecCtx->codec->name) + (m_usingHw ? " (HW)" : " (SW)");
     else
         m_codec.clear();
 
@@ -147,6 +210,14 @@ void FFmpegWorker::stopDecoding()
 {
     m_abort.store(true);
     m_queue = nullptr;
+}
+
+int FFmpegWorker::decodeInterruptCb(void* opaque)
+{
+    FFmpegWorker* self = static_cast<FFmpegWorker*>(opaque);
+    if (!self)
+        return 0;
+    return self->m_abort.load() ? 1 : 0;
 }
 
 void FFmpegWorker::decodeLoop()
@@ -174,7 +245,6 @@ void FFmpegWorker::decodeLoop()
 
     AVDictionary* opts = nullptr;
     if (isHttp) {
-        // Long timeouts: Frigate may take a while to mux clip.mp4
         av_dict_set(&opts, "rw_timeout", "60000000", 0);
         av_dict_set(&opts, "timeout", "60000000", 0);
         av_dict_set(&opts, "reconnect", "1", 0);
@@ -215,8 +285,6 @@ void FFmpegWorker::decodeLoop()
         return;
     }
 
-    // Do NOT emit openInputOk here — connection open is not "ready to play"
-
     if (avformat_find_stream_info(fmtCtx, nullptr) < 0 || m_abort.load()) {
         avformat_close_input(&fmtCtx);
         if (!m_abort.load())
@@ -251,14 +319,13 @@ void FFmpegWorker::decodeLoop()
     }
 
     AVCodecContext* codecCtx = nullptr;
-    if (!openCodec(&codecCtx, codec, params, false) || !codecCtx) {
+    if (!openCodec(&codecCtx, codec, params, true) || !codecCtx) {
         avformat_close_input(&fmtCtx);
         emit openInputFailed(QStringLiteral("Failed to open codec"));
         emit finished();
         return;
     }
 
-    // Ready only after codec is open
     emit openInputOk();
     emit streamStarted();
 
@@ -275,6 +342,7 @@ void FFmpegWorker::decodeLoop()
 
     const int kMaxOutW = m_highQuality ? 3840 : 1280;
     const int kMaxOutH = m_highQuality ? 2160 : 720;
+    const int swsFlags = m_highQuality ? SWS_BILINEAR : SWS_FAST_BILINEAR;
 
     qint64 lastDataMs = QDateTime::currentMSecsSinceEpoch();
     qint64 lastFileSize = isLocalFile ? QFileInfo(m_url).size() : 0;
@@ -325,21 +393,71 @@ void FFmpegWorker::decodeLoop()
             if (ret < 0)
                 break;
 
-            int dstW = frame->width;
-            int dstH = frame->height;
-
-            if (dstW > kMaxOutW || dstH > kMaxOutH) {
-                const float scale = qMin(float(kMaxOutW) / float(dstW),
-                                         float(kMaxOutH) / float(dstH));
-                dstW = int(dstW * scale) & ~1;
-                dstH = int(dstH * scale) & ~1;
+            // Always push AVFrame (preferred path)
+            if (m_queue) {
+                AVFrame* clone = av_frame_clone(frame);
+                if (clone) {
+                    AVFramePtr ptr(clone, AVFrameDeleter());
+                    m_queue->pushFrame(std::move(ptr));
+                }
             }
 
-            if (dstW < 2 || dstH < 2) {
-                av_frame_unref(frame);
-                continue;
+            // Only do expensive RGB conversion for non-live streams
+            const bool needRgb = !isRtsp;
+
+            if (needRgb && m_queue) {
+                int dstW = frame->width;
+                int dstH = frame->height;
+
+                if (dstW > kMaxOutW || dstH > kMaxOutH) {
+                    const float scale = qMin(float(kMaxOutW) / float(dstW),
+                                             float(kMaxOutH) / float(dstH));
+                    dstW = int(dstW * scale) & ~1;
+                    dstH = int(dstH * scale) & ~1;
+                }
+
+                if (dstW >= 2 && dstH >= 2) {
+                    if (!rgbSws ||
+                        lastSrcW != frame->width || lastSrcH != frame->height ||
+                        lastDstW != dstW || lastDstH != dstH) {
+
+                        if (rgbSws)
+                            sws_freeContext(rgbSws);
+
+                        rgbSws = sws_getContext(
+                            frame->width, frame->height,
+                            static_cast<AVPixelFormat>(frame->format),
+                            dstW, dstH,
+                            AV_PIX_FMT_BGRA,
+                            swsFlags, nullptr, nullptr, nullptr);
+
+                        lastSrcW = frame->width;
+                        lastSrcH = frame->height;
+                        lastDstW = dstW;
+                        lastDstH = dstH;
+                    }
+
+                    if (rgbSws) {
+                        QImage img(dstW, dstH, QImage::Format_RGB32);
+                        if (!img.isNull()) {
+                            uint8_t* dest[4] = { img.bits(), nullptr, nullptr, nullptr };
+                            int destStride[4] = { int(img.bytesPerLine()), 0, 0, 0 };
+
+                            sws_scale(rgbSws,
+                                      frame->data,
+                                      frame->linesize,
+                                      0,
+                                      frame->height,
+                                      dest,
+                                      destStride);
+
+                            m_queue->pushImage(img);
+                        }
+                    }
+                }
             }
 
+            // Stats
             if (!statsSent) {
                 statsSent = true;
                 updateStats(fmtCtx, codecCtx, videoStream);
@@ -352,48 +470,7 @@ void FFmpegWorker::decodeLoop()
                 }
             }
 
-            if (!rgbSws ||
-                lastSrcW != frame->width || lastSrcH != frame->height ||
-                lastDstW != dstW || lastDstH != dstH) {
-                if (rgbSws)
-                    sws_freeContext(rgbSws);
-
-                rgbSws = sws_getContext(
-                    frame->width, frame->height,
-                    static_cast<AVPixelFormat>(frame->format),
-                    dstW, dstH,
-                    AV_PIX_FMT_BGRA,
-                    SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
-
-                lastSrcW = frame->width;
-                lastSrcH = frame->height;
-                lastDstW = dstW;
-                lastDstH = dstH;
-            }
-
-            if (!rgbSws) {
-                av_frame_unref(frame);
-                continue;
-            }
-
-            QImage img(dstW, dstH, QImage::Format_RGB32);
-            if (img.isNull()) {
-                av_frame_unref(frame);
-                continue;
-            }
-
-            uint8_t* dest[4] = { img.bits(), nullptr, nullptr, nullptr };
-            int destStride[4] = { int(img.bytesPerLine()), 0, 0, 0 };
-
-            sws_scale(rgbSws,
-                      frame->data,
-                      frame->linesize,
-                      0,
-                      frame->height,
-                      dest,
-                      destStride);
-
-            // Pace clip playback (HTTP and local file), not live RTSP
+            // Pace non-live playback
             if (!isRtsp && !m_abort.load()) {
                 int64_t pts = frame->best_effort_timestamp;
                 if (pts == AV_NOPTS_VALUE)
@@ -414,9 +491,6 @@ void FFmpegWorker::decodeLoop()
                     QThread::msleep(33);
                 }
             }
-
-            if (m_queue && img.width() > 16 && img.height() > 16)
-                m_queue->pushImage(img);
 
             av_frame_unref(frame);
         }

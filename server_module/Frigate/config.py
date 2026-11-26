@@ -4,6 +4,8 @@ config.py — single config.json for Windows and Linux.
 On first run, writes config.json next to this module with OS-appropriate
 defaults. Docker mount detection overrides paths when containers are found.
 Env vars always win for a given key when set.
+
+Frigate version is fetched live from GET /api/version when possible.
 """
 import os
 import sys
@@ -14,6 +16,8 @@ import platform
 import psutil
 from pathlib import Path
 import subprocess
+import urllib.request
+import urllib.error
 
 # ---------------------------------------------------------
 # APP DIRECTORY (source or frozen binary)
@@ -83,6 +87,43 @@ def compute_broadcast(ip: str, mask: str):
         broadcast_packed = ip_packed | (~mask_packed & 0xFFFFFFFF)
         return socket.inet_ntoa(struct.pack("!I", broadcast_packed))
     except Exception:
+        return None
+
+
+# ---------------------------------------------------------
+# FRIGATE VERSION (live from API)
+# ---------------------------------------------------------
+
+def fetch_frigate_version(api_base: str = None, timeout: float = 2.0) -> str | None:
+    """
+    Query Frigate's GET /api/version endpoint.
+    Returns e.g. "0.18.3-a19e23a" or None on failure.
+    """
+    base = (api_base or os.environ.get("FRIGATE_API_BASE") or "http://127.0.0.1:5000").rstrip("/")
+    url = f"{base}/api/version"
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            text = resp.read().decode("utf-8", errors="replace").strip()
+            # Frigate returns plain text like "0.18.3-a19e23a"
+            if text and len(text) < 64 and not text.startswith("{"):
+                return text
+            # Occasionally JSON — try to pull a version field
+            try:
+                data = json.loads(text)
+                if isinstance(data, str):
+                    return data.strip()
+                if isinstance(data, dict):
+                    for key in ("version", "frigate_version", "ver"):
+                        if key in data and data[key]:
+                            return str(data[key]).strip()
+            except Exception:
+                pass
+            return text or None
+    except Exception as e:
+        print(f"[CONFIG] Could not fetch Frigate version from {url}: {e}")
         return None
 
 
@@ -367,7 +408,8 @@ def build_defaults() -> dict:
         "go2rtc_container_name": go2rtc_container,
 
         "frigate_service_name": os.getenv("FRIGATE_SERVICE_NAME", "frigate"),
-        "frigate_version": os.getenv("FRIGATE_VERSION", "0.17"),
+        # Static fallback only — live version is preferred via fetch_frigate_version()
+        "frigate_version": os.getenv("FRIGATE_VERSION", "0.18"),
         "frigate_api_enabled": True,
 
         "frigate_media_path": media_path,
@@ -469,7 +511,6 @@ GO2RTC_CONTAINER_NAME = _cfg["go2rtc_container_name"]
 FRIGATE_SERVICE_NAME = _cfg["frigate_service_name"]
 
 FRIGATE_INSTALL_TYPE = detect_install_type()
-FRIGATE_VERSION = _cfg["frigate_version"]
 FRIGATE_API_ENABLED = bool(_cfg["frigate_api_enabled"])
 
 FRIGATE_MEDIA_PATH = Path(_cfg["frigate_media_path"])
@@ -485,6 +526,15 @@ if os.getenv("FRIGATE_MEDIA_PATH"):
     FRIGATE_MEDIA_PATH = Path(os.getenv("FRIGATE_MEDIA_PATH"))
 if os.getenv("FRIGATE_CACHE_PATH"):
     FRIGATE_CACHE_PATH = Path(os.getenv("FRIGATE_CACHE_PATH"))
+
+# Live Frigate version (preferred) → config/env fallback → "0.18"
+_live_version = fetch_frigate_version()
+if _live_version:
+    FRIGATE_VERSION = _live_version
+    print(f"[CONFIG] Frigate version (live): {FRIGATE_VERSION}")
+else:
+    FRIGATE_VERSION = str(_cfg.get("frigate_version") or os.getenv("FRIGATE_VERSION") or "0.18")
+    print(f"[CONFIG] Frigate version (fallback): {FRIGATE_VERSION}")
 
 print(f"[CONFIG] Config file : {CONFIG_FILE}")
 print(f"[CONFIG] Platform    : {platform.system()}")

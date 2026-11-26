@@ -8,6 +8,11 @@
 
 #include <QProcess>
 #include <QDebug>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QFile>
+#include <QUrl>
 
 FrigateAPI::FrigateAPI(QObject* parent)
     : QObject(parent)
@@ -17,6 +22,7 @@ FrigateAPI::FrigateAPI(QObject* parent)
     m_timeline      = new FrigateTimeline(this);
     m_playback      = new FrigatePlayback(this);
     m_onvif         = new FrigateOnvif(this);
+    m_exportNet     = new QNetworkAccessManager(this);
 
     connect(m_cameraManager, &FrigateCameraManager::camerasLoaded,
             this, &FrigateAPI::camerasLoaded);
@@ -107,7 +113,12 @@ FrigateAPI::FrigateAPI(QObject* parent)
             this, &FrigateAPI::moduleInformationReceived);
 }
 
-void FrigateAPI::setServer(QString server)
+FrigateAPI::~FrigateAPI()
+{
+    cancelExport();
+}
+
+void FrigateAPI::setServer(const QString& server)
 {
     if (m_server == server)
         return;
@@ -119,7 +130,7 @@ void FrigateAPI::setServer(QString server)
     emit serverChanged();
 }
 
-void FrigateAPI::setModuleServer(QString server)
+void FrigateAPI::setModuleServer(const QString& server)
 {
     if (m_moduleServer == server)
         return;
@@ -131,7 +142,7 @@ void FrigateAPI::setModuleServer(QString server)
     emit moduleServerChanged();
 }
 
-void FrigateAPI::setServerIp(QString ip)
+void FrigateAPI::setServerIp(const QString& ip)
 {
     if (m_serverIp == ip)
         return;
@@ -152,17 +163,17 @@ void FrigateAPI::loadCameras()
     m_cameraManager->loadCameras();
 }
 
-void FrigateAPI::addCamera(QString id, QString mainUrl, QString subUrl, bool record)
+void FrigateAPI::addCamera(const QString& id, const QString& mainUrl, const QString& subUrl, bool record)
 {
     m_cameraManager->addCamera(id, mainUrl, subUrl, record);
 }
 
-void FrigateAPI::editCamera(QString id, QString url)
+void FrigateAPI::editCamera(const QString& id, const QString& url)
 {
     m_cameraManager->editCamera(id, url);
 }
 
-void FrigateAPI::removeCamera(QString id)
+void FrigateAPI::removeCamera(const QString& id)
 {
     m_cameraManager->removeCamera(id);
 }
@@ -353,6 +364,16 @@ void FrigateAPI::testRtsp(const QString& url)
          << "-";
 
     QProcess* ff = new QProcess(this);
+
+    connect(ff, &QProcess::errorOccurred, this, [this, ff](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            emit rtspTestResult(false, QStringLiteral("RTSP Test Failed: FFmpeg executable not found"));
+        } else {
+            emit rtspTestResult(false, QStringLiteral("RTSP Test Failed: Process execution error"));
+        }
+        ff->deleteLater();
+    });
+
     connect(ff, &QProcess::finished, this, [this, ff](int exitCode, QProcess::ExitStatus status) {
         QByteArray err = ff->readAllStandardError();
         QString errorText = QString(err);
@@ -380,6 +401,7 @@ void FrigateAPI::testRtsp(const QString& url)
 
         ff->deleteLater();
     });
+
     ff->start(program, args);
 }
 
@@ -406,4 +428,180 @@ QString FrigateAPI::cameraCodec(const QString& cameraName) const
 bool FrigateAPI::isFullscreenTrueMain(const QString& cameraName) const
 {
     return m_streamManager ? m_streamManager->isFullscreenTrueMain(cameraName) : false;
+}
+
+void FrigateAPI::finishExport(bool ok, const QString& message, const QString& path, int gen)
+{
+    if (gen != m_exportGen)
+        return;
+    if (!m_exportActive)
+        return;
+    m_exportActive = false;
+
+    if (m_exportFile) {
+        m_exportFile->flush();
+        m_exportFile->close();
+        m_exportFile->deleteLater();
+        m_exportFile = nullptr;
+    }
+
+    if (m_exportReply) {
+        m_exportReply->deleteLater();
+        m_exportReply = nullptr;
+    }
+
+    if (ok && m_exportBytes > 0)
+        emit exportProgress(m_exportBytes, m_exportBytes);
+
+    emit exportFinished(ok, message, ok ? path : QString());
+}
+
+void FrigateAPI::cancelExport()
+{
+    if (!m_exportActive && !m_exportReply && !m_exportFile)
+        return;
+
+    const int gen = m_exportGen;
+    const QString path = m_exportPath;
+
+    if (m_exportReply) {
+        QNetworkReply* r = m_exportReply;
+        m_exportReply = nullptr;
+        r->disconnect(this);
+        r->abort();
+        r->deleteLater();
+    }
+
+    if (m_exportFile) {
+        m_exportFile->close();
+        m_exportFile->deleteLater();
+        m_exportFile = nullptr;
+    }
+
+    if (!path.isEmpty())
+        QFile::remove(path);
+
+    finishExport(false, QStringLiteral("Export cancelled"), QString(), gen);
+}
+
+void FrigateAPI::exportClip(const QString& cameraId, qint64 startSec, qint64 endSec, const QString& savePath)
+{
+    if (m_exportActive)
+        cancelExport();
+
+    if (m_server.isEmpty() || cameraId.trimmed().isEmpty() || savePath.isEmpty()) {
+        emit exportFinished(false, QStringLiteral("Missing server, camera, or path"), QString());
+        return;
+    }
+    if (endSec <= startSec) {
+        emit exportFinished(false, QStringLiteral("Invalid time range"), QString());
+        return;
+    }
+
+    ++m_exportGen;
+    const int gen = m_exportGen;
+    m_exportPath = savePath;
+    m_exportBytes = 0;
+    m_exportTotalBytes = -1;
+    m_exportActive = true;
+
+    m_exportFile = new QFile(savePath);
+    if (!m_exportFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        const QString err = m_exportFile->errorString();
+        m_exportFile->deleteLater();
+        m_exportFile = nullptr;
+        finishExport(false, QStringLiteral("Cannot write file: ") + err, savePath, gen);
+        return;
+    }
+
+    QString base = m_server;
+    while (base.endsWith(QLatin1Char('/')))
+        base.chop(1);
+
+    if (!base.startsWith(QLatin1String("http://")) && !base.startsWith(QLatin1String("https://"))) {
+        base.prepend(QLatin1String("http://"));
+    }
+
+    const QString cam = QString::fromUtf8(QUrl::toPercentEncoding(cameraId));
+    const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
+                            .arg(base, cam)
+                            .arg(startSec)
+                            .arg(endSec);
+
+    QNetworkRequest req{QUrl(url)};
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::NoLessSafeRedirectPolicy);
+    req.setRawHeader("Accept-Encoding", "identity");
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("PX-Open/1.0.8"));
+
+    m_exportReply = m_exportNet->get(req);
+
+    connect(m_exportReply, &QNetworkReply::downloadProgress, this,
+            [this, gen](qint64 rec, qint64 tot) {
+        if (gen != m_exportGen || !m_exportActive)
+            return;
+        m_exportTotalBytes = tot;
+        const qint64 shown = m_exportBytes > 0 ? m_exportBytes : rec;
+        emit exportProgress(shown, m_exportTotalBytes);
+    });
+
+    connect(m_exportReply, &QNetworkReply::readyRead, this, [this, gen]() {
+        if (gen != m_exportGen || !m_exportActive || !m_exportFile || !m_exportReply)
+            return;
+        const QByteArray chunk = m_exportReply->readAll();
+        if (chunk.isEmpty())
+            return;
+        const qint64 n = m_exportFile->write(chunk);
+        if (n > 0)
+            m_exportBytes += n;
+        emit exportProgress(m_exportBytes, m_exportTotalBytes);
+    });
+
+    connect(m_exportReply, &QNetworkReply::finished, this, [this, gen, savePath]() {
+        if (gen != m_exportGen)
+            return;
+
+        QNetworkReply* reply = m_exportReply;
+        m_exportReply = nullptr;
+
+        if (reply && m_exportFile && m_exportActive) {
+            const QByteArray rest = reply->readAll();
+            if (!rest.isEmpty()) {
+                const qint64 n = m_exportFile->write(rest);
+                if (n > 0)
+                    m_exportBytes += n;
+            }
+            m_exportFile->flush();
+        }
+
+        bool ok = false;
+        QString msg;
+
+        if (!reply) {
+            msg = QStringLiteral("Export cancelled");
+        } else if (reply->error() == QNetworkReply::OperationCanceledError) {
+            msg = QStringLiteral("Export cancelled");
+            QFile::remove(savePath);
+        } else if (reply->error() != QNetworkReply::NoError) {
+            msg = reply->errorString();
+            QFile::remove(savePath);
+        } else {
+            const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (code >= 400) {
+                msg = QStringLiteral("Server returned %1").arg(code);
+                QFile::remove(savePath);
+            } else if (m_exportBytes <= 0) {
+                msg = QStringLiteral("Empty file (no recording in range?)");
+                QFile::remove(savePath);
+            } else {
+                ok = true;
+                msg = QStringLiteral("Saved");
+            }
+        }
+
+        if (reply)
+            reply->deleteLater();
+
+        finishExport(ok, msg, savePath, gen);
+    });
 }

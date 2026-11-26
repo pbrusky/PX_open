@@ -87,3 +87,9 @@ node_modules/
 *~
 *.swp
 *.bak
+
+# Server module local config & certificates
+server_module/Frigate/config.json
+server_module/Frigate/cert.pem
+server_module/Frigate/key.pem
+*.pem

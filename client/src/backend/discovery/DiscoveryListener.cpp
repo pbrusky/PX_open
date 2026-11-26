@@ -1,19 +1,26 @@
 #include "DiscoveryListener.h"
+
+#include <QUdpSocket>
 #include <QNetworkDatagram>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDebug>
+#include <QHostAddress>
 
 DiscoveryListener::DiscoveryListener(QObject* parent)
     : QObject(parent),
-      m_socket(new QUdpSocket(this))
+      m_socket(nullptr)
 {
-    connect(m_socket, &QUdpSocket::readyRead,
-            this, &DiscoveryListener::processPendingDatagrams);
 }
 
 void DiscoveryListener::startDiscovery()
 {
+    if (!m_socket) {
+        m_socket = new QUdpSocket(this);
+        connect(m_socket, &QUdpSocket::readyRead,
+                this, &DiscoveryListener::processPendingDatagrams);
+    }
+
     if (m_socket->state() != QAbstractSocket::UnconnectedState) {
         qDebug() << "[Discovery] Already running, ignoring startDiscovery()";
         return;
@@ -21,8 +28,8 @@ void DiscoveryListener::startDiscovery()
 
     qDebug() << "[Discovery] Binding UDP 3666";
 
-    if (!m_socket->bind(3666, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
-        qWarning() << "[Discovery] Failed to bind UDP 3666";
+    if (!m_socket->bind(QHostAddress::AnyIPv4, 3666, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+        qWarning() << "[Discovery] Failed to bind UDP 3666:" << m_socket->errorString();
         return;
     }
 
@@ -31,7 +38,7 @@ void DiscoveryListener::startDiscovery()
 
 void DiscoveryListener::stopDiscovery()
 {
-    if (m_socket->state() != QAbstractSocket::UnconnectedState) {
+    if (m_socket && m_socket->state() != QAbstractSocket::UnconnectedState) {
         qDebug() << "[Discovery] Stopping discovery";
         m_socket->close();
     }
@@ -39,8 +46,10 @@ void DiscoveryListener::stopDiscovery()
 
 void DiscoveryListener::processPendingDatagrams()
 {
-    while (m_socket->hasPendingDatagrams()) {
+    if (!m_socket)
+        return;
 
+    while (m_socket->hasPendingDatagrams()) {
         QNetworkDatagram datagram = m_socket->receiveDatagram();
         QByteArray data = datagram.data();
 
@@ -50,25 +59,39 @@ void DiscoveryListener::processPendingDatagrams()
 
         QJsonObject obj = doc.object();
 
-        QString name       = obj.value("name").toString();
-        int port           = obj.value("port").toInt();
-        QString container  = obj.value("container").toString();
-        QString systemId   = obj.value("systemId").toString();
-        QString moduleId   = obj.value("id").toString();
-        QString type       = obj.value("type").toString();
+        QString name       = obj.value(QStringLiteral("name")).toString();
+        int port           = obj.value(QStringLiteral("port")).toInt();
+        QString container  = obj.value(QStringLiteral("container")).toString();
+        QString systemId   = obj.value(QStringLiteral("systemId")).toString();
+        QString moduleId   = obj.value(QStringLiteral("id")).toString();
+        QString type       = obj.value(QStringLiteral("type")).toString();
+        QString version    = obj.value(QStringLiteral("version")).toString();
+        if (version.isEmpty())
+            version = obj.value(QStringLiteral("frigate_version")).toString();
 
-        QString senderIp = datagram.senderAddress().toString();
-        if (senderIp.startsWith("::ffff:"))
+        if (port <= 0 || (name.isEmpty() && systemId.isEmpty()))
+            continue;
+
+        QHostAddress senderAddr = datagram.senderAddress();
+        if (senderAddr.protocol() == QAbstractSocket::IPv6Protocol) {
+            bool ok = false;
+            QHostAddress ipv4(senderAddr.toIPv4Address(&ok));
+            if (ok)
+                senderAddr = ipv4;
+        }
+
+        QString senderIp = senderAddr.toString();
+        if (senderIp.startsWith(QLatin1String("::ffff:")))
             senderIp = senderIp.mid(7);
 
-        // ⭐ Discovery ONLY reports servers.
-        // ⭐ It does NOT set the active server IP.
         emit serverFound(name,
                          senderIp,
                          port,
                          container,
                          systemId,
                          moduleId,
-                         type);
+                         type,
+                         version);
+
     }
 }

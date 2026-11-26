@@ -7,6 +7,7 @@
 #include <QQuickItem>
 #include <QEvent>
 #include <QCursor>
+#include <QDebug>
 
 #ifdef Q_OS_WIN
 #  include <windows.h>
@@ -18,6 +19,11 @@ FullscreenHelper::FullscreenHelper(QObject* parent)
     m_idleTimer.setSingleShot(true);
     connect(&m_idleTimer, &QTimer::timeout, this, [this]() {
         setCursorHidden(true);
+    });
+
+    // Cleanup cursor when this object is destroyed
+    connect(this, &QObject::destroyed, this, [this]() {
+        stopIdleCursor();
     });
 }
 
@@ -82,31 +88,56 @@ bool FullscreenHelper::eventFilter(QObject* watched, QEvent* event)
 QQuickWindow* FullscreenHelper::openFullscreen(QQmlEngine* engine,
                                                const QString& qmlPath)
 {
-    QQmlComponent comp(engine, QUrl(qmlPath));
+    if (!engine)
+        return nullptr;
 
-    QQuickWindow* win = qobject_cast<QQuickWindow*>(comp.create());
+    QQmlComponent comp(engine, QUrl(qmlPath));
+    QObject* obj = comp.create();
+
+    if (!obj) {
+        qWarning() << "FullscreenHelper: Failed to create QML Component:" << comp.errorString();
+        return nullptr;
+    }
+
+    QQuickWindow* win = qobject_cast<QQuickWindow*>(obj);
 
     if (!win) {
-        QObject* obj = comp.create();
         QQuickItem* item = qobject_cast<QQuickItem*>(obj);
-
-        win = new QQuickWindow();
-
-        if (item)
+        if (item) {
+            win = new QQuickWindow();
             item->setParentItem(win->contentItem());
+
+            // Ensure child item scales with window size
+            QObject::connect(win, &QQuickWindow::widthChanged, [item, win]() { item->setWidth(win->width()); });
+            QObject::connect(win, &QQuickWindow::heightChanged, [item, win]() { item->setHeight(win->height()); });
+            item->setSize(win->size());
+        } else {
+            qWarning() << "FullscreenHelper: Created root QML object is neither a QQuickWindow nor QQuickItem";
+            delete obj;
+            return nullptr;
+        }
     }
+
+    // Auto-delete window when closed to prevent memory leaks
+    QObject::connect(win, &QQuickWindow::closing, win, &QObject::deleteLater);
+
+    // Stop idle cursor filtering when the window closes
+    QObject::connect(win, &QQuickWindow::closing, this, &FullscreenHelper::stopIdleCursor);
 
     win->setFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
 
-    QRect screenRect = QGuiApplication::primaryScreen()->geometry();
+    // Detect current screen under mouse cursor instead of hardcoding primary screen
+    QScreen* targetScreen = QGuiApplication::screenAt(QCursor::pos());
+    if (!targetScreen)
+        targetScreen = QGuiApplication::primaryScreen();
+
+    QRect screenRect = targetScreen->geometry();
+    win->setScreen(targetScreen);
     win->setGeometry(screenRect);
 
 #ifdef Q_OS_WIN
-    win->show();
-
     HWND hwnd = reinterpret_cast<HWND>(win->winId());
     if (hwnd) {
-        // True fullscreen popup (covers taskbar)
         LONG style = GetWindowLong(hwnd, GWL_STYLE);
         style &= ~WS_OVERLAPPEDWINDOW;
         style |= WS_POPUP;
@@ -114,22 +145,24 @@ QQuickWindow* FullscreenHelper::openFullscreen(QQmlEngine* engine,
 
         LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
         exStyle |= WS_EX_TOPMOST;
-        exStyle |= WS_EX_TOOLWINDOW;
         SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
-
-        SetForegroundWindow(hwnd);
-        SetActiveWindow(hwnd);
-        SetFocus(hwnd);
 
         SetWindowPos(hwnd, HWND_TOPMOST,
                      screenRect.x(),
                      screenRect.y(),
                      screenRect.width(),
                      screenRect.height(),
-                     SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+                     SWP_FRAMECHANGED);
+    }
+
+    win->show();
+
+    if (hwnd) {
+        SetForegroundWindow(hwnd);
+        SetActiveWindow(hwnd);
+        SetFocus(hwnd);
     }
 #else
-    // Linux / macOS: Qt fullscreen is reliable; no Win32 needed
     win->showFullScreen();
     win->raise();
     win->requestActivate();

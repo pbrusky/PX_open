@@ -19,7 +19,8 @@ Item {
 
     property string filterLabel: ""
     property real filterMinScore: 0
-    property int filterHours: 24
+    // Match FrigateTimeline default window (faster first load)
+    property int filterHours: 6
 
     signal requestToggleCollapse()
 
@@ -31,6 +32,10 @@ Item {
     readonly property color chipActive: "#2F3A5C"
     readonly property color muted: "#8A8A96"
     readonly property color softBorder: "#3A3A44"
+
+    // Internal state guards
+    property bool _isRebuildingLabels: false
+    property int _refreshGen: 0
 
     clip: true
 
@@ -64,6 +69,7 @@ Item {
         }
 
         statusText = "Loading…"
+        root._refreshGen++
 
         var nowSec = Math.floor(Date.now() / 1000)
         var afterSec = nowSec - (filterHours * 3600)
@@ -119,6 +125,12 @@ Item {
         return h + "h"
     }
 
+    function formatTs(sec) {
+        if (!sec || sec <= 0)
+            return ""
+        return Qt.formatDateTime(new Date(sec * 1000), "MM/dd hh:mm:ss")
+    }
+
     function availableLabels() {
         var map = ({})
         var src = eventsRaw || []
@@ -136,6 +148,7 @@ Item {
     }
 
     function rebuildLabelModel() {
+        root._isRebuildingLabels = true
         var prev = root.filterLabel
         labelModel.clear()
         labelModel.append({ text: "All object types", value: "" })
@@ -152,6 +165,7 @@ Item {
                 if (selectIdx === 0)
                     root.filterLabel = ""
             }
+            root._isRebuildingLabels = false
         })
     }
 
@@ -373,6 +387,8 @@ Item {
                 elide: Text.ElideRight
             }
             onActivated: {
+                if (root._isRebuildingLabels)
+                    return
                 if (currentIndex < 0 || currentIndex >= labelModel.count) {
                     root.filterLabel = ""
                     return
@@ -478,10 +494,12 @@ Item {
         ListView {
             id: list
             width: parent.width
-            height: Math.max(50, col.height - 250)
+            height: Math.max(50, col.height - list.y)
             clip: true
             spacing: 8
             model: root.eventsModel
+
+            cacheBuffer: Math.max(200, height * 2)
 
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -528,21 +546,23 @@ Item {
                         return ""
                     var srv = ""
                     try {
-                        srv = "" + (root.frigateRef.server || "")
+                        srv = ("" + (root.frigateRef.server || "")).replace(/\/+$/, "")
                     } catch (e) {
                         return ""
                     }
                     if (!srv.length)
                         return ""
-                    while (srv.length && srv.charAt(srv.length - 1) === "/")
-                        srv = srv.substring(0, srv.length - 1)
                     return srv + "/api/events/" + evId + "/thumbnail.jpg"
                 }
 
-                function formatTs(sec) {
-                    if (!sec || sec <= 0)
-                        return ""
-                    return Qt.formatDateTime(new Date(sec * 1000), "MM/dd hh:mm:ss")
+                readonly property bool inView: {
+                    var cy = list.contentY
+                    var vh = list.height
+                    var yPos = rowRect.y
+                    var h = rowRect.height
+                    if (vh <= 0)
+                        return false
+                    return (yPos + h > cy - vh) && (yPos < cy + vh * 2)
                 }
 
                 Rectangle {
@@ -576,10 +596,12 @@ Item {
                             id: thumb
                             anchors.fill: parent
                             anchors.margins: 1
-                            source: rowRect.thumbUrl
+                            source: (rowRect.inView && rowRect.thumbUrl.length) ? rowRect.thumbUrl : ""
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
                             cache: true
+                            sourceSize.width: 200
+                            sourceSize.height: 112
                         }
 
                         Text {
@@ -592,7 +614,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             visible: thumb.status === Image.Error
-                                     || (thumb.status === Image.Null && !rowRect.thumbUrl.length)
+                                     || (thumb.status === Image.Null && rowRect.inView && !rowRect.thumbUrl.length)
                             text: "No img"
                             color: "#555"
                             font.pixelSize: 10
@@ -639,7 +661,7 @@ Item {
                         }
 
                         Text {
-                            text: rowRect.formatTs(rowRect.evStart)
+                            text: root.formatTs(rowRect.evStart)
                             color: "#FFFFFF"
                             font.pixelSize: 12
                         }

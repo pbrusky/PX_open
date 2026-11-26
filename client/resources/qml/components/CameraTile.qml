@@ -188,8 +188,13 @@ Item {
         }
 
         onClicked: function(mouse) {
-            if (mouse.button === Qt.RightButton)
+            if (mouse.button === Qt.RightButton) {
                 contextMenu.open()
+                return
+            }
+            // Select camera for grid timeline / events panel
+            if (cameraName !== "" && mainWindow)
+                mainWindow.selectedCameraId = cameraName
         }
     }
 

@@ -11,10 +11,13 @@
         <file>resources/qml/fullscreen/FullscreenCamera.qml</file>
         <file>resources/qml/fullscreen/FullscreenTimeline.qml</file>
         <file>resources/qml/fullscreen/FullscreenToolbar.qml</file>
+        <file>resources/qml/fullscreen/FullscreenTopBar.qml</file>
+        <file>resources/qml/fullscreen/FullscreenLoadingOverlay.qml</file>
         <file>resources/qml/fullscreen/LiveFullscreenLayers.qml</file>
         <file>resources/qml/fullscreen/TimelineStatusBar.qml</file>
         <file>resources/qml/fullscreen/TimelineTrack.qml</file>
         <file>resources/qml/fullscreen/TimelineCalendarPopup.qml</file>
+        <file>resources/qml/fullscreen/ExportConfirmPopup.qml</file>
 
         <!-- Settings / Pages -->
         <file>resources/qml/aboutSettings.qml</file>
@@ -58,7 +61,7 @@
         <file>resources/qml/components/timeline/TimelineHoverPreview.qml</file>
         <file>resources/qml/components/timeline/TimelineMouseHandler.qml</file>
         <file>resources/qml/components/timeline/TimelineAutoHide.qml</file>
-        
+
         <!-- js -->
         <file>resources/qml/js/CameraUtils.js</file>
 

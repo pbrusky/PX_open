@@ -33,7 +33,7 @@ Rectangle {
     Connections {
         target: discovery
 
-        function onServerFound(name, address, port, container) {
+        function onServerFound(name, address, port, container, systemId, moduleId, type, version) {
             if (root.serverAssigned)
                 return
 
@@ -43,13 +43,14 @@ Rectangle {
                     return
             }
 
-            servers.push({ name, address, port, container })
+            servers.push({ name: name, address: address, port: port, container: container, version: version || "" })
 
             serverModel.append({
                 "name": name,
                 "address": address,
                 "port": port,
-                "container": container
+                "container": container,
+                "version": version || ""
             })
         }
     }
@@ -88,7 +89,7 @@ Rectangle {
 
     Column {
         spacing: 20
-        width: 420
+        width: 440
         anchors.centerIn: parent
 
         Text {
@@ -102,12 +103,14 @@ Rectangle {
 
         ListView {
             width: parent.width
-            height: 300
+            height: 320
+            spacing: 10
+            clip: true
             model: serverModel
 
             delegate: Rectangle {
-                width: parent.width
-                height: 80
+                width: ListView.view.width
+                height: cardColumn.height + 24
                 radius: 8
                 color: "#0F355C"
                 border.color: "#1A4A7A"
@@ -115,20 +118,45 @@ Rectangle {
                 Row {
                     anchors.fill: parent
                     anchors.margins: 12
-                    spacing: 12
+                    spacing: 14
 
                     Image {
                         source: "qrc:/app/assets/icons/nx/server.svg"
                         width: 32
                         height: 32
+                        anchors.verticalCenter: parent.verticalCenter
                     }
 
                     Column {
-                        spacing: 2
+                        id: cardColumn
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 3
 
-                        Text { text: name; color: "white"; font.pixelSize: 18 }
-                        Text { text: address + ":" + port; color: "#ccc"; font.pixelSize: 14 }
-                        Text { text: "Container: " + container; color: "#aaa"; font.pixelSize: 12 }
+                        Text {
+                            text: name
+                            color: "white"
+                            font.pixelSize: 18
+                            font.bold: true
+                        }
+
+                        Text {
+                            text: address + ":" + port
+                            color: "#ccc"
+                            font.pixelSize: 14
+                        }
+
+                        Text {
+                            text: (version && version.length) ? ("Frigate " + version) : "Frigate (unknown)"
+                            color: "#8cf"
+                            font.pixelSize: 12
+                        }
+
+                        Text {
+                            text: "Container: " + container
+                            color: "#aaa"
+                            font.pixelSize: 12
+                            visible: container && container.length > 0
+                        }
                     }
                 }
 

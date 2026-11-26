@@ -26,31 +26,52 @@ Item {
     property var cameraOnlineMap: ({})
     property bool _skipStreamStopOnRemove: false
 
+    // ------------------------------------------------------------------
+    // Name helpers (use these everywhere instead of manual replace)
+    // ------------------------------------------------------------------
+    function normalizeCameraName(name) {
+        if (name === undefined || name === null)
+            return ""
+        return String(name).trim().replace(/ /g, "_")
+    }
+
+    function namesMatch(a, b) {
+        var na = normalizeCameraName(a)
+        var nb = normalizeCameraName(b)
+        if (!na || !nb)
+            return false
+        return na === nb
+    }
+
     function setChromeHidden(hidden) {
         if (mainWindow)
             mainWindow.cameraFullscreenActive = !!hidden
     }
 
     function cameraOnline(name) {
-        cameraOnlineMap[name] = true
+        var key = normalizeCameraName(name)
+        cameraOnlineMap[key] = true
         cameraOnlineMap = cameraOnlineMap
         grid.forceLayout()
     }
     function cameraOffline(name) {
-        cameraOnlineMap[name] = false
+        var key = normalizeCameraName(name)
+        cameraOnlineMap[key] = false
         cameraOnlineMap = cameraOnlineMap
         grid.forceLayout()
     }
     function getCamera(name) {
         if (!mainWindow || !mainWindow.cameraList)
             return null
+        var target = normalizeCameraName(name)
         return mainWindow.cameraList.find(function(c) {
-            return c.name === name || c.id === name
+            return namesMatch(c.name, target) || namesMatch(c.id, target)
         })
     }
     function isCameraOnline(name) {
-        if (cameraOnlineMap.hasOwnProperty(name))
-            return cameraOnlineMap[name]
+        var key = normalizeCameraName(name)
+        if (cameraOnlineMap.hasOwnProperty(key))
+            return cameraOnlineMap[key]
         return frigateRef ? frigateRef.isCameraOnline(name) : false
     }
     function nameAt(i) {
@@ -100,14 +121,10 @@ Item {
                 var id = (typeof cam === "string") ? cam : (cam.id || cam.name || "")
                 var nm = (typeof cam === "string") ? cam : (cam.name || cam.id || "")
                 if (id) {
-                    allowed[String(id)] = true
-                    allowed[String(id).replace(/ /g, "_")] = true
-                    allowed[String(id).replace(/_/g, " ")] = true
+                    allowed[normalizeCameraName(id)] = true
                 }
                 if (nm) {
-                    allowed[String(nm)] = true
-                    allowed[String(nm).replace(/ /g, "_")] = true
-                    allowed[String(nm).replace(/_/g, " ")] = true
+                    allowed[normalizeCameraName(nm)] = true
                 }
             }
         }
@@ -120,7 +137,7 @@ Item {
             if (next.indexOf(n) !== -1)
                 continue
             if (list && list.length) {
-                if (!allowed[n] && !allowed[n.replace(/ /g, "_")] && !allowed[n.replace(/_/g, " ")])
+                if (!allowed[normalizeCameraName(n)])
                     continue
             }
             next.push(n)
@@ -148,8 +165,13 @@ Item {
     }
 
     function dropAt(x, y, cameraName) {
-        if (!cameraName || cameraNames.indexOf(cameraName) !== -1)
+        if (!cameraName)
             return
+        // Prevent duplicates using normalized comparison
+        for (var i = 0; i < cameraNames.length; i++) {
+            if (namesMatch(cameraNames[i], cameraName))
+                return
+        }
         cameraNames.push(cameraName)
         cameraNames = cameraNames.slice()
         updateGridSize()
@@ -186,11 +208,9 @@ Item {
         if (!cameraName)
             return
         var target = String(cameraName)
-        var targetAlt = target.replace(/ /g, "_")
         var idx = -1
         for (var i = 0; i < cameraNames.length; ++i) {
-            var n = String(cameraNames[i] || "")
-            if (n === target || n === targetAlt || n.replace(/ /g, "_") === targetAlt) {
+            if (namesMatch(cameraNames[i], target)) {
                 idx = i
                 break
             }
@@ -200,8 +220,7 @@ Item {
 
         console.log("CameraGrid: removing tile for deleted camera", target)
 
-        if (fullscreenName === target || fullscreenName === targetAlt ||
-            String(fullscreenName).replace(/ /g, "_") === targetAlt) {
+        if (namesMatch(fullscreenName, target)) {
             fullscreenLoader.visible = false
             fullscreenName = ""
             fullscreenSubQueue = null
@@ -274,16 +293,13 @@ Item {
                 id = c
             else if (c)
                 id = String(c.id || c.name || "")
-            if (id) {
-                valid[id] = true
-                valid[id.replace(/ /g, "_")] = true
-                valid[id.replace(/_/g, " ")] = true
-            }
+            if (id)
+                valid[normalizeCameraName(id)] = true
         }
         var toRemove = []
         for (var j = 0; j < cameraNames.length; ++j) {
             var n = String(cameraNames[j] || "")
-            if (!valid[n] && !valid[n.replace(/ /g, "_")] && !valid[n.replace(/_/g, " ")])
+            if (!valid[normalizeCameraName(n)])
                 toRemove.push(n)
         }
         for (var k = 0; k < toRemove.length; ++k)
@@ -323,7 +339,7 @@ Item {
             return
 
         var prevName = fullscreenName
-        if (prevName !== "" && prevName !== cameraName &&
+        if (prevName !== "" && !namesMatch(prevName, cameraName) &&
             frigateRef && typeof frigateRef.stopFullscreenStream === "function") {
             frigateRef.stopFullscreenStream(prevName)
         }
@@ -388,7 +404,7 @@ Item {
                 return
 
             var name = "" + cameraName
-            if (item.cameraName !== name && item.cameraId !== name)
+            if (!namesMatch(item.cameraName, name) && !namesMatch(item.cameraId, name))
                 return
 
             // open() arms seek after ~600ms; force arm so event seek is accepted
@@ -455,12 +471,9 @@ Item {
             frigateRef.stopFullscreenStream(name)
         }
 
-        if (mainWindow) {
-            if (typeof mainWindow.enterTrueFullscreen === "function")
-                mainWindow.enterTrueFullscreen()
-            else if (typeof mainWindow.showFullScreen === "function")
-                mainWindow.showFullScreen()
-        }
+        // Do NOT force the main window into true fullscreen here.
+        // The window should stay in whatever state it was already in
+        // (normal or true fullscreen). Chrome is restored via setChromeHidden(false).
     }
 
     function openEditCamera(id) {

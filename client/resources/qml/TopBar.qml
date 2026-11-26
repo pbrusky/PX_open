@@ -22,7 +22,7 @@ Item {
     signal maximizeRequested()
     signal addCameraRequested()
     signal aboutRequested()
-    signal settingsRequested()   // ← new
+    signal settingsRequested()
 
     //
     // Right‑click menu on server name
@@ -95,6 +95,8 @@ Item {
         MouseArea {
             anchors.fill: parent
             hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            preventStealing: true
             onEntered: menuButton.hovered = true
             onExited: menuButton.hovered = false
             onClicked: menuPopup.open()
@@ -147,7 +149,7 @@ Item {
         //
         Rectangle {
             id: serverNameContainer
-            width: serverNameText.paintedWidth + 24
+            width: Math.min(serverNameText.implicitWidth + 24, parent.width * 0.5)
             height: parent.height
             color: "transparent"
 
@@ -157,6 +159,7 @@ Item {
                 text: topbarWrapper.serverName !== "" ? topbarWrapper.serverName : "Frigate System"
                 color: "white"
                 font.pixelSize: 18
+                elide: Text.ElideRight
             }
 
             MouseArea {
@@ -193,8 +196,12 @@ Item {
             }
 
             MouseArea {
+                id: minimizeMouseArea
                 anchors.fill: parent
                 hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+
                 onEntered: minimizeButton.hovered = true
                 onExited: minimizeButton.hovered = false
                 onClicked: topbarWrapper.minimizeRequested()
@@ -223,6 +230,9 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+
                 onEntered: maximizeRestoreButton.hovered = true
                 onExited: maximizeRestoreButton.hovered = false
                 onClicked: {
@@ -259,6 +269,9 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+
                 onEntered: exitButton.hovered = true
                 onExited: exitButton.hovered = false
                 onClicked: topbarWrapper.exitRequested()

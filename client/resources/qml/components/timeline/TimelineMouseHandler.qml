@@ -8,6 +8,7 @@ Item {
     signal released()
     signal seekRequested(real tsMs)
     signal hoverTimeChanged(real tsMs)
+    signal panChanged(real newPan)
 
     property real pan
     property var scrubber
@@ -22,11 +23,16 @@ Item {
     anchors.fill: parent
 
     function formatHover(tsMs) {
-        if (!hoverPreview)
+        if (!hoverPreview || isNaN(tsMs) || tsMs <= 0)
             return
-        hoverPreview.tsString = Qt.formatDateTime(new Date(tsMs), "hh:mm:ss")
-        hoverPreview.dateString = Qt.formatDateTime(new Date(tsMs), "ddd MMM dd")
-        if (hoverPreview.hasOwnProperty("lineHeight"))
+
+        // Reuse single Date instance or format efficiently
+        var d = new Date(tsMs)
+        hoverPreview.tsString = Qt.formatDateTime(d, "hh:mm:ss")
+        hoverPreview.dateString = Qt.formatDateTime(d, "ddd MMM dd")
+        
+        // Qt 5/6 compatible property check
+        if ("lineHeight" in hoverPreview)
             hoverPreview.lineHeight = trackHeight + 8
     }
 
@@ -39,27 +45,30 @@ Item {
         onPositionChanged: function(mouse) {
             mouseHandler.moved()
 
-            if (!xToTimestamp)
+            // Safe function check
+            if (typeof mouseHandler.xToTimestamp !== "function")
                 return
 
-            var ts = xToTimestamp(mouse.x)
+            var ts = mouseHandler.xToTimestamp(mouse.x)
             mouseHandler.hoverTimeChanged(ts)
 
             if (hoverPreview) {
                 hoverPreview.visible = true
-                // Keep bubble on screen
+                
+                // Keep bubble clamped within bounds
                 var bx = mouse.x - hoverPreview.width / 2
-                if (bx < 4)
-                    bx = 4
-                if (bx + hoverPreview.width > mouseHandler.width - 4)
-                    bx = mouseHandler.width - hoverPreview.width - 4
+                var maxX = mouseHandler.width - hoverPreview.width - 4
+                bx = Math.max(4, Math.min(bx, maxX))
+
                 hoverPreview.x = bx
                 hoverPreview.y = -hoverPreview.height + 2
                 mouseHandler.formatHover(ts)
             }
 
             if (mouse.buttons & Qt.RightButton) {
-                pan = mouseHandler.startPan + (mouse.x - mouseHandler.startX)
+                var calculatedPan = mouseHandler.startPan + (mouse.x - mouseHandler.startX)
+                mouseHandler.pan = calculatedPan
+                mouseHandler.panChanged(calculatedPan)
             }
         }
 
@@ -68,7 +77,7 @@ Item {
             mouseHandler.pressed()
 
             if (mouse.button === Qt.RightButton) {
-                mouseHandler.startPan = pan
+                mouseHandler.startPan = mouseHandler.pan
                 mouseHandler.startX = mouse.x
             }
         }
@@ -77,15 +86,12 @@ Item {
             mouseHandler.released()
             if (mouse.button === Qt.LeftButton && !mouseHandler.didSeek) {
                 mouseHandler.didSeek = true
-                if (xToTimestamp) {
-                    var ts = xToTimestamp(mouse.x)
+                if (typeof mouseHandler.xToTimestamp === "function") {
+                    var ts = mouseHandler.xToTimestamp(mouse.x)
                     if (ts > 0)
                         mouseHandler.seekRequested(ts)
                 }
             }
-        }
-
-        onClicked: function(mouse) {
         }
 
         onExited: {

@@ -68,6 +68,7 @@ private:
     QHash<QString, QNetworkReply*> m_downloadReplies;
     QHash<QString, QString> m_tempFiles;
     QHash<QString, QFile*> m_downloadFiles;
+    QHash<QString, bool> m_downloadStartedPlay;  // true once local worker started mid-download
 };
 
 #endif

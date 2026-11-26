@@ -39,6 +39,7 @@ FrigatePlayback::~FrigatePlayback()
             QFile::remove(it.value());
     }
     m_tempFiles.clear();
+    m_downloadStartedPlay.clear();
 }
 
 void FrigatePlayback::setServer(const QString& server)
@@ -70,7 +71,7 @@ QObject* FrigatePlayback::getPlaybackQueue(const QString& cameraId)
         return m_playbackQueues.value(cameraId);
 
     FrameQueue* queue = new FrameQueue(this);
-    queue->setMaxSize(2);
+    queue->setMaxSize(4);
     m_playbackQueues.insert(cameraId, queue);
     return queue;
 }
@@ -88,6 +89,7 @@ void FrigatePlayback::cancelDownload(const QString& cameraId)
         file->close();
         delete file;
     }
+    m_downloadStartedPlay.remove(cameraId);
 }
 
 void FrigatePlayback::cleanupTempFile(const QString& cameraId)
@@ -95,6 +97,7 @@ void FrigatePlayback::cleanupTempFile(const QString& cameraId)
     const QString path = m_tempFiles.take(cameraId);
     if (!path.isEmpty())
         QFile::remove(path);
+    m_downloadStartedPlay.remove(cameraId);
 }
 
 void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
@@ -163,7 +166,7 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
         QMutexLocker lock(&m_mutex);
         if (!m_playbackQueues.contains(cameraId)) {
             FrameQueue* q = new FrameQueue(this);
-            q->setMaxSize(2);
+            q->setMaxSize(4);
             m_playbackQueues.insert(cameraId, q);
         }
         queue = m_playbackQueues.value(cameraId);
@@ -178,7 +181,8 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
     FFmpegWorker* worker = new FFmpegWorker(nullptr);
     worker->setUrl(url);
     worker->setFrameQueue(queue);
-    worker->setHighQuality(false);
+    // Match fullscreen live: full resolution decode (up to 4K), not 720p cap
+    worker->setHighQuality(true);
 
     QThread* thread = new QThread();
 
@@ -208,7 +212,6 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
                          || r.contains(QStringLiteral("404"))
                          || r.contains(QStringLiteral("not found"));
 
-        // Empty / invalid range — do not download, do not mark live camera offline
         if (isHttp && noClip) {
             emit playbackError(cameraId,
                 QStringLiteral("No recording at this time. Try another place on the timeline."));
@@ -282,6 +285,7 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
         QStringLiteral("px_playback_%1_%2.mp4").arg(cameraId).arg(gen));
 
     cleanupTempFile(cameraId);
+    m_downloadStartedPlay.remove(cameraId);
 
     QFile* outFile = new QFile(localPath);
     if (!outFile->open(QIODevice::WriteOnly)) {
@@ -303,7 +307,36 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
     QNetworkReply* reply = m_net->get(req);
     m_downloadReplies.insert(cameraId, reply);
 
-    connect(reply, &QNetworkReply::readyRead, this, [this, cameraId, gen, reply]() {
+    // Start local FFmpeg once we have enough bytes (play while download continues).
+    // static so MSVC does not require capturing into the lambda
+    static constexpr qint64 kMinBytesToStart = 512 * 1024;
+
+    auto tryStartEarly = [this, cameraId, gen, localPath]() {
+        if (m_seekGen.value(cameraId, 0) != gen)
+            return;
+        if (m_downloadStartedPlay.value(cameraId, false))
+            return;
+
+        QFile* f = m_downloadFiles.value(cameraId);
+        if (!f || f->size() < kMinBytesToStart)
+            return;
+
+        f->flush();
+
+        {
+            QMutexLocker lock(&m_mutex);
+            if (m_playbackWorkers.contains(cameraId)) {
+                m_downloadStartedPlay.insert(cameraId, true);
+                return;
+            }
+        }
+
+        m_downloadStartedPlay.insert(cameraId, true);
+        startLocalWorker(cameraId, gen, localPath);
+    };
+
+    connect(reply, &QNetworkReply::readyRead, this,
+            [this, cameraId, gen, reply, tryStartEarly]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
         if (QFile* f = m_downloadFiles.value(cameraId)) {
@@ -311,11 +344,13 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
             if (!chunk.isEmpty())
                 f->write(chunk);
         }
+        tryStartEarly();
     });
 
     connect(reply, &QNetworkReply::finished, this,
             [this, cameraId, gen, localPath, reply]() {
         m_downloadReplies.remove(cameraId);
+
         QFile* file = m_downloadFiles.take(cameraId);
         if (file) {
             if (reply->bytesAvailable() > 0)
@@ -324,16 +359,21 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
             file->close();
             delete file;
         }
+
         if (m_seekGen.value(cameraId, 0) != gen) {
             reply->deleteLater();
+            m_downloadStartedPlay.remove(cameraId);
             return;
         }
+
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto err = reply->error();
         reply->deleteLater();
+
         const qint64 size = QFileInfo(localPath).size();
         if (err != QNetworkReply::NoError || status >= 400 || size < 1024) {
             cleanupTempFile(cameraId);
+            m_downloadStartedPlay.remove(cameraId);
 
             QString msg;
             if (status == 400 || status == 404)
@@ -349,7 +389,13 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
             emit playbackStopped(cameraId);
             return;
         }
-        startLocalWorker(cameraId, gen, localPath);
+
+        // Download complete: start only if we never started mid-download
+        if (!m_downloadStartedPlay.value(cameraId, false)) {
+            m_downloadStartedPlay.insert(cameraId, true);
+            startLocalWorker(cameraId, gen, localPath);
+        }
+        m_downloadStartedPlay.remove(cameraId);
     });
 }
 
@@ -361,28 +407,41 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
     }
 
     const qint64 wall = QDateTime::currentMSecsSinceEpoch();
-    if (m_lastSeekMs.contains(cameraId) && (wall - m_lastSeekMs.value(cameraId) < 800))
+    if (m_lastSeekMs.contains(cameraId) && (wall - m_lastSeekMs.value(cameraId) < 400))
         return;
     m_lastSeekMs[cameraId] = wall;
 
     const int gen = m_seekGen.value(cameraId, 0) + 1;
     m_seekGen[cameraId] = gen;
 
-    qint64 startSec = timestampMs;
+    qint64 seekSec = timestampMs;
     if (timestampMs > 100000000000LL)
-        startSec = timestampMs / 1000;
+        seekSec = timestampMs / 1000;
+    else if (timestampMs > 10000000000LL)
+        seekSec = timestampMs / 1000;
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
-    if (startSec > nowSec - 30)
-        startSec = nowSec - 30;
+
+    constexpr qint64 kBeforeSec = 5;
+    constexpr qint64 kAfterSec  = 180;
+    constexpr qint64 kMinLenSec = 30;
+
+    qint64 startSec = seekSec - kBeforeSec;
     if (startSec < 1)
         startSec = 1;
 
-    qint64 endSec = startSec + 30;
-    if (endSec > nowSec - 5)
-        endSec = nowSec - 5;
+    qint64 endSec = seekSec + kAfterSec;
     if (endSec <= startSec)
-        endSec = startSec + 10;
+        endSec = startSec + kMinLenSec;
+
+    if (endSec > nowSec - 2)
+        endSec = nowSec - 2;
+    if (startSec >= endSec) {
+        endSec = nowSec - 2;
+        startSec = endSec - kMinLenSec;
+        if (startSec < 1)
+            startSec = 1;
+    }
 
     const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
                             .arg(m_server, cameraId)
@@ -396,15 +455,15 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
         QMutexLocker lock(&m_mutex);
         if (!m_playbackQueues.contains(cameraId)) {
             FrameQueue* q = new FrameQueue(this);
-            q->setMaxSize(2);
+            q->setMaxSize(4);
             m_playbackQueues.insert(cameraId, q);
         }
         if (FrameQueue* queue = m_playbackQueues.value(cameraId))
             queue->resetReceived();
     }
 
-    m_playbackPositionByCamera[cameraId] = startSec * 1000;
-    emit playbackPositionChanged(cameraId, startSec * 1000);
+    m_playbackPositionByCamera[cameraId] = seekSec * 1000;
+    emit playbackPositionChanged(cameraId, seekSec * 1000);
 
     startUrlWorker(cameraId, gen, url);
 }

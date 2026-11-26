@@ -18,7 +18,6 @@ Item {
     property bool closeEnabled: false
 
     property alias mainReady: liveLayers.mainReady
-    /** true only when C++ confirmed the real _main profile opened */
     property bool trueMain: false
 
     property bool isPlayback: false
@@ -31,6 +30,7 @@ Item {
     property int _seekGen: 0
     property int _activeSeekGen: -1
     property bool seekArmed: false
+    property real pendingSeekMs: -1
 
     signal requestClose()
 
@@ -58,6 +58,20 @@ Item {
             forcePlaybackTimer.restart()
     }
 
+    function timelineExportUiOpen() {
+        if (!timelineLoader.item)
+            return false
+        if (timelineLoader.item.exportUiOpen)
+            return true
+        if (timelineLoader.item.exportBusy)
+            return true
+        if (timelineLoader.item.exportConfirm && timelineLoader.item.exportConfirm.visible)
+            return true
+        if (timelineLoader.item.exportEndMs > timelineLoader.item.exportStartMs)
+            return true
+        return false
+    }
+
     Rectangle {
         anchors.fill: parent
         color: "black"
@@ -75,6 +89,8 @@ Item {
         mainQueue: root.mainQueue
         isPlayback: root.isPlayback
         playbackReady: root.playbackReady
+        visible: !root.playbackReady
+        opacity: root.playbackReady ? 0 : 1
     }
 
     CameraVideoItem {
@@ -104,33 +120,9 @@ Item {
         }
     }
 
-    Rectangle {
-        anchors.centerIn: parent
-        width: Math.min(parent.width * 0.7, 440)
-        height: 80
-        radius: 10
-        color: "#CC000000"
-        border.color: "#FFC107"
-        border.width: 1
-        z: 50
-        visible: root.isPlayback && !root.playbackReady
-        Column {
-            anchors.centerIn: parent
-            spacing: 8
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "LOADING CLIP... " + root.loadSecs + "s"
-                color: "#FFC107"
-                font.pixelSize: 20
-                font.bold: true
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "Live stays on until first clip frame"
-                color: "#FF8888"
-                font.pixelSize: 13
-            }
-        }
+    FullscreenLoadingOverlay {
+        active: root.isPlayback && !root.playbackReady
+        loadSecs: root.loadSecs
     }
 
     Timer {
@@ -151,6 +143,12 @@ Item {
             applyRecordings(segments)
         }
 
+        function onMotionActivityLoaded(id, points) {
+            if (id !== root.cameraId && id !== root.cameraName)
+                return
+            applyMotion(points)
+        }
+
         function onPlaybackStarted(id) {
             if (id !== root.cameraId && id !== root.cameraName)
                 return
@@ -165,10 +163,8 @@ Item {
                 return
             if (root._returningLive)
                 return
-
             if (root.isPlayback && root.playbackReady)
                 return
-
             if (root.isPlayback && !root.playbackReady) {
                 root.isPlayback = false
                 root.playbackReady = false
@@ -258,9 +254,9 @@ Item {
                 return
             if (root.timelinePointerInside || bottomEdge.containsMouse)
                 return
-            // Calendar is taller than the timeline bar, so hover can leave the
-            // 150px strip while the popup is still in use.
             if (timelineLoader.item.calendarOpen)
+                return
+            if (root.timelineExportUiOpen())
                 return
             if (typeof timelineLoader.item.hideTimeline === "function")
                 timelineLoader.item.hideTimeline()
@@ -319,94 +315,17 @@ Item {
         }
     }
 
-    Rectangle {
-        height: 36
-        width: parent.width
+    FullscreenTopBar {
         anchors.top: parent.top
-        color: "#00000099"
-        z: 30
-        Row {
-            anchors.fill: parent
-            anchors.margins: 8
-            spacing: 16
-            Text {
-                text: root.cameraName
-                color: "white"
-                font.pixelSize: 15
-                font.bold: true
-            }
-            Text {
-                text: {
-                    if (!root.isPlayback)
-                        return "LIVE"
-                    if (!root.playbackReady)
-                        return "LOADING..."
-                    return "PLAYBACK"
-                }
-                color: root.isPlayback ? "#FFC107" : "#00C853"
-                font.pixelSize: 13
-                font.bold: true
-            }
-            Text {
-                text: root.playbackReady ? "" : ((liveLayers.mainReady && root.trueMain) ? "MAIN" : "SUB")
-                color: (liveLayers.mainReady && root.trueMain) ? "#FFC107" : "#90CAF9"
-                font.pixelSize: 13
-            }
-        }
-    }
-
-    Rectangle {
-        width: 70
-        height: 28
-        anchors.top: parent.top
+        anchors.left: parent.left
         anchors.right: parent.right
-        anchors.rightMargin: 90
-        anchors.topMargin: 10
-        radius: 4
-        color: root.playbackReady ? "#1B5E20" : "#00000055"
-        border.color: root.playbackReady ? "#00C853" : "#444"
-        border.width: 1
-        z: 31
-        visible: root.isPlayback
-        Text {
-            anchors.centerIn: parent
-            text: "Live"
-            color: "white"
-            font.pixelSize: 13
-        }
-        MouseArea {
-            anchors.fill: parent
-            enabled: root.playbackReady
-            preventStealing: true
-            onClicked: function(mouse) {
-                mouse.accepted = true
-                root.returnToLive()
-            }
-        }
-    }
-
-    Rectangle {
-        width: 70
-        height: 28
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: 10
-        radius: 4
-        color: "#000000AA"
-        z: 31
-        Text {
-            anchors.centerIn: parent
-            text: "Exit"
-            color: "white"
-            font.pixelSize: 13
-        }
-        MouseArea {
-            anchors.fill: parent
-            onClicked: function(mouse) {
-                mouse.accepted = true
-                root.tryExit()
-            }
-        }
+        cameraName: root.cameraName
+        isPlayback: root.isPlayback
+        playbackReady: root.playbackReady
+        mainReady: liveLayers.mainReady
+        trueMain: root.trueMain
+        onExitRequested: root.tryExit()
+        onReturnToLiveRequested: root.returnToLive()
     }
 
     Loader {
@@ -445,6 +364,8 @@ Item {
             timelineHideTimer.stop()
         }
         onExited: {
+            if (root.timelineExportUiOpen())
+                return
             if (!root.timelinePointerInside)
                 timelineHideTimer.restart()
         }
@@ -456,9 +377,12 @@ Item {
 
     function onTimelineHoverActive(active) {
         root.timelinePointerInside = active
-        if (active || (timelineLoader.item && timelineLoader.item.calendarOpen)) {
+        var keep = active
+                || (timelineLoader.item && timelineLoader.item.calendarOpen)
+                || root.timelineExportUiOpen()
+        if (keep) {
             timelineHideTimer.stop()
-            if (active)
+            if (active || root.timelineExportUiOpen())
                 showTimelineBar()
         } else {
             timelineHideTimer.restart()
@@ -520,6 +444,15 @@ Item {
             timelineLoader.item.startTs = segments[0].start
             timelineLoader.item.endTs = segments[segments.length - 1].end
         }
+    }
+
+    function applyMotion(points) {
+        if (!timelineLoader.item)
+            return
+        if (typeof timelineLoader.item.applyMotionPoints === "function")
+            timelineLoader.item.applyMotionPoints(points || [])
+        else
+            timelineLoader.item.motionPoints = points || []
     }
 
     function onTimelineSeek(tsMs) {
@@ -601,6 +534,9 @@ Item {
 
         if (typeof liveLayers.resumeMain === "function")
             liveLayers.resumeMain(id)
+        else if (typeof liveLayers.startLive === "function")
+            liveLayers.startLive()
+
         root.mainQueue = liveLayers.mainQueue
         root.trueMain = false
         if (frigateRef && typeof frigateRef.isFullscreenTrueMain === "function")
@@ -611,20 +547,48 @@ Item {
         })
     }
 
+    // Recordings + motion ticks. Events only via Events panel when open.
     function loadTimelineData() {
         if (!frigateRef)
             return
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         if (id === "")
             return
+
+        if (typeof frigateRef.getRecordingsForCamera === "function") {
+            var cached = frigateRef.getRecordingsForCamera(id)
+            if (cached && cached.length > 0)
+                applyRecordings(cached)
+        }
+
+        // Cached motion for instant ticks
+        if (typeof frigateRef.getMotionActivity === "function") {
+            var mot = frigateRef.getMotionActivity(id)
+            if (mot && mot.length > 0)
+                applyMotion(mot)
+        }
+
         if (typeof frigateRef.loadRecordings === "function")
             frigateRef.loadRecordings(id)
-        if (typeof frigateRef.loadEvents === "function")
-            frigateRef.loadEvents(id)
+        if (typeof frigateRef.loadRecordingDays === "function")
+            frigateRef.loadRecordingDays(id)
+
         if (typeof frigateRef.loadMotionActivity === "function")
             frigateRef.loadMotionActivity(id)
+
         recordingsPollTimer.tries = 0
         recordingsPollTimer.start()
+    }
+
+    function ensureLiveQueues(id) {
+        if (!frigateRef || id === "")
+            return
+        if (!root.subQueue && typeof frigateRef.getQueue === "function")
+            root.subQueue = frigateRef.getQueue(id)
+        if (!root.mainQueue && typeof frigateRef.getFullscreenQueue === "function")
+            root.mainQueue = frigateRef.getFullscreenQueue(id)
+        liveLayers.subQueue = root.subQueue
+        liveLayers.mainQueue = root.mainQueue
     }
 
     function open() {
@@ -645,6 +609,44 @@ Item {
         apiConn.target = frigateRef
 
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        var pending = root.pendingSeekMs
+        root.pendingSeekMs = -1
+
+        liveLayers.cameraId = root.cameraId
+        liveLayers.cameraName = root.cameraName
+        liveLayers.frigateRef = root.frigateRef
+
+        if (pending > 0 && id !== "") {
+            root.isPlayback = true
+            root.playbackReady = false
+
+            ensureLiveQueues(id)
+            liveLayers.isPlayback = true
+            liveLayers.playbackReady = false
+            if (typeof liveLayers.startLive === "function")
+                liveLayers.startLive()
+
+            playbackQueueConn.target = null
+            playbackVideo.queue = null
+            root.playbackQueue = null
+
+            if (timelineLoader.item) {
+                timelineLoader.item.isPlayback = true
+                timelineLoader.item.playbackPositionMs = pending
+                timelineLoader.item.collapsed = false
+                timelineLoader.item.allowAutoReveal = true
+            }
+
+            applyTimelineCamera()
+            loadTimelineData()
+
+            seekArmed = true
+            onTimelineSeek(pending)
+            return
+        }
+
+        liveLayers.subQueue = root.subQueue
+        liveLayers.mainQueue = root.mainQueue
 
         if (frigateRef && id !== "") {
             if (typeof frigateRef.switchToLive === "function")
@@ -653,11 +655,6 @@ Item {
                 frigateRef.stopPlayback(id)
         }
 
-        liveLayers.cameraId = root.cameraId
-        liveLayers.cameraName = root.cameraName
-        liveLayers.frigateRef = root.frigateRef
-        liveLayers.subQueue = root.subQueue
-        liveLayers.mainQueue = root.mainQueue
         liveLayers.isPlayback = false
         liveLayers.playbackReady = false
         liveLayers.startLive()
@@ -693,6 +690,7 @@ Item {
         root.subQueue = null
         root.playbackQueue = null
         root.trueMain = false
+        root.pendingSeekMs = -1
 
         if (frigateRef && typeof frigateRef.stopFullscreenStream === "function")
             frigateRef.stopFullscreenStream(id)
@@ -723,6 +721,10 @@ Item {
             timelineLoader.item.allowAutoReveal = false
             timelineLoader.item.collapsed = true
             timelineLoader.item.isPlayback = false
+            if (typeof timelineLoader.item.clearExportRange === "function")
+                timelineLoader.item.clearExportRange()
+            if (timelineLoader.item.exportConfirm && timelineLoader.item.exportConfirm.visible)
+                timelineLoader.item.exportConfirm.close()
         }
     }
 }
