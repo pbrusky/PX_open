@@ -18,8 +18,10 @@ void CameraVideoItem::setQueue(QObject* q)
 
     m_queue = q ? qobject_cast<FrameQueue*>(q) : nullptr;
 
-    m_lastImage = QImage();
+    // Keep the last image so we don't flash black when changing queue
+    // m_lastImage = QImage();   // ← commented out on purpose
     m_lastPaintMs = 0;
+
     if (m_hasFrame) {
         m_hasFrame = false;
         emit hasFrameChanged();
@@ -43,16 +45,19 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
     if (m_queue) {
         QImage img = m_queue->popImage();
         if (!img.isNull()) {
-            m_lastImage = img;
+            m_lastImage = img;   // only update when we actually have a new frame
             m_lastPaintMs = QDateTime::currentMSecsSinceEpoch();
+
             const bool first = !m_hasFrame;
             m_hasFrame = true;
+
             QMetaObject::invokeMethod(this, [this, first]() {
                 if (first)
                     emit hasFrameChanged();
                 emit framePresented();
             }, Qt::QueuedConnection);
         }
+        // Important: do NOT clear m_lastImage when popImage() returns null
     }
 
     if (!window() || m_lastImage.isNull())
