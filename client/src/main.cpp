@@ -6,10 +6,11 @@
 #include <QThread>
 #include <QCoreApplication>
 #include <QDir>
+
 #include <QtWebEngineQuick>
 #include <QQuickStyle>
 #include <QIcon>
-#include <QProcess>
+#include <QProcess> // Keep this include for Linux lspci/lscpu
 #include <QLoggingCategory>
 #include <QFile>
 
@@ -30,37 +31,52 @@
 #include "AboutInfo.h"
 
 #ifdef Q_OS_WIN
-#  include <windows.h>
+#  include <windows.h> // REQUIRED for DISPLAY_DEVICEW and EnumDisplayDevicesW
 #endif
 
 extern "C" {
 #include <libavutil/log.h>
 }
 
+// Fast native GPU check — Windows uses Win32 EnumDisplayDevices (<1ms); Linux uses lspci
 bool isAmdGpuPresent()
 {
 #ifdef Q_OS_WIN
-    // Use PowerShell instead of deprecated 'wmic'
-    QProcess p;
-    p.start("powershell", QStringList() << "-Command" << "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name");
-    if (!p.waitForFinished(2000))
-        return false;
-    const QString output = QString::fromLocal8Bit(p.readAllStandardOutput()).toLower();
-    return output.contains("amd") || output.contains("radeon");
+    DISPLAY_DEVICEW dd;
+    dd.cb = sizeof(dd);
+    DWORD deviceIndex = 0;
+
+    while (EnumDisplayDevicesW(NULL, deviceIndex, &dd, 0)) {
+        if (dd.StateFlags & DISPLAY_DEVICE_ACTIVE || dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) {
+            const QString gpuName = QString::fromWCharArray(dd.DeviceString).toLower();
+            if (gpuName.contains(QStringLiteral("amd")) ||
+                gpuName.contains(QStringLiteral("radeon")) ||
+                gpuName.contains(QStringLiteral("advanced micro devices")))
+            {
+                return true;
+            }
+        }
+        deviceIndex++;
+    }
+    return false;
 #else
+    // Linux: Use lspci - this part is fine and doesn't use powershell
     QProcess p;
-    p.start("lspci", QStringList());
-    if (!p.waitForFinished(2000))
+    p.start(QStringLiteral("lspci"), QStringList());
+    if (!p.waitForFinished(2000)) {
+        p.kill();
+        p.waitForFinished(500);
         return false;
-    const QString output = QString::fromLocal8Bit(p.readAllStandardOutput()).toLower();
+    }
+    const QString output = QString::fromLocal10Bit(p.readAllStandardOutput()).toLower();
     return output.contains("amd") || output.contains("radeon");
 #endif
 }
 
 int main(int argc, char *argv[])
 {
+    // The problematic call is here, BEFORE QML engine or AboutInfo is created.
     if (isAmdGpuPresent()) {
-        // Warning: This forces software rendering for all AMD GPUs, which affects video playback.
         qputenv("QT_OPENGL", "software");
     }
 
@@ -83,6 +99,7 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
 
+    // AboutInfo singleton is created here, but its methods are now fine on Windows
     qmlRegisterSingletonType<AboutInfo>("PxOpen", 1, 0, "AboutInfo",
         [](QQmlEngine*, QJSEngine*) -> QObject* {
             return new AboutInfo();
@@ -123,12 +140,11 @@ int main(int argc, char *argv[])
     FrigateStreamManager* frigateStream = new FrigateStreamManager(&engine);
 
     DiscoveryListener* discovery = new DiscoveryListener();
-    DiscoveryProxy* discoveryProxy = new DiscoveryProxy(&engine); // Parented to engine
-    QThread* discoveryThread = new QThread(&app);                 // Parented to app
+    DiscoveryProxy* discoveryProxy = new DiscoveryProxy(&engine);
+    QThread* discoveryThread = new QThread(&app);
 
     discovery->moveToThread(discoveryThread);
 
-    // Auto-delete discovery object when thread finishes
     QObject::connect(discoveryThread, &QThread::finished, discovery, &QObject::deleteLater);
 
     QObject::connect(discoveryThread, &QThread::started,
@@ -157,7 +173,6 @@ int main(int argc, char *argv[])
     QObject* mainWindowObj = engine.rootObjects().first();
     QWindow* mainWindow = qobject_cast<QWindow*>(mainWindowObj);
 
-    // FIX: Set Qt window flags BEFORE applying native Win32 window styles
     if (mainWindow) {
         mainWindow->setFlags(Qt::FramelessWindowHint | Qt::Window);
     }
@@ -189,6 +204,7 @@ int main(int argc, char *argv[])
         if (hIcon) {
             SendMessage(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hIcon));
             SendMessage(hwnd, WM_SETICON, ICON_BIG,   reinterpret_cast<LPARAM>(hIcon));
+            DestroyIcon(hIcon);
         }
 
         LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
