@@ -10,7 +10,7 @@
 #include <QtWebEngineQuick>
 #include <QQuickStyle>
 #include <QIcon>
-#include <QProcess> // Keep this include for Linux lspci/lscpu
+#include <QProcess>
 #include <QLoggingCategory>
 #include <QFile>
 
@@ -31,14 +31,13 @@
 #include "AboutInfo.h"
 
 #ifdef Q_OS_WIN
-#  include <windows.h> // REQUIRED for DISPLAY_DEVICEW and EnumDisplayDevicesW
+#  include <windows.h>
 #endif
 
 extern "C" {
 #include <libavutil/log.h>
 }
 
-// Fast native GPU check — Windows uses Win32 EnumDisplayDevices (<1ms); Linux uses lspci
 bool isAmdGpuPresent()
 {
 #ifdef Q_OS_WIN
@@ -60,7 +59,6 @@ bool isAmdGpuPresent()
     }
     return false;
 #else
-    // Linux: Use lspci - this part is fine and doesn't use powershell
     QProcess p;
     p.start(QStringLiteral("lspci"), QStringList());
     if (!p.waitForFinished(2000)) {
@@ -68,14 +66,13 @@ bool isAmdGpuPresent()
         p.waitForFinished(500);
         return false;
     }
-    const QString output = QString::fromLocal10Bit(p.readAllStandardOutput()).toLower();
+    const QString output = QString::fromLocal8Bit(p.readAllStandardOutput()).toLower();
     return output.contains("amd") || output.contains("radeon");
 #endif
 }
 
 int main(int argc, char *argv[])
 {
-    // The problematic call is here, BEFORE QML engine or AboutInfo is created.
     if (isAmdGpuPresent()) {
         qputenv("QT_OPENGL", "software");
     }
@@ -99,7 +96,6 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
 
-    // AboutInfo singleton is created here, but its methods are now fine on Windows
     qmlRegisterSingletonType<AboutInfo>("PxOpen", 1, 0, "AboutInfo",
         [](QQmlEngine*, QJSEngine*) -> QObject* {
             return new AboutInfo();
@@ -220,4 +216,4 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("mainWindow", mainWindowObj);
 
     return app.exec();
-}
+}   
