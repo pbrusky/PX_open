@@ -18,6 +18,14 @@ CameraVideoItem::CameraVideoItem(QQuickItem* parent)
     setFlag(ItemHasContents, true);
 }
 
+CameraVideoItem::~CameraVideoItem()
+{
+    if (m_swsContext) {
+        sws_freeContext(m_swsContext);
+        m_swsContext = nullptr;
+    }
+}
+
 void CameraVideoItem::setQueue(QObject* q)
 {
     if (m_queue)
@@ -25,7 +33,7 @@ void CameraVideoItem::setQueue(QObject* q)
 
     m_queue = q ? qobject_cast<FrameQueue*>(q) : nullptr;
 
-    // Keep last image to reduce flashing
+    // Keep last image to avoid flashing
     m_lastPaintMs = 0;
 
     if (m_hasFrame) {
@@ -43,33 +51,43 @@ void CameraVideoItem::setQueue(QObject* q)
     update();
 }
 
-// Helper: convert AVFrame → QImage (temporary bridge)
-static QImage avFrameToQImage(const AVFrame* frame)
+QImage CameraVideoItem::convertFrame(const AVFrame* frame)
 {
     if (!frame || frame->width <= 0 || frame->height <= 0)
         return QImage();
 
-    // Target format for Qt
-    const AVPixelFormat dstFmt = AV_PIX_FMT_BGRA;
+    // Reuse SwsContext when possible
+    if (!m_swsContext ||
+        m_lastSwsWidth != frame->width ||
+        m_lastSwsHeight != frame->height ||
+        m_lastSwsFormat != frame->format) {
 
-    SwsContext* sws = sws_getContext(
-        frame->width, frame->height, static_cast<AVPixelFormat>(frame->format),
-        frame->width, frame->height, dstFmt,
-        SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (m_swsContext) {
+            sws_freeContext(m_swsContext);
+            m_swsContext = nullptr;
+        }
 
-    if (!sws)
+        m_swsContext = sws_getContext(
+            frame->width, frame->height, static_cast<AVPixelFormat>(frame->format),
+            frame->width, frame->height, AV_PIX_FMT_BGRA,
+            SWS_BILINEAR, nullptr, nullptr, nullptr);
+
+        m_lastSwsWidth = frame->width;
+        m_lastSwsHeight = frame->height;
+        m_lastSwsFormat = frame->format;
+    }
+
+    if (!m_swsContext)
         return QImage();
 
     QImage img(frame->width, frame->height, QImage::Format_RGB32);
-    if (img.isNull()) {
-        sws_freeContext(sws);
+    if (img.isNull())
         return QImage();
-    }
 
     uint8_t* dest[4] = { img.bits(), nullptr, nullptr, nullptr };
     int destStride[4] = { static_cast<int>(img.bytesPerLine()), 0, 0, 0 };
 
-    sws_scale(sws,
+    sws_scale(m_swsContext,
               frame->data,
               frame->linesize,
               0,
@@ -77,29 +95,27 @@ static QImage avFrameToQImage(const AVFrame* frame)
               dest,
               destStride);
 
-    sws_freeContext(sws);
     return img;
 }
 
-QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
-                                          UpdatePaintNodeData*)
+QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
 {
     QSGSimpleTextureNode* node = static_cast<QSGSimpleTextureNode*>(oldNode);
 
     bool gotNewFrame = false;
 
     if (m_queue) {
-        // === Prefer new AVFrame path ===
+        // Preferred path: AVFrame
         AVFramePtr frame = m_queue->popFrame();
         if (frame) {
-            QImage img = avFrameToQImage(frame.get());
+            QImage img = convertFrame(frame.get());
             if (!img.isNull()) {
                 m_lastImage = img;
                 gotNewFrame = true;
             }
         }
 
-        // Fallback: old QImage path (still supported)
+        // Fallback: old QImage path
         if (!gotNewFrame) {
             QImage img = m_queue->popImage();
             if (!img.isNull()) {
@@ -135,7 +151,7 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
     node->setTexture(tex);
     node->setOwnsTexture(true);
 
-    // Letterbox / aspect-correct
+    // Correct aspect ratio (letterbox)
     QRectF bounds = boundingRect();
     const float tileW = bounds.width();
     const float tileH = bounds.height();
@@ -155,9 +171,11 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode,
             renderW = tileH * frameAspect;
         }
 
-        node->setRect(QRectF((tileW - renderW) * 0.5f,
-                             (tileH - renderH) * 0.5f,
-                             renderW, renderH));
+        node->setRect(QRectF(
+            (tileW - renderW) * 0.5f,
+            (tileH - renderH) * 0.5f,
+            renderW,
+            renderH));
     }
 
     return node;
