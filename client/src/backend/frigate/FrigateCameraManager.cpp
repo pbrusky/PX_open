@@ -298,7 +298,8 @@ void FrigateCameraManager::addCamera(const QString& id,
 
     QString username;
     QString password;
-    parseRtspUrl(mainUrl.isEmpty() ? subUrl : mainUrl, username, password, *new QString()); // IP not needed here
+    QString ip;
+    parseRtspUrl(mainUrl.isEmpty() ? subUrl : mainUrl, username, password, ip);
 
     QJsonObject obj;
     obj["id"]       = id;
@@ -347,7 +348,8 @@ void FrigateCameraManager::editCamera(const QString& id, const QString& url)
 
     QString username;
     QString password;
-    parseRtspUrl(url, username, password, *new QString()); // IP not needed here
+    QString ip;
+    parseRtspUrl(url, username, password, ip);
 
     QJsonObject obj;
     obj["id"]       = id;
@@ -440,33 +442,48 @@ QVariantMap FrigateCameraManager::getCameraMetadata(const QString& id) const
 void FrigateCameraManager::loadModuleInformation()
 {
     if (m_moduleServer.isEmpty()) {
-        emit moduleInformationReceived(QStringLiteral("unknown"), QStringLiteral("unknown"), QStringLiteral("error"), QString(), QString());
+        emit moduleInformationReceived(
+            QStringLiteral("unknown"),
+            QStringLiteral("unknown"),
+            QStringLiteral("error"),
+            QString(),
+            QString());
         return;
     }
 
-    QUrl endpoint(m_moduleServer + "/api/moduleInfo");
+    // Server exposes /api/moduleInformation (not /api/moduleInfo)
+    QUrl endpoint(m_moduleServer + QStringLiteral("/api/moduleInformation"));
     QNetworkRequest req(endpoint);
     QNetworkReply* reply = m_net->get(req);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        QByteArray data = reply->readAll();
-        QNetworkReply::NetworkError networkError = reply->error();
+        const QByteArray data = reply->readAll();
+        const QNetworkReply::NetworkError networkError = reply->error();
         reply->deleteLater();
 
         if (networkError != QNetworkReply::NoError) {
-            emit moduleInformationReceived(QStringLiteral("unknown"), QStringLiteral("unknown"), QStringLiteral("network_error"), QString(), QString());
+            emit moduleInformationReceived(
+                QStringLiteral("unknown"),
+                QStringLiteral("unknown"),
+                QStringLiteral("network_error"),
+                QString(),
+                QString());
             return;
         }
 
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        QJsonObject root  = doc.object();
-        emit moduleInformationReceived(
-            root.value("name").toString(),
-            root.value("version").toString(),
-            root.value("status").toString(),
-            root.value("systemId").toString(),
-            root.value("moduleId").toString()
-        );
+        const QJsonObject root = QJsonDocument::fromJson(data).object();
+        // Payload is nested under "reply"
+        const QJsonObject replyObj = root.value(QStringLiteral("reply")).toObject();
+        const QJsonObject info = replyObj.isEmpty() ? root : replyObj;
+
+        const QString name = info.value(QStringLiteral("name")).toString();
+        const QString version = info.value(QStringLiteral("version")).toString(); // PX module e.g. 1.0.8
+        const QString status = info.value(QStringLiteral("status")).toString();
+        const QString systemId = info.value(QStringLiteral("systemId")).toString();
+        const QString moduleId = info.value(QStringLiteral("moduleId")).toString();
+        // Live Frigate version also available: info.value("frigateVersion")
+
+        emit moduleInformationReceived(name, version, status, systemId, moduleId);
     });
 }
 
