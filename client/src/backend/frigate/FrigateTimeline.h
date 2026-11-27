@@ -39,6 +39,7 @@ public:
 
 signals:
     void recordingsLoaded(const QString& cameraId, const QVariantList& segments);
+    void recordingsRefreshFinished(const QString& cameraId);
     void eventsLoaded(const QString& cameraId, const QVariantList& events);
     void motionActivityLoaded(const QString& cameraId, const QVariantList& points);
     void recordingDaysLoaded(const QString& cameraId, const QStringList& days);

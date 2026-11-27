@@ -12,6 +12,7 @@ Rectangle {
     property bool pointerInside: false
     property bool calendarOpen: false
     property bool timelineLoading: false
+    property bool refreshing: false
     property real minMotion: 15
 
     property real dataStartTs: 0
@@ -295,6 +296,13 @@ Rectangle {
             }
         }
 
+        function onRecordingsRefreshFinished(id) {
+            if (id !== cameraId && id !== cameraName)
+                return
+            timelineLoading = false
+            refreshing = false
+        }
+
         function onEventsLoaded(id, list) {
             if (id !== cameraId && id !== cameraName)
                 return
@@ -316,7 +324,7 @@ Rectangle {
         function onPlaybackPositionChanged(id, posMs) {
             if (id !== cameraId && id !== cameraName)
                 return
-            _backendDrivesPlayhead = true
+            _backendDrivesPlayhead = false
             if (Math.abs(posMs - playbackPositionMs) > 1) {
                 playbackPositionMs = posMs
                 updatePlayhead()
@@ -692,6 +700,7 @@ Rectangle {
         var dayEnd = dayStart + 86400
         _fixedDayMode = true
         timelineLoading = true
+        refreshing = true
         if (dayStart < dataStartBound())
             dataStartTs = dayStart
         if (dayEnd > dataEndBound())

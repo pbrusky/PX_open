@@ -74,6 +74,8 @@ FrigateAPI::FrigateAPI(QObject* parent)
 
     connect(m_timeline, &FrigateTimeline::recordingsLoaded,
             this, &FrigateAPI::recordingsLoaded);
+    connect(m_timeline, &FrigateTimeline::recordingsRefreshFinished,
+            this, &FrigateAPI::recordingsRefreshFinished);
     connect(m_timeline, &FrigateTimeline::eventsLoaded,
             this, &FrigateAPI::eventsLoaded);
     connect(m_timeline, &FrigateTimeline::motionActivityLoaded,

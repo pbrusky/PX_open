@@ -269,6 +269,7 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
     if (m_server.isEmpty() || cameraId.isEmpty()) {
         m_recordingsByCamera[cameraId] = QVariantList();
         emit recordingsLoaded(cameraId, QVariantList());
+        emit recordingsRefreshFinished(cameraId);
         return;
     }
 
@@ -297,8 +298,10 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
     if (!diskCacheFresh(m_server, QStringLiteral("days"), cameraId))
         loadRecordingDays(cameraId);
 
-    if (diskCacheFresh(m_server, QStringLiteral("rec"), cameraId))
+    if (diskCacheFresh(m_server, QStringLiteral("rec"), cameraId)) {
+        emit recordingsRefreshFinished(cameraId);
         return;
+    }
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
     loadRecordingsRange(cameraId, nowSec - 6 * 3600, nowSec);
@@ -309,6 +312,7 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
     if (m_server.isEmpty() || cameraId.isEmpty()) {
         m_recordingsByCamera[cameraId] = QVariantList();
         emit recordingsLoaded(cameraId, QVariantList());
+        emit recordingsRefreshFinished(cameraId);
         return;
     }
 
@@ -337,8 +341,10 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
 
         // A failed/cancelled request has no authoritative day data. Do not
         // overwrite the cached timeline or emit an empty replacement for it.
-        if (networkError != QNetworkReply::NoError || status < 200 || status >= 400)
+        if (networkError != QNetworkReply::NoError || status < 200 || status >= 400) {
+            emit recordingsRefreshFinished(cameraId);
             return;
+        }
 
         QVariantList segments;
         const QJsonDocument doc = QJsonDocument::fromJson(data);
@@ -365,6 +371,7 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
         m_recordingsByCamera[cameraId] = segments;
         saveListToDisk(m_server, QStringLiteral("rec"), cameraId, segments);
         emit recordingsLoaded(cameraId, segments);
+        emit recordingsRefreshFinished(cameraId);
     });
 }
 
