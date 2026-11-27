@@ -31,6 +31,7 @@
         <file>resources/qml/EventPlayback.qml</file>
 
         <!-- Components -->
+        <file>resources/qml/components/NxStyle.qml</file>
         <file>resources/qml/components/CameraGrid.qml</file>
         <file>resources/qml/components/CameraTile.qml</file>
         <file>resources/qml/components/CameraView.qml</file>

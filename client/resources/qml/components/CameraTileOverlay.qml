@@ -27,10 +27,10 @@ Item {
     // Highlight border only — do NOT darken the video
     Rectangle {
         anchors.fill: parent
-        radius: 6
+        radius: NxStyle.radius
         color: "transparent"
         border.width: hovered ? 2 : 0
-        border.color: "#5B8CFF"
+        border.color: NxStyle.accent
         opacity: hovered ? 1.0 : 0.0
         Behavior on opacity { NumberAnimation { duration: 120 } }
         Behavior on border.width { NumberAnimation { duration: 80 } }

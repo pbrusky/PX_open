@@ -1,12 +1,13 @@
 import QtQuick 2.15
+import "qrc:/app/resources/qml/components"
 import "qrc:/app/resources/qml/components/timeline"
 
 Rectangle {
     id: trackBg
     height: 40
-    color: "#1A1A1A"
-    radius: 3
-    border.color: "#333"
+    color: NxStyle.panelAlt
+    radius: NxStyle.smallRadius
+    border.color: NxStyle.border
     border.width: 1
     clip: true
 
@@ -87,7 +88,7 @@ Rectangle {
             // Motion
             var pts = timeline.motionPoints || []
             var minM = trackBg.minMotion
-            ctx.fillStyle = "#FF6D00"
+            ctx.fillStyle = NxStyle.motion
             for (var i = 0; i < pts.length; ++i) {
                 var p = pts[i]
                 var mot = Number(p.motion || 0)
@@ -105,7 +106,7 @@ Rectangle {
 
             // Events
             var evs = timeline.events || []
-            ctx.fillStyle = "#FFC107"
+            ctx.fillStyle = NxStyle.event
             for (var j = 0; j < evs.length; ++j) {
                 var et = Number(evs[j].start || 0)
                 if (et > 100000000000)
@@ -129,7 +130,7 @@ Rectangle {
             // Playhead
             if (timeline.playheadTsMs > 0) {
                 var px = xOf(timeline.playheadTsMs)
-                ctx.fillStyle = timeline.isPlayback ? "#FFFFFF" : "#90CAF9"
+                ctx.fillStyle = timeline.isPlayback ? NxStyle.text : NxStyle.playhead
                 ctx.fillRect(px - 1.5, 0, 3, h)
             }
         }

@@ -1,6 +1,8 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import PxOpen 1.0
+import "qrc:/app/resources/qml/components"
 
 Item {
     id: sidebar
@@ -36,23 +38,7 @@ Item {
     property real ghostX: 0
     property real ghostY: 0
 
-    // Simple dark palette – change here to restyle the whole sidebar
-    QtObject {
-        id: palette
-        readonly property color background: "#202020"
-        readonly property color surface: "#303030"
-        readonly property color surfaceAlt: "#2A2A2A"
-        readonly property color surfaceHover: "#3A3A50"
-        readonly property color selected: "#404060"
-        readonly property color border: "#555555"
-        readonly property color text: "#FFFFFF"
-        readonly property color textMuted: "#AAAAAA"
-        readonly property color accent: "#4060A0"
-        readonly property color online: "#4CAF50"
-        readonly property color offline: "#D32F2F"
-        readonly property color ghostBg: "#2A2A4ADD"
-        readonly property color ghostBorder: "#8B9BFF"
-    }
+    readonly property var palette: NxStyle
 
     Rectangle {
         anchors.fill: parent
@@ -453,7 +439,7 @@ Item {
                 placeholderText: "e.g. Front only"
                 color: palette.text
                 selectedTextColor: palette.text
-                selectionColor: palette.accent
+                selectionColor: NxStyle.accent
                 background: Rectangle {
                     color: "#1A1A1A"
                     border.color: palette.border

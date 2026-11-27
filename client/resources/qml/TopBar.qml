@@ -1,6 +1,8 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import PxOpen 1.0
+import "qrc:/app/resources/qml/components"
 
 Item {
     id: topbarWrapper
@@ -45,7 +47,9 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#1E1E1E"
+        color: NxStyle.panel
+        border.color: NxStyle.border
+        border.width: 1
     }
 
     //
@@ -77,19 +81,19 @@ Item {
         id: menuButton
         width: 36
         height: 36
-        radius: 4
+        radius: NxStyle.radius
         anchors.left: parent.left
         anchors.leftMargin: 8
         anchors.verticalCenter: parent.verticalCenter
-        color: hovered ? "#2A2A2A" : "#1E1E1E"
+        color: hovered ? NxStyle.hover : NxStyle.panel
         property bool hovered: false
 
         Column {
             anchors.centerIn: parent
             spacing: 3
-            Rectangle { width: 20; height: 2; color: "white"; radius: 1 }
-            Rectangle { width: 20; height: 2; color: "white"; radius: 1 }
-            Rectangle { width: 20; height: 2; color: "white"; radius: 1 }
+            Rectangle { width: 20; height: 2; color: NxStyle.text; radius: 1 }
+            Rectangle { width: 20; height: 2; color: NxStyle.text; radius: 1 }
+            Rectangle { width: 20; height: 2; color: NxStyle.text; radius: 1 }
         }
 
         MouseArea {
@@ -157,8 +161,8 @@ Item {
                 id: serverNameText
                 anchors.centerIn: parent
                 text: topbarWrapper.serverName !== "" ? topbarWrapper.serverName : "Frigate System"
-                color: "white"
-                font.pixelSize: 18
+                color: NxStyle.text
+                font.pixelSize: 16
                 elide: Text.ElideRight
             }
 
@@ -183,14 +187,14 @@ Item {
             id: minimizeButton
             width: 28
             height: 28
-            radius: 4
-            color: hovered ? "#3A3A3A" : "#2A2A2A"
+            radius: NxStyle.radius
+            color: hovered ? NxStyle.hover : NxStyle.panelAlt
             property bool hovered: false
 
             Text {
                 anchors.centerIn: parent
                 text: "—"
-                color: "white"
+                color: NxStyle.text
                 font.pixelSize: 20
                 font.bold: true
             }
@@ -215,14 +219,14 @@ Item {
             id: maximizeRestoreButton
             width: 28
             height: 28
-            radius: 4
-            color: hovered ? "#3A3A3A" : "#2A2A2A"
+            radius: NxStyle.radius
+            color: hovered ? NxStyle.hover : NxStyle.panelAlt
             property bool hovered: false
 
             Text {
                 anchors.centerIn: parent
                 text: topbarWrapper.isMaximized ? "▢" : "⬜"
-                color: "white"
+                color: NxStyle.text
                 font.pixelSize: 16
                 font.bold: true
             }
@@ -254,14 +258,14 @@ Item {
             id: exitButton
             width: 28
             height: 28
-            radius: 4
-            color: hovered ? "#3A3A3A" : "#2A2A2A"
+            radius: NxStyle.radius
+            color: hovered ? NxStyle.hover : NxStyle.panelAlt
             property bool hovered: false
 
             Text {
                 anchors.centerIn: parent
                 text: "X"
-                color: "white"
+                color: NxStyle.text
                 font.pixelSize: 18
                 font.bold: true
             }

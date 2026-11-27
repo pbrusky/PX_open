@@ -14,7 +14,7 @@ ApplicationWindow {
     width: 1400
     height: 900
     visible: true
-    color: "black"
+    color: NxStyle.background
 
     flags: Qt.Window | Qt.FramelessWindowHint
 

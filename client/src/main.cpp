@@ -6,6 +6,7 @@
 #include <QThread>
 #include <QCoreApplication>
 #include <QDir>
+#include <QUrl>
 
 #include <QtWebEngineQuick>
 #include <QQuickStyle>
@@ -100,6 +101,10 @@ int main(int argc, char *argv[])
         [](QQmlEngine*, QJSEngine*) -> QObject* {
             return new AboutInfo();
         });
+
+    qmlRegisterSingletonType(
+        QUrl(QStringLiteral("qrc:/app/resources/qml/components/NxStyle.qml")),
+        "PxOpen", 1, 0, "NxStyle");
 
     qmlRegisterType<FrigateAPI>("PxOpen", 1, 0, "FrigateAPI");
     qmlRegisterType<FrigateCameraManager>("PxOpen", 1, 0, "FrigateCameraManager");

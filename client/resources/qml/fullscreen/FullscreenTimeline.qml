@@ -1,6 +1,7 @@
 ﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Dialogs
+import "qrc:/app/resources/qml/components"
 import "qrc:/app/resources/qml/components/timeline"
 
 Rectangle {
@@ -107,10 +108,10 @@ Rectangle {
 
     height: collapsed ? 4 : 150
     visible: true
-    color: collapsed ? "#00000000" : "#0E0E0E"
-    border.color: collapsed ? "transparent" : "#333333"
+    color: collapsed ? "#00000000" : NxStyle.panel
+    border.color: collapsed ? "transparent" : NxStyle.border
     border.width: collapsed ? 0 : 1
-    radius: collapsed ? 0 : 6
+    radius: collapsed ? 0 : NxStyle.radius
     z: 10
     clip: false
 
@@ -733,7 +734,7 @@ Rectangle {
         z: 100
         visible: !collapsed && timelineLoading
         text: "Timeline loading"
-        color: "#DDDDDD"
+        color: NxStyle.text
         font.pixelSize: 12
         font.bold: true
     }

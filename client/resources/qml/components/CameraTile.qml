@@ -96,8 +96,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#101010"
-        radius: 6
+        color: NxStyle.background
+        radius: NxStyle.radius
         visible: frameQueue === null
     }
 
