@@ -485,6 +485,55 @@ Item {
             serverViewRoot.openRemoveCameraPopup(id)
     }
 
+    // ------------------------------------------------------------------
+    // Helpers used by keyboard shortcuts (ShortcutManager.qml)
+    // ------------------------------------------------------------------
+    function activeFullscreenItem() {
+        return fullscreenLoader.item
+    }
+
+    function seekRelative(deltaMs) {
+        var item = fullscreenLoader.item
+        if (!item || !item.isPlayback)
+            return false
+        var id = (item.cameraId && item.cameraId.length) ? item.cameraId : item.cameraName
+        var base = 0
+        if (frigateRef && typeof frigateRef.currentPosition === "function")
+            base = Number(frigateRef.currentPosition(id)) || 0
+        if (base <= 0)
+            base = Date.now()
+        var target = base + Number(deltaMs)
+        if (target < 0)
+            target = 0
+        item.seekArmed = true
+        if (typeof item.onTimelineSeek === "function")
+            item.onTimelineSeek(target)
+        return true
+    }
+
+    function goLive() {
+        var item = fullscreenLoader.item
+        if (item && typeof item.returnToLive === "function") {
+            item.returnToLive()
+            return
+        }
+        var id = (mainWindow && mainWindow.selectedCameraId) ? mainWindow.selectedCameraId : fullscreenName
+        if (frigateRef && typeof frigateRef.switchToLive === "function")
+            frigateRef.switchToLive(id)
+    }
+
+    function addCamera(cameraName) {
+        if (!cameraName || cameraName === "")
+            return
+        for (var i = 0; i < cameraNames.length; i++) {
+            if (namesMatch(cameraNames[i], cameraName))
+                return
+        }
+        if (cameraNames.length >= 16)
+            return
+        dropAt(grid.width / 2, grid.height / 2, cameraName)
+    }
+
     Rectangle {
         visible: hoverIndex >= 0 && hoverIndex < cameraNames.length
         color: "#2244AA44"

@@ -135,6 +135,27 @@ ApplicationWindow {
     SessionManager { id: session; mainWindow: mainWindow; frigateRef: mainWindow.frigateRef; contentLoader: contentLoader; sidebar: sidebarWrapper; topbar: topbar; eventsPanel: eventsPanel }
     NavigationRouter { id: nav; mainWindow: mainWindow; frigateRef: mainWindow.frigateRef; contentLoader: contentLoader; sidebar: sidebarWrapper; popupManager: popupManager; session: session }
 
+    ShortcutManager {
+        id: shortcuts
+        mainWindow: mainWindow
+        frigateRef: mainWindow.frigateRef
+        contentLoader: contentLoader
+        sidebar: sidebarWrapper
+        eventsPanel: eventsPanel
+        popupManager: popupManager
+    }
+
+    ShortcutBindings { id: keyBindings; shortcuts: shortcuts }
+
+    Connections {
+        target: sidebarWrapper
+        function onCameraFullscreenRequested(cameraName) {
+            var sv = contentLoader.item
+            if (sv && sv.cameraGrid && typeof sv.cameraGrid.enterFullscreen === "function")
+                sv.cameraGrid.enterFullscreen(cameraName)
+        }
+    }
+
     Component.onCompleted: { Qt.callLater(function() { session.performAutoConnect() }); FullscreenHelper.startIdleCursor(10000) }
     Connections { target: FullscreenHelper; function onCursorHiddenChanged() { if (FullscreenHelper.cursorHidden) mainWindow.selectedCameraId = "" } }
     Timer { id: frigatePollTimer; interval: 1500; repeat: true; onTriggered: { if (frigateRef) frigateRef.loadCameras() } }

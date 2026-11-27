@@ -303,6 +303,34 @@ Item {
         anchors.fill: parent
         focus: true
         z: 20
+        Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_F && root.closeEnabled) {
+                root.tryExit()
+                event.accepted = true
+                return
+            }
+            if (event.key === Qt.Key_L) {
+                root.returnToLive()
+                event.accepted = true
+                return
+            }
+            if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+                if (!frigateRef)
+                    return
+                var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+                var pos = 0
+                if (typeof frigateRef.currentPosition === "function")
+                    pos = Number(frigateRef.currentPosition(id)) || 0
+                if (pos <= 0)
+                    pos = Date.now()
+                var target = pos + (event.key === Qt.Key_Left ? -10 : 10) * 1000
+                if (target < 0)
+                    target = 0
+                root.seekArmed = true
+                root.onTimelineSeek(target)
+                event.accepted = true
+            }
+        }
         Keys.onReleased: function(event) {
             if (event.key === Qt.Key_Escape && root.closeEnabled) {
                 root.tryExit()

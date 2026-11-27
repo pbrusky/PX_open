@@ -20,6 +20,7 @@ Item {
     property bool collapsed: false
 
     signal cameraSelected(string cameraId)
+    signal cameraFullscreenRequested(string cameraName)
     signal requestRemoveCamera(string cameraId)
     signal navigate(string page)
     signal cameraDropped(real x, real y, string cameraName)
@@ -31,12 +32,6 @@ Item {
     // [{ name: "…", cameras: [...] }, ...] — filled from ServerView
     property var layoutList: []
     property string selectedLayoutName: ""
-
-    property bool dragging: false
-    property string draggingCameraId: ""
-    property string draggingCameraName: ""
-    property real ghostX: 0
-    property real ghostY: 0
 
     readonly property var palette: NxStyle
 
@@ -99,200 +94,38 @@ Item {
             }
         }
 
-        // Cameras header
-        Text {
-            Layout.fillWidth: true
-            text: "Cameras"
-            color: palette.textMuted
-            font.pixelSize: 11
-            font.bold: true
-        }
-
-        // Camera list (or empty state)
+        // Camera tree with favorites, groups, and search
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.preferredHeight: 1   // stretch weight
+            Layout.preferredHeight: 1
 
-            ListView {
-                id: cameraListView
+            CameraTree {
+                id: cameraTree
                 anchors.fill: parent
-                clip: true
-                visible: sidebar.cameraList.length > 0
-                model: sidebar.cameraList
+                frigateRef: sidebar.frigateRef
+                cameraList: sidebar.cameraList
+                serverKey: (sidebar.frigateRef
+                            && sidebar.frigateRef.serverIp
+                            && ("" + sidebar.frigateRef.serverIp).length)
+                           ? ("" + sidebar.frigateRef.serverIp)
+                           : sidebar.serverName
+                selectedCameraId: sidebar.selectedCameraId
 
-                delegate: Rectangle {
-                    id: cameraRow
-                    width: cameraListView.width
-                    height: 40
-                    radius: 4
-
-                    property string cameraId: modelData.id || ""
-                    property string cameraName: modelData.name || ""
-                    property bool isOnline: false
-
-                    Component.onCompleted: {
-                        isOnline = frigateRef ? frigateRef.isCameraOnline(cameraId) : false
-                    }
-
-                    Connections {
-                        target: frigateRef
-                        ignoreUnknownSignals: true
-                        function onCameraOnline(name) {
-                            if (name === cameraId || name === cameraName)
-                                cameraRow.isOnline = true
-                        }
-                        function onCameraOffline(name) {
-                            if (name === cameraId || name === cameraName)
-                                cameraRow.isOnline = false
-                        }
-                    }
-
-                    color: (cameraId === sidebar.selectedCameraId)
-                           ? palette.selected
-                           : (sidebar.dragging && sidebar.draggingCameraId === cameraId)
-                             ? palette.surfaceHover
-                             : palette.surface
-
-                    opacity: (sidebar.dragging && sidebar.draggingCameraId === cameraId) ? 0.5 : 1.0
-
-                    Row {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 10
-                        z: 0
-
-                        Item {
-                            width: 22
-                            height: 22
-                            anchors.verticalCenter: parent.verticalCenter
-                            Image {
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-                                source: "qrc:/app/assets/icons/nx/cameras.svg"
-                                fillMode: Image.PreserveAspectFit
-                                opacity: cameraRow.isOnline ? 1.0 : 0.55
-                            }
-                            Rectangle {
-                                width: 7
-                                height: 7
-                                radius: 3.5
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                color: cameraRow.isOnline ? palette.online : palette.offline
-                                border.color: palette.background
-                                border.width: 1
-                            }
-                        }
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: cameraName
-                            color: palette.text
-                            font.pixelSize: 14
-                            elide: Text.ElideRight
-                            width: cameraRow.width - 56
-                        }
-                    }
-
-                    Menu {
-                        id: sidebarContextMenu
-                        title: cameraName !== "" ? cameraName : "Camera"
-                        MenuItem {
-                            text: "Select"
-                            enabled: cameraName !== ""
-                            onTriggered: {
-                                sidebar.selectedCameraId = cameraId
-                                sidebar.cameraSelected(cameraId)
-                            }
-                        }
-                        MenuItem {
-                            text: "Edit Camera"
-                            enabled: cameraName !== ""
-                            onTriggered: {
-                                sidebar.selectedCameraId = cameraId
-                                sidebar.cameraSelected(cameraId)
-                                sidebar.navigate("editCamera:" + cameraId)
-                            }
-                        }
-                        MenuItem {
-                            text: "Remove Camera"
-                            onTriggered: sidebar.requestRemoveCamera(cameraId)
-                        }
-                        MenuItem {
-                            text: "Add Camera"
-                            onTriggered: sidebar.navigate("addCamera")
-                        }
-                    }
-
-                    TapHandler {
-                        acceptedButtons: Qt.LeftButton
-                        onTapped: {
-                            sidebar.selectedCameraId = cameraId
-                            sidebar.cameraSelected(cameraId)
-                        }
-                    }
-
-                    DragHandler {
-                        id: rowDrag
-                        target: null
-                        acceptedButtons: Qt.LeftButton
-                        grabPermissions: PointerHandler.CanTakeOverFromAnything
-                            | PointerHandler.ApprovesTakeOverByAnything
-
-                        function syncGhost() {
-                            if (!rowDrag.centroid)
-                                return
-                            var scene = rowDrag.centroid.scenePosition
-                            if (!scene)
-                                return
-                            var loc = sidebar.mapFromItem(null, scene.x, scene.y)
-                            sidebar.ghostX = loc.x + 10
-                            sidebar.ghostY = loc.y + 10
-                        }
-
-                        onActiveChanged: {
-                            if (active) {
-                                sidebar.dragging = true
-                                sidebar.draggingCameraId = cameraId
-                                sidebar.draggingCameraName = cameraName
-                                syncGhost()
-                            } else if (sidebar.draggingCameraId === cameraId) {
-                                var scene = rowDrag.centroid ? rowDrag.centroid.scenePosition : null
-                                if (scene) {
-                                    var loc = sidebar.mapFromItem(null, scene.x, scene.y)
-                                    var g = sidebar.mapToGlobal(loc.x, loc.y)
-                                    sidebar.cameraDropped(g.x, g.y, sidebar.draggingCameraName)
-                                }
-                                sidebar.dragging = false
-                                sidebar.draggingCameraId = ""
-                                sidebar.draggingCameraName = ""
-                            }
-                        }
-
-                        onTranslationChanged: {
-                            if (active)
-                                syncGhost()
-                        }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.RightButton
-                        z: 10
-                        onClicked: sidebarContextMenu.open()
-                    }
+                onCameraSelected: function(cameraId) {
+                    sidebar.selectedCameraId = cameraId
+                    sidebar.cameraSelected(cameraId)
                 }
-            }
-
-            // Empty state for cameras
-            Text {
-                anchors.centerIn: parent
-                visible: sidebar.cameraList.length === 0
-                text: "No cameras"
-                color: palette.textMuted
-                font.pixelSize: 13
+                onCameraFullscreenRequested: function(cameraName) {
+                    sidebar.cameraFullscreenRequested(cameraName)
+                }
+                onRequestRemoveCamera: function(cameraId) {
+                    sidebar.requestRemoveCamera(cameraId)
+                }
+                onNavigate: function(page) { sidebar.navigate(page) }
+                onCameraDropped: function(x, y, cameraName) {
+                    sidebar.cameraDropped(x, y, cameraName)
+                }
             }
         }
 
@@ -482,43 +315,5 @@ Item {
             }
         }
         onOpened: layoutNameField.forceActiveFocus()
-    }
-
-    // Drag ghost
-    Rectangle {
-        id: dragGhost
-        visible: sidebar.dragging
-        width: Math.min(220, Math.max(130, ghostLabel.implicitWidth + 48))
-        height: 34
-        radius: 6
-        z: 100000
-        x: sidebar.ghostX
-        y: sidebar.ghostY
-        color: palette.ghostBg
-        border.color: palette.ghostBorder
-        border.width: 1
-
-        Row {
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
-            anchors.leftMargin: 10
-            spacing: 8
-
-            Image {
-                width: 16
-                height: 16
-                anchors.verticalCenter: parent.verticalCenter
-                source: "qrc:/app/assets/icons/nx/cameras.svg"
-                fillMode: Image.PreserveAspectFit
-            }
-            Text {
-                id: ghostLabel
-                anchors.verticalCenter: parent.verticalCenter
-                text: sidebar.draggingCameraName
-                color: palette.text
-                font.pixelSize: 13
-                font.bold: true
-            }
-        }
     }
 }
