@@ -35,6 +35,7 @@ public:
     void setFrameQueue(FrameQueue* queue);
     void setHighQuality(bool enabled);
     void setEmitRgb(bool enabled);
+    void setStartOffsetSec(qint64 sec);
 
     QString resolution() const { return m_resolution; }
     double fps() const { return m_fps; }
@@ -80,6 +81,7 @@ private:
     bool m_highQuality = false;
     bool m_emitRgb = true;
     bool m_usingHw = false;
+    qint64 m_startOffsetSec = 0;
 
     std::atomic<FrameQueue*> m_queue{nullptr};
 

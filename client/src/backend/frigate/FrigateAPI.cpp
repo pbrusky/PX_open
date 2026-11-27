@@ -335,6 +335,11 @@ void FrigateAPI::startPlayback(const QString& cameraId, qint64 timestampMs)
     m_playback->startPlayback(cameraId, timestampMs);
 }
 
+void FrigateAPI::warmRecordings(const QString& cameraId, qint64 timestampMs)
+{
+    m_playback->warmRecordings(cameraId, timestampMs);
+}
+
 qint64 FrigateAPI::currentPosition(const QString& cameraId)
 {
     return m_playback->currentPosition(cameraId);

@@ -61,6 +61,11 @@ void FFmpegWorker::setEmitRgb(bool enabled)
     m_emitRgb = enabled;
 }
 
+void FFmpegWorker::setStartOffsetSec(qint64 sec)
+{
+    m_startOffsetSec = sec > 0 ? sec : 0;
+}
+
 void FFmpegWorker::clearHw()
 {
     if (m_hwDeviceCtx) {
@@ -273,6 +278,9 @@ void FFmpegWorker::decodeLoop()
         av_dict_set(&opts, "analyzeduration", "5000000", 0);
         av_dict_set(&opts, "fflags", "+genpts", 0);
     }
+
+    if (isLocalFile && m_startOffsetSec > 0)
+        av_dict_set(&opts, "ss", QByteArray::number(m_startOffsetSec).constData(), 0);
 
     const QByteArray urlBytes = m_url.toUtf8();
     int ret = avformat_open_input(&fmtCtx, urlBytes.constData(), nullptr, &opts);

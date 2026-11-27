@@ -110,6 +110,16 @@ Item {
         }
     }
 
+    // Show the actual recorded frame while the video range is being prepared.
+    Image {
+        id: playbackSnapshot
+        anchors.fill: parent
+        z: 3
+        fillMode: Image.PreserveAspectFit
+        cache: false
+        visible: root.isPlayback && !root.playbackReady && source.toString().length > 0
+    }
+
     Connections {
         id: playbackQueueConn
         target: root.playbackQueue
@@ -400,6 +410,7 @@ Item {
 
         root.playbackReady = true
         root.loadSecs = 0
+        playbackSnapshot.source = ""
         forcePlaybackTimer.stop()
 
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
@@ -521,6 +532,14 @@ Item {
 
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
 
+        var snapServer = (frigateRef && frigateRef.server) ? frigateRef.server : ""
+        while (snapServer.length > 0 && snapServer.charAt(snapServer.length - 1) === "/")
+            snapServer = snapServer.slice(0, -1)
+        playbackSnapshot.source = snapServer !== ""
+                ? snapServer + "/api/" + id + "/recordings/" + Math.floor(tsMs / 1000)
+                  + "/snapshot.jpg?v=" + Date.now()
+                : ""
+
         root._seekGen++
         root._activeSeekGen = -1
 
@@ -569,6 +588,7 @@ Item {
         root.playbackReady = false
         root.loadSecs = 0
         root._activeSeekGen = -1
+        playbackSnapshot.source = ""
         forcePlaybackTimer.stop()
 
         playbackVideo.queue = null
@@ -661,6 +681,7 @@ Item {
         isPlayback = false
         playbackReady = false
         loadSecs = 0
+        playbackSnapshot.source = ""
         timelinePointerInside = false
         _returningLive = false
         _seekGen = 0
@@ -676,6 +697,11 @@ Item {
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
         var pending = root.pendingSeekMs
         root.pendingSeekMs = -1
+
+        // Start generating this hour's VOD playlist while the user is still
+        // looking at the timeline, so the first recorded click is ~1s.
+        if (frigateRef && id !== "" && typeof frigateRef.warmRecordings === "function")
+            frigateRef.warmRecordings(id, pending > 0 ? pending : Date.now())
 
         liveLayers.cameraId = root.cameraId
         liveLayers.cameraName = root.cameraName
@@ -770,6 +796,7 @@ Item {
         isPlayback = false
         playbackReady = false
         loadSecs = 0
+        playbackSnapshot.source = ""
         timelinePointerInside = false
         _returningLive = false
         _seekGen = 0
