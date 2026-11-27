@@ -48,6 +48,11 @@ private:
     void startUrlWorker(const QString& cameraId, int gen, const QString& url);
     void startLocalWorker(const QString& cameraId, int gen, const QString& localPath);
     void downloadThenPlay(const QString& cameraId, int gen, const QString& remoteUrl);
+    void beginClip(const QString& cameraId, int gen, qint64 startSec, qint64 endSec, bool resetQueue);
+    void continuePlayback(const QString& cameraId, int gen);
+    void prefetchNextClip(const QString& cameraId, int gen, qint64 startSec, qint64 endSec);
+    void cancelPrefetch(const QString& cameraId);
+    void endPlaybackSession(const QString& cameraId);
     void cleanupTempFile(const QString& cameraId);
 
     QString m_server;
@@ -58,6 +63,8 @@ private:
 
     QMutex m_mutex;
     QHash<QString, qint64> m_playbackPositionByCamera;
+    QHash<QString, qint64> m_playbackEndSecByCamera;
+    QHash<QString, bool> m_playbackActiveByCamera;
     QHash<QString, qint64> m_lastSeekMs;
     QHash<QString, int> m_seekGen;
 
@@ -69,6 +76,10 @@ private:
     QHash<QString, QString> m_tempFiles;
     QHash<QString, QFile*> m_downloadFiles;
     QHash<QString, bool> m_downloadStartedPlay;  // true once local worker started mid-download
+
+    QHash<QString, QNetworkReply*> m_prefetchReplies;
+    QHash<QString, QFile*> m_prefetchFiles;
+    QHash<QString, QString> m_prefetchPaths;
 };
 
 #endif

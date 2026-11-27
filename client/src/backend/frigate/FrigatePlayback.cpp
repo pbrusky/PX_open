@@ -15,6 +15,13 @@
 #include <QFileInfo>
 #include <QUrl>
 
+namespace {
+constexpr qint64 kClipBeforeSec = 3;
+constexpr qint64 kClipInitialAfterSec = 15;
+constexpr qint64 kClipContinueAfterSec = 60;
+constexpr qint64 kClipMinLenSec = 20;
+}
+
 FrigatePlayback::FrigatePlayback(QObject* parent)
     : QObject(parent)
     , m_net(new QNetworkAccessManager(this))
@@ -33,6 +40,12 @@ FrigatePlayback::~FrigatePlayback()
     const QStringList dlKeys = m_downloadReplies.keys();
     for (const QString& id : dlKeys)
         cancelDownload(id);
+
+    const QStringList prefetchKeys = m_prefetchReplies.keys();
+    for (const QString& id : prefetchKeys)
+        cancelPrefetch(id);
+    for (const QString& id : m_prefetchPaths.keys())
+        cancelPrefetch(id);
 
     for (auto it = m_tempFiles.begin(); it != m_tempFiles.end(); ++it) {
         if (!it.value().isEmpty())
@@ -100,6 +113,104 @@ void FrigatePlayback::cleanupTempFile(const QString& cameraId)
     m_downloadStartedPlay.remove(cameraId);
 }
 
+void FrigatePlayback::cancelPrefetch(const QString& cameraId)
+{
+    QNetworkReply* reply = m_prefetchReplies.take(cameraId);
+    if (reply) {
+        reply->disconnect(this);
+        reply->abort();
+        reply->deleteLater();
+    }
+    QFile* file = m_prefetchFiles.take(cameraId);
+    if (file) {
+        file->close();
+        delete file;
+    }
+    const QString path = m_prefetchPaths.take(cameraId);
+    if (!path.isEmpty())
+        QFile::remove(path);
+}
+
+void FrigatePlayback::prefetchNextClip(const QString& cameraId, int gen, qint64 startSec, qint64 endSec)
+{
+    if (cameraId.trimmed().isEmpty() || m_server.isEmpty())
+        return;
+    if (m_seekGen.value(cameraId, 0) != gen || !m_playbackActiveByCamera.value(cameraId, false))
+        return;
+    if (m_prefetchReplies.contains(cameraId) || m_prefetchPaths.contains(cameraId))
+        return;
+
+    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
+    if (endSec > nowSec - 2)
+        endSec = nowSec - 2;
+    if (endSec <= startSec)
+        return;
+
+    cancelPrefetch(cameraId);
+
+    QDir tmpDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation));
+    const QString path = tmpDir.filePath(
+        QStringLiteral("px_prefetch_%1_%2_%3.mp4").arg(cameraId).arg(startSec).arg(endSec));
+
+    QFile* outFile = new QFile(path);
+    if (!outFile->open(QIODevice::WriteOnly)) {
+        delete outFile;
+        return;
+    }
+    m_prefetchFiles.insert(cameraId, outFile);
+
+    QNetworkRequest req;
+    const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
+                            .arg(m_server, cameraId)
+                            .arg(startSec)
+                            .arg(endSec);
+    req.setUrl(QUrl(url));
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::NoLessSafeRedirectPolicy);
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("PX_Open/1.0"));
+    req.setTransferTimeout(180000);
+
+    QNetworkReply* reply = m_net->get(req);
+    m_prefetchReplies.insert(cameraId, reply);
+
+    connect(reply, &QNetworkReply::readyRead, this,
+            [this, cameraId, reply]() {
+        if (QFile* f = m_prefetchFiles.value(cameraId)) {
+            const QByteArray chunk = reply->readAll();
+            if (!chunk.isEmpty())
+                f->write(chunk);
+        }
+    });
+
+    connect(reply, &QNetworkReply::finished, this,
+            [this, cameraId, gen, path, reply]() {
+        m_prefetchReplies.remove(cameraId);
+
+        QFile* file = m_prefetchFiles.take(cameraId);
+        if (file) {
+            if (reply->bytesAvailable() > 0)
+                file->write(reply->readAll());
+            file->flush();
+            file->close();
+            delete file;
+        }
+
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto err = reply->error();
+        reply->deleteLater();
+
+        if (m_seekGen.value(cameraId, 0) != gen
+                || !m_playbackActiveByCamera.value(cameraId, false)
+                || err != QNetworkReply::NoError || status >= 400
+                || QFileInfo(path).size() < 1024) {
+            QFile::remove(path);
+            return;
+        }
+
+        m_prefetchPaths.insert(cameraId, path);
+    });
+}
+
 void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
 {
     cancelDownload(cameraId);
@@ -147,6 +258,7 @@ void FrigatePlayback::stopPlayback(const QString& cameraId)
     m_seekGen[cameraId] = m_seekGen.value(cameraId, 0) + 1;
     stopWorkerAsync(cameraId);
     cleanupTempFile(cameraId);
+    endPlaybackSession(cameraId);
     m_playbackPositionByCamera[cameraId] = 0;
     m_lastSeekMs.remove(cameraId);
     emit playbackStopped(cameraId);
@@ -218,6 +330,7 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
                          || r.contains(QStringLiteral("not found"));
 
         if (isHttp && noClip) {
+            endPlaybackSession(cameraId);
             emit playbackError(cameraId,
                 QStringLiteral("No recording at this time. Try another place on the timeline."));
             emit playbackStopped(cameraId);
@@ -230,6 +343,7 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
         }
 
         cleanupTempFile(cameraId);
+        endPlaybackSession(cameraId);
         emit playbackError(cameraId,
             reason.isEmpty() ? QStringLiteral("Playback failed.") : reason);
         emit playbackStopped(cameraId);
@@ -245,6 +359,11 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
             m_playbackThreads.remove(cameraId);
         }
         cleanupTempFile(cameraId);
+        if (m_playbackActiveByCamera.value(cameraId, false)) {
+            continuePlayback(cameraId, gen);
+            return;
+        }
+        endPlaybackSession(cameraId);
         emit playbackStopped(cameraId);
     }, Qt::QueuedConnection);
 
@@ -379,6 +498,7 @@ void FrigatePlayback::downloadThenPlay(const QString& cameraId, int gen, const Q
         if (err != QNetworkReply::NoError || status >= 400 || size < 1024) {
             cleanupTempFile(cameraId);
             m_downloadStartedPlay.remove(cameraId);
+            endPlaybackSession(cameraId);
 
             QString msg;
             if (status == 400 || status == 404)
@@ -418,6 +538,7 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 
     const int gen = m_seekGen.value(cameraId, 0) + 1;
     m_seekGen[cameraId] = gen;
+    cancelPrefetch(cameraId);
 
     qint64 seekSec = timestampMs;
     if (timestampMs > 100000000000LL)
@@ -427,31 +548,47 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
 
-    constexpr qint64 kBeforeSec = 3;
-    constexpr qint64 kAfterSec  = 15;
-    constexpr qint64 kMinLenSec = 20;
-
-    qint64 startSec = seekSec - kBeforeSec;
+    qint64 startSec = seekSec - kClipBeforeSec;
     if (startSec < 1)
         startSec = 1;
 
-    qint64 endSec = seekSec + kAfterSec;
+    qint64 endSec = seekSec + kClipInitialAfterSec;
     if (endSec <= startSec)
-        endSec = startSec + kMinLenSec;
+        endSec = startSec + kClipMinLenSec;
 
     if (endSec > nowSec - 2)
         endSec = nowSec - 2;
     if (startSec >= endSec) {
         endSec = nowSec - 2;
-        startSec = endSec - kMinLenSec;
+        startSec = endSec - kClipMinLenSec;
         if (startSec < 1)
             startSec = 1;
     }
 
-    const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
-                            .arg(m_server, cameraId)
-                            .arg(startSec)
-                            .arg(endSec);
+    m_playbackActiveByCamera[cameraId] = true;
+    m_playbackPositionByCamera[cameraId] = seekSec * 1000;
+    emit playbackPositionChanged(cameraId, seekSec * 1000);
+
+    beginClip(cameraId, gen, startSec, endSec, true);
+}
+
+void FrigatePlayback::beginClip(const QString& cameraId, int gen, qint64 startSec, qint64 endSec, bool resetQueue)
+{
+    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
+    if (endSec > nowSec - 2)
+        endSec = nowSec - 2;
+    if (startSec < 1)
+        startSec = 1;
+    if (endSec <= startSec) {
+        if (!resetQueue) {
+            endPlaybackSession(cameraId);
+            emit playbackStopped(cameraId);
+        }
+        return;
+    }
+
+    m_playbackEndSecByCamera[cameraId] = endSec;
+
     stopWorkerAsync(cameraId);
     cleanupTempFile(cameraId);
 
@@ -463,15 +600,61 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
             m_playbackQueues.insert(cameraId, q);
         }
         if (FrameQueue* queue = m_playbackQueues.value(cameraId)) {
-            queue->clear();
+            if (resetQueue)
+                queue->clear();
             queue->resetReceived();
         }
     }
 
-    m_playbackPositionByCamera[cameraId] = seekSec * 1000;
-    emit playbackPositionChanged(cameraId, seekSec * 1000);
+    const QString prefetched = m_prefetchPaths.take(cameraId);
+    if (!prefetched.isEmpty()) {
+        m_tempFiles.insert(cameraId, prefetched);
+        startLocalWorker(cameraId, gen, prefetched);
+    } else {
+        const QString url = QStringLiteral("%1/api/%2/start/%3/end/%4/clip.mp4")
+                                .arg(m_server, cameraId)
+                                .arg(startSec)
+                                .arg(endSec);
+        startUrlWorker(cameraId, gen, url);
+    }
 
-    startUrlWorker(cameraId, gen, url);
+    prefetchNextClip(cameraId, gen, endSec, endSec + kClipContinueAfterSec);
+}
+
+void FrigatePlayback::continuePlayback(const QString& cameraId, int gen)
+{
+    if (m_seekGen.value(cameraId, 0) != gen)
+        return;
+    if (!m_playbackActiveByCamera.value(cameraId, false)) {
+        emit playbackStopped(cameraId);
+        return;
+    }
+
+    const qint64 nextStart = m_playbackEndSecByCamera.value(cameraId, 0);
+    if (nextStart <= 0) {
+        endPlaybackSession(cameraId);
+        emit playbackStopped(cameraId);
+        return;
+    }
+
+    qint64 nextEnd = nextStart + kClipContinueAfterSec;
+    const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
+    if (nextEnd > nowSec - 2)
+        nextEnd = nowSec - 2;
+    if (nextEnd <= nextStart) {
+        endPlaybackSession(cameraId);
+        emit playbackStopped(cameraId);
+        return;
+    }
+
+    beginClip(cameraId, gen, nextStart, nextEnd, false);
+}
+
+void FrigatePlayback::endPlaybackSession(const QString& cameraId)
+{
+    cancelPrefetch(cameraId);
+    m_playbackActiveByCamera.remove(cameraId);
+    m_playbackEndSecByCamera.remove(cameraId);
 }
 
 qint64 FrigatePlayback::currentPosition(const QString& cameraId) const
@@ -486,6 +669,7 @@ void FrigatePlayback::switchToLive(const QString& cameraId)
     m_seekGen[cameraId] = m_seekGen.value(cameraId, 0) + 1;
     stopWorkerAsync(cameraId);
     cleanupTempFile(cameraId);
+    endPlaybackSession(cameraId);
     m_playbackPositionByCamera[cameraId] = 0;
     m_lastSeekMs.remove(cameraId);
     emit playbackStopped(cameraId);
