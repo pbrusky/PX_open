@@ -187,6 +187,7 @@ Item {
         var id = timelineCameraId
         if (typeof frigateRef.loadRecordings === "function") frigateRef.loadRecordings(id)
         if (typeof frigateRef.loadMotionActivity === "function") frigateRef.loadMotionActivity(id)
+        if (typeof frigateRef.loadEvents === "function") frigateRef.loadEvents(id)
         if (typeof frigateRef.loadRecordingDays === "function") frigateRef.loadRecordingDays(id)
     }
 
@@ -235,6 +236,11 @@ Item {
         if (typeof root.frigateRef.getRecordingDaysForCamera === "function") {
             var d = root.frigateRef.getRecordingDaysForCamera(id) || []
             if (d.length) tl.recordingDays = d
+        }
+        if (typeof root.frigateRef.getEventsForCamera === "function") {
+            var ev = root.frigateRef.getEventsForCamera(id) || []
+            if (ev.length) tl.events = ev
+            had = true
         }
         var m = root.fetchMotionList(id)
         if (m.length) {

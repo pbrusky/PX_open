@@ -19,22 +19,35 @@ Item {
         return Math.max(0, Math.min(w, ratio * w))
     }
 
-    Repeater {
-        model: recordings
+    // Keep hundreds/thousands of recording blocks in one paint operation
+    // instead of creating one QML item and bindings per recording.
+    Canvas {
+        id: canvas
+        anchors.fill: parent
+        antialiasing: false
 
-        Rectangle {
-            height: Math.max(8, (parent ? parent.height : 28) * 0.35)
-            y: parent ? (parent.height - height - 2) : 0
-            radius: 1
-            color: "#2E7D32"
-            opacity: 0.85
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
 
-            width: {
-                var x1 = segments.mapX(Number(modelData.start) * 1000)
-                var x2 = segments.mapX(Number(modelData.end) * 1000)
-                return Math.max(2, x2 - x1)
+            var h = Math.max(8, segments.height * 0.35)
+            var y = segments.height - h - 2
+            ctx.fillStyle = "#2E7D32"
+            ctx.globalAlpha = 0.85
+
+            for (var i = 0; i < segments.recordings.length; ++i) {
+                var rec = segments.recordings[i]
+                var x1 = segments.mapX(Number(rec.start) * 1000)
+                var x2 = segments.mapX(Number(rec.end) * 1000)
+                var w = Math.max(2, x2 - x1)
+                ctx.fillRect(x1, y, w, h)
             }
-            x: segments.mapX(Number(modelData.start) * 1000)
         }
     }
+
+    onRecordingsChanged: canvas.requestPaint()
+    onViewStartChanged: canvas.requestPaint()
+    onViewEndChanged: canvas.requestPaint()
+    onContentWidthChanged: canvas.requestPaint()
+    onHeightChanged: canvas.requestPaint()
 }

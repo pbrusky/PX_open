@@ -455,6 +455,12 @@ Item {
             timelineLoader.item.motionPoints = points || []
     }
 
+    function applyEvents(list) {
+        if (!timelineLoader.item)
+            return
+        timelineLoader.item.events = list || []
+    }
+
     function onTimelineSeek(tsMs) {
         if (!frigateRef)
             return
@@ -547,7 +553,7 @@ Item {
         })
     }
 
-    // Recordings + motion ticks. Events only via Events panel when open.
+    // Recordings, event ticks, and motion ticks share FrigateTimeline's caches.
     function loadTimelineData() {
         if (!frigateRef)
             return
@@ -568,6 +574,10 @@ Item {
                 applyMotion(mot)
         }
 
+        // Reuse event ticks already loaded by the camera-grid timeline.
+        if (typeof frigateRef.getEventsForCamera === "function")
+            applyEvents(frigateRef.getEventsForCamera(id))
+
         if (typeof frigateRef.loadRecordings === "function")
             frigateRef.loadRecordings(id)
         if (typeof frigateRef.loadRecordingDays === "function")
@@ -575,6 +585,8 @@ Item {
 
         if (typeof frigateRef.loadMotionActivity === "function")
             frigateRef.loadMotionActivity(id)
+        if (typeof frigateRef.loadEvents === "function")
+            frigateRef.loadEvents(id)
 
         recordingsPollTimer.tries = 0
         recordingsPollTimer.start()
