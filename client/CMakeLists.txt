@@ -2,6 +2,16 @@ cmake_minimum_required(VERSION 3.16)
 
 project(px_open LANGUAGES CXX)
 
+# Embed a version so installed Linux binaries do not depend on a working
+# directory or a package-layout-specific version.txt. A version.txt beside
+# the executable can still override this at runtime.
+set(PX_OPEN_VERSION "unknown")
+set(PX_OPEN_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/version.txt")
+if(EXISTS "${PX_OPEN_VERSION_FILE}")
+    file(STRINGS "${PX_OPEN_VERSION_FILE}" PX_OPEN_VERSION LIMIT_COUNT 1)
+    string(STRIP "${PX_OPEN_VERSION}" PX_OPEN_VERSION)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -95,6 +105,8 @@ if(WIN32)
     target_sources(px_open PRIVATE appicon.rc)
 endif()
 
+target_compile_definitions(px_open PRIVATE PX_OPEN_VERSION="${PX_OPEN_VERSION}")
+
 target_include_directories(px_open PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
@@ -135,3 +147,5 @@ target_link_libraries(px_open PRIVATE
 
     ${FFMPEG_LIBRARIES}
 )
+
+install(FILES "${PX_OPEN_VERSION_FILE}" DESTINATION .)

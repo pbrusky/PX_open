@@ -116,7 +116,11 @@ int main(int argc, char *argv[])
             return new FullscreenHelper();
         });
 
-    QString version = "unknown";
+#ifndef PX_OPEN_VERSION
+#define PX_OPEN_VERSION "unknown"
+#endif
+
+    QString version = QStringLiteral(PX_OPEN_VERSION);
     const QStringList versionCandidates = {
         QDir(QCoreApplication::applicationDirPath()).filePath("version.txt"),
         QDir(QCoreApplication::applicationDirPath()).filePath("../version.txt"),
@@ -126,10 +130,14 @@ int main(int argc, char *argv[])
     for (const QString& path : versionCandidates) {
         QFile vf(path);
         if (vf.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            version = QString::fromUtf8(vf.readAll()).trimmed();
-            break;
+            const QString fileVersion = QString::fromUtf8(vf.readAll()).trimmed();
+            if (!fileVersion.isEmpty()) {
+                version = fileVersion;
+                break;
+            }
         }
     }
+    app.setApplicationVersion(version);
     engine.rootContext()->setContextProperty("PX_VERSION", version);
 
     FrigateAPI* frigateApi = new FrigateAPI(&engine);
