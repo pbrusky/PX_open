@@ -65,7 +65,7 @@ Item {
             return true
         if (timelineLoader.item.exportBusy)
             return true
-        if (timelineLoader.item.exportConfirm && timelineLoader.item.exportConfirm.visible)
+        if (timelineLoader.item.exportConfirm && timelineLoader.item.exportConfirm.item && timelineLoader.item.exportConfirm.item.visible)
             return true
         if (timelineLoader.item.exportEndMs > timelineLoader.item.exportStartMs)
             return true
@@ -392,8 +392,9 @@ Item {
     function markPlaybackReady() {
         if (root.playbackReady)
             return
-        if (root._activeSeekGen < 0 || root._seekGen !== root._activeSeekGen)
+        if (root._activeSeekGen < 0 || root._seekGen !== root._activeSeekGen) {
             return
+        }
 
         root.playbackReady = true
         root.loadSecs = 0
@@ -409,6 +410,8 @@ Item {
                     frigateRef.stopFullscreenStream(id)
             })
         }
+        if (!root.timelinePointerInside)
+            timelineHideTimer.restart()
     }
 
     function tryExit() {
@@ -427,13 +430,49 @@ Item {
         if (!timelineLoader.item)
             return
         var id = root.cameraId !== "" ? root.cameraId : root.cameraName
+        timelineLoader.item.recordings = []
+        timelineLoader.item.events = []
+        timelineLoader.item.motionPoints = []
+        if (timelineLoader.item.recordingDays !== undefined) timelineLoader.item.recordingDays = []
+        timelineLoader.item.startTs = 0
+        timelineLoader.item.endTs = 0
+        timelineLoader.item.dataStartTs = 0
+        timelineLoader.item.dataEndTs = 0
+        timelineLoader.item.viewStartTs = 0
+        timelineLoader.item.viewEndTs = 0
+        timelineLoader.item._viewLock = false
+        timelineLoader.item._fixedDayMode = false
+        timelineLoader.item.hoverTsMs = -1
+        if (!root.isPlayback)
+            timelineLoader.item.playbackPositionMs = 0
         timelineLoader.item.cameraId = id
         timelineLoader.item.cameraName = root.cameraName
         timelineLoader.item.frigateRef = root.frigateRef
         timelineLoader.item.allowAutoReveal = true
-        timelineLoader.item.collapsed = true
+        timelineLoader.item.collapsed = false
         timelineLoader.item.isPlayback = root.isPlayback
         root.timelinePointerInside = false
+        if (timelineLoader.item) {
+            timelineLoader.item.exportBusy = false
+            timelineLoader.item.exportStartMs = -1
+            timelineLoader.item.exportEndMs = -1
+            timelineLoader.item.exportUiOpen = false
+            if (typeof timelineLoader.item.clearExportRange === "function")
+                timelineLoader.item.clearExportRange()
+            if (timelineLoader.item.exportConfirm && timelineLoader.item.exportConfirm.item) {
+                timelineLoader.item.exportConfirm.item.visible = false
+                if (typeof timelineLoader.item.exportConfirm.item.close === "function")
+                    timelineLoader.item.exportConfirm.item.close()
+            }
+            if (timelineLoader.item.exportConfirm)
+                timelineLoader.item.exportConfirm.active = false
+            Qt.callLater(function() {
+                if (!timelineLoader.item)
+                    return
+                timelineLoader.item.refreshExportUiOpen()
+                timelineHideTimer.restart()
+            })
+        }
     }
 
     function applyRecordings(segments) {
@@ -441,8 +480,10 @@ Item {
             return
         timelineLoader.item.recordings = segments
         if (segments && segments.length > 0) {
-            timelineLoader.item.startTs = segments[0].start
-            timelineLoader.item.endTs = segments[segments.length - 1].end
+            timelineLoader.item.startTs = Number(segments[0].start)
+            timelineLoader.item.endTs = Number(segments[segments.length - 1].end)
+            if (typeof timelineLoader.item.setDataRange === "function")
+                timelineLoader.item.setDataRange(timelineLoader.item.startTs, timelineLoader.item.endTs)
         }
     }
 
@@ -470,7 +511,7 @@ Item {
             return
 
         var wall = Date.now()
-        if (Math.abs(tsMs - root._lastSeekTs) < 200 && (wall - root._lastSeekWall) < 300)
+        if (Math.abs(tsMs - root._lastSeekTs) < 50 && (wall - root._lastSeekWall) < 100)
             return
         root._lastSeekTs = tsMs
         root._lastSeekWall = wall
@@ -619,7 +660,7 @@ Item {
         _activeSeekGen = -1
         _lastSeekTs = -1
         trueMain = false
-        seekArmed = false
+        seekArmed = true
         visible = true
         forceActiveFocus()
         closeArmTimer.restart()
@@ -691,7 +732,7 @@ Item {
         loadTimelineData()
 
         Qt.callLater(function() {
-            seekArmTimer.restart()
+            seekArmed = true
         })
     }
 

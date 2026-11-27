@@ -216,6 +216,13 @@ Item {
         if (!tl) return
         tl.recordings = []; tl.events = []; tl.motionPoints = []
         if (tl.recordingDays !== undefined) tl.recordingDays = []
+        if (tl.startTs !== undefined) tl.startTs = 0
+        if (tl.endTs !== undefined) tl.endTs = 0
+        if (tl.dataStartTs !== undefined) tl.dataStartTs = 0
+        if (tl.dataEndTs !== undefined) tl.dataEndTs = 0
+        if (tl.viewStartTs !== undefined) tl.viewStartTs = 0
+        if (tl.viewEndTs !== undefined) tl.viewEndTs = 0
+        if (tl._viewLock !== undefined) tl._viewLock = false
         if (tl._fixedDayMode !== undefined) tl._fixedDayMode = false
         if (tl.hoverTsMs !== undefined) tl.hoverTsMs = -1
         if (tl.playbackPositionMs !== undefined) tl.playbackPositionMs = 0
@@ -230,6 +237,8 @@ Item {
                 tl.recordings = r
                 tl.startTs = Number(r[0].start)
                 tl.endTs = Number(r[r.length - 1].end)
+                if (typeof tl.setDataRange === "function")
+                    tl.setDataRange(tl.startTs, tl.endTs)
                 had = true
             }
         }
