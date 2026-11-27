@@ -31,6 +31,7 @@ Rectangle {
     property bool _pendingHoverValue: false
     property bool _activated: false
     property bool _backendDrivesPlayhead: false
+    property bool followLive: true
     readonly property int maxMotionPoints: 800
 
     signal seekRequested(real timestampMs)
@@ -139,6 +140,51 @@ Rectangle {
         playheadTsMs = next
     }
 
+    function followCurrentTime() {
+        if (!followLive || isPlayback || _fixedDayMode || _viewLock)
+            return
+        if (!(viewEndTs > viewStartTs))
+            return
+
+        var nowSec = Date.now() / 1000
+        var de = dataEndBound()
+        if (dataEndTs > dataStartTs && de < nowSec) {
+            dataEndTs = nowSec
+            de = nowSec
+        }
+        if (de < nowSec)
+            return
+
+        var span = viewEndTs - viewStartTs
+        if (!(span > 0) || span > maxViewSpan)
+            span = Math.min(defaultViewSpan, de - dataStartBound())
+        if (span < minViewSpan)
+            span = minViewSpan
+        if (span > maxViewSpan)
+            span = maxViewSpan
+
+        var ds = dataStartBound()
+        var end = Math.min(de, nowSec)
+        var start = end - span
+        if (start < ds)
+            start = ds
+        if (end - start < minViewSpan) {
+            start = Math.max(ds, end - minViewSpan)
+            end = start + minViewSpan
+            if (end > de)
+                end = de
+        }
+        if (!(end > start))
+            return
+
+        _viewLock = true
+        if (Math.abs(viewStartTs - start) > 0.05)
+            viewStartTs = start
+        if (Math.abs(viewEndTs - end) > 0.05)
+            viewEndTs = end
+        _viewLock = false
+    }
+
     function exportSpanLabel() {
         if (!(exportEndMs > exportStartMs))
             return ""
@@ -212,8 +258,10 @@ Rectangle {
         repeat: true
         onTriggered: {
             currentTimeMs = Date.now()
-            if (!isPlayback)
+            if (!isPlayback) {
                 updatePlayhead()
+                followCurrentTime()
+            }
         }
     }
 
@@ -403,8 +451,10 @@ Rectangle {
     onIsPlaybackChanged: {
         if (!isPlayback) {
             _backendDrivesPlayhead = false
+            followLive = true
             updatePlayhead()
         } else {
+            followLive = false
             activate()
         }
     }
@@ -570,6 +620,7 @@ Rectangle {
     function zoomAt(cursorX, factor) {
         if (_viewLock)
             return
+        followLive = false
         var s = effectiveStartTs()
         var e = effectiveEndTs()
         var w = mapWidth()
@@ -588,6 +639,7 @@ Rectangle {
     function panByPixels(dx) {
         if (_viewLock)
             return
+        followLive = false
         var s = effectiveStartTs()
         var e = effectiveEndTs()
         var w = mapWidth()
@@ -603,6 +655,7 @@ Rectangle {
         if (_viewLock)
             return
         _fixedDayMode = false
+        followLive = true
         _viewLock = true
 
         var nowSec = Date.now() / 1000
@@ -700,6 +753,7 @@ Rectangle {
         var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
         var dayEnd = dayStart + 86400
         _fixedDayMode = true
+        followLive = false
         timelineLoading = true
         refreshing = true
         if (dayStart < dataStartBound())

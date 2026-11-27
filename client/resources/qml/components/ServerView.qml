@@ -224,6 +224,7 @@ Item {
         if (tl.viewEndTs !== undefined) tl.viewEndTs = 0
         if (tl._viewLock !== undefined) tl._viewLock = false
         if (tl._fixedDayMode !== undefined) tl._fixedDayMode = false
+        if (tl.followLive !== undefined) tl.followLive = true
         if (tl.hoverTsMs !== undefined) tl.hoverTsMs = -1
         if (tl.playbackPositionMs !== undefined) tl.playbackPositionMs = 0
     }
@@ -297,6 +298,7 @@ Item {
             tl.timelineLoading = true
             tl.refreshing = true
             tl.allowAutoReveal = true; tl.collapsed = false
+            tl.followLive = true
             clearGridTimelineTrack(tl)
             applyCachedTimeline(tl, id)
             Qt.callLater(function() {

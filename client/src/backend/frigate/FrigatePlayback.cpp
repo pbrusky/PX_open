@@ -201,7 +201,6 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
 
     connect(worker, &FFmpegWorker::openInputFailed, this,
             [this, cameraId, gen, url](const QString& reason) {
-        qWarning() << "[PLAYBACK DEBUG] openInputFailed" << cameraId << "gen" << gen << "curGen" << m_seekGen.value(cameraId, 0) << "reason" << reason << "url" << url;
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
 
@@ -453,8 +452,6 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
                             .arg(m_server, cameraId)
                             .arg(startSec)
                             .arg(endSec);
-    qWarning() << "[PLAYBACK DEBUG] startPlayback" << cameraId << "tsMs" << timestampMs << "seekSec" << seekSec << "start" << startSec << "end" << endSec << "url" << url;
-
     stopWorkerAsync(cameraId);
     cleanupTempFile(cameraId);
 

@@ -163,8 +163,10 @@ Item {
                 return
             if (root._returningLive)
                 return
-            if (root.isPlayback && root.playbackReady)
+            if (root.isPlayback && root.playbackReady) {
+                root.returnToLive()
                 return
+            }
             if (root.isPlayback && !root.playbackReady) {
                 root.isPlayback = false
                 root.playbackReady = false
@@ -451,6 +453,7 @@ Item {
         timelineLoader.item.allowAutoReveal = true
         timelineLoader.item.collapsed = false
         timelineLoader.item.isPlayback = root.isPlayback
+        timelineLoader.item.followLive = !root.isPlayback
         root.timelinePointerInside = false
         if (timelineLoader.item) {
             timelineLoader.item.exportBusy = false
@@ -548,6 +551,7 @@ Item {
         if (timelineLoader.item) {
             timelineLoader.item.isPlayback = true
             timelineLoader.item.playbackPositionMs = tsMs
+            timelineLoader.item.followLive = false
         }
     }
 
@@ -574,6 +578,9 @@ Item {
         if (timelineLoader.item) {
             timelineLoader.item.isPlayback = false
             timelineLoader.item.playbackPositionMs = 0
+            timelineLoader.item.followLive = true
+            if (typeof timelineLoader.item.applyDefaultView === "function")
+                timelineLoader.item.applyDefaultView()
         }
 
         if (frigateRef && typeof frigateRef.switchToLive === "function")
