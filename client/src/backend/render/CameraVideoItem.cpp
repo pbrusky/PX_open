@@ -33,6 +33,8 @@ void CameraVideoItem::setQueue(QObject* q)
     if (m_queue)
         disconnect(m_queue, nullptr, this, nullptr);
 
+    // Invalidate callbacks queued by a previously connected FrameQueue.
+    m_queueGeneration.fetch_add(1);
     m_queue = q ? qobject_cast<FrameQueue*>(q) : nullptr;
 
     // Keep last image to avoid flashing
@@ -134,6 +136,7 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*
     QSGSimpleTextureNode* node = static_cast<QSGSimpleTextureNode*>(oldNode);
 
     bool gotNewFrame = false;
+    const quint64 queueGeneration = m_queueGeneration.load();
 
     if (m_queue) {
         // Preferred path: AVFrame
@@ -161,7 +164,9 @@ QSGNode* CameraVideoItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*
             const bool first = !m_hasFrame;
             m_hasFrame = true;
 
-            QMetaObject::invokeMethod(this, [this, first]() {
+            QMetaObject::invokeMethod(this, [this, first, queueGeneration]() {
+                if (queueGeneration != m_queueGeneration.load())
+                    return;
                 if (first)
                     emit hasFrameChanged();
                 emit framePresented();

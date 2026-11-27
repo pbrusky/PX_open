@@ -254,6 +254,7 @@ void FrigateTimeline::setServer(const QString& server)
     m_server = server;
     while (m_server.endsWith(QLatin1Char('/')))
         m_server.chop(1);
+    m_recordingsRequestSerial.clear();
 }
 
 void FrigateTimeline::setModuleServer(const QString& server)
@@ -311,6 +312,10 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
         return;
     }
 
+    // Calendar selections can start overlapping requests. Only the newest
+    // request for this camera is allowed to replace the timeline.
+    const quint64 requestId = ++m_recordingsRequestSerial[cameraId];
+
     QUrl url(QStringLiteral("%1/api/%2/recordings").arg(m_server, cameraId));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("after"), QString::number(afterSec));
@@ -320,31 +325,39 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
     QNetworkRequest req(url);
     QNetworkReply* reply = m_net->get(req);
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId, requestId]() {
         const QByteArray data = reply->readAll();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QNetworkReply::NetworkError networkError = reply->error();
         reply->deleteLater();
 
-        QVariantList segments;
-        if (status < 400) {
-            const QJsonDocument doc = QJsonDocument::fromJson(data);
-            if (doc.isArray()) {
-                for (const QJsonValue& v : doc.array()) {
-                    const QJsonObject o = v.toObject();
-                    double start = o.value(QStringLiteral("start_time")).toDouble();
-                    double end   = o.value(QStringLiteral("end_time")).toDouble();
-                    if (start <= 0.0)
-                        start = o.value(QStringLiteral("start")).toDouble();
-                    if (end <= 0.0)
-                        end = o.value(QStringLiteral("end")).toDouble();
-                    if (end <= start)
-                        continue;
+        // Ignore a stale response from a previously selected day/range.
+        if (m_recordingsRequestSerial.value(cameraId) != requestId)
+            return;
 
-                    QVariantMap seg;
-                    seg.insert(QStringLiteral("start"), start);
-                    seg.insert(QStringLiteral("end"), end);
-                    segments.append(seg);
-                }
+        // A failed/cancelled request has no authoritative day data. Do not
+        // overwrite the cached timeline or emit an empty replacement for it.
+        if (networkError != QNetworkReply::NoError || status < 200 || status >= 400)
+            return;
+
+        QVariantList segments;
+        const QJsonDocument doc = QJsonDocument::fromJson(data);
+        if (doc.isArray()) {
+            for (const QJsonValue& v : doc.array()) {
+                const QJsonObject o = v.toObject();
+                double start = o.value(QStringLiteral("start_time")).toDouble();
+                double end   = o.value(QStringLiteral("end_time")).toDouble();
+                if (start <= 0.0)
+                    start = o.value(QStringLiteral("start")).toDouble();
+                if (end <= 0.0)
+                    end = o.value(QStringLiteral("end")).toDouble();
+                if (end <= start)
+                    continue;
+
+                QVariantMap seg;
+                seg.insert(QStringLiteral("start"), start);
+                seg.insert(QStringLiteral("end"), end);
+                segments.append(seg);
             }
         }
 
@@ -762,6 +775,7 @@ void FrigateTimeline::loadPlaybackWindow(const QString& cameraId, qint64 timesta
 void FrigateTimeline::clearCamera(const QString& cameraId)
 {
     m_recordingsByCamera.remove(cameraId);
+    m_recordingsRequestSerial.remove(cameraId);
     m_eventsByCamera.remove(cameraId);
     m_motionByCamera.remove(cameraId);
     m_recordingDaysByCamera.remove(cameraId);

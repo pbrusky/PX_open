@@ -49,6 +49,7 @@ private:
     QNetworkAccessManager* m_net;
 
     QHash<QString, QVariantList> m_recordingsByCamera;
+    QHash<QString, quint64> m_recordingsRequestSerial;
     QHash<QString, QVariantList> m_eventsByCamera;
     QHash<QString, QVariantList> m_motionByCamera;
     QHash<QString, QStringList>  m_recordingDaysByCamera;

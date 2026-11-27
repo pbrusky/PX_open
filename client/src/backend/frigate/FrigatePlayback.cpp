@@ -115,9 +115,11 @@ void FrigatePlayback::stopWorkerAsync(const QString& cameraId)
         return;
 
     if (worker) {
+        // stopDecoding() only uses atomics, so it is safe to call while the
+        // worker is still draining a frame on its own thread.
         worker->setFrameQueue(nullptr);
+        worker->stopDecoding();
         QObject::disconnect(worker, nullptr, this, nullptr);
-        QMetaObject::invokeMethod(worker, "stopDecoding", Qt::QueuedConnection);
     }
     if (worker && thread) {
         QObject::connect(worker, &FFmpegWorker::finished, thread, &QThread::quit, Qt::UniqueConnection);
@@ -458,8 +460,10 @@ void FrigatePlayback::startPlayback(const QString& cameraId, qint64 timestampMs)
             q->setMaxSize(4);
             m_playbackQueues.insert(cameraId, q);
         }
-        if (FrameQueue* queue = m_playbackQueues.value(cameraId))
+        if (FrameQueue* queue = m_playbackQueues.value(cameraId)) {
+            queue->clear();
             queue->resetReceived();
+        }
     }
 
     m_playbackPositionByCamera[cameraId] = seekSec * 1000;

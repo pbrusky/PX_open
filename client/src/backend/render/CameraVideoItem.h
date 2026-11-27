@@ -3,6 +3,8 @@
 #include <QQuickItem>
 #include <QImage>
 
+#include <atomic>
+
 extern "C" {
 #include <libavutil/frame.h>
 }
@@ -40,6 +42,7 @@ private:
     QImage m_lastImage;
     qint64 m_lastPaintMs = 0;
     bool m_hasFrame = false;
+    std::atomic<quint64> m_queueGeneration{0};
 
     // Reused conversion context
     SwsContext* m_swsContext = nullptr;

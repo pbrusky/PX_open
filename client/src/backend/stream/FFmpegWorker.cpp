@@ -48,7 +48,7 @@ void FFmpegWorker::setTestMode(bool enabled)
 
 void FFmpegWorker::setFrameQueue(FrameQueue* queue)
 {
-    m_queue = queue;
+    m_queue.store(queue);
 }
 
 void FFmpegWorker::setHighQuality(bool enabled)
@@ -209,7 +209,7 @@ void FFmpegWorker::startDecoding()
 void FFmpegWorker::stopDecoding()
 {
     m_abort.store(true);
-    m_queue = nullptr;
+    m_queue.store(nullptr);
 }
 
 int FFmpegWorker::decodeInterruptCb(void* opaque)
@@ -394,18 +394,20 @@ void FFmpegWorker::decodeLoop()
                 break;
 
             // Always push AVFrame (preferred path)
-            if (m_queue) {
+            FrameQueue* outputQueue = m_queue.load();
+            if (outputQueue) {
                 AVFrame* clone = av_frame_clone(frame);
                 if (clone) {
                     AVFramePtr ptr(clone, AVFrameDeleter());
-                    m_queue->pushFrame(std::move(ptr));
+                    outputQueue->pushFrame(std::move(ptr));
                 }
             }
 
             // Only do expensive RGB conversion for non-live streams
             const bool needRgb = !isRtsp;
 
-            if (needRgb && m_queue) {
+            FrameQueue* rgbQueue = m_queue.load();
+            if (needRgb && rgbQueue) {
                 int dstW = frame->width;
                 int dstH = frame->height;
 
@@ -451,7 +453,7 @@ void FFmpegWorker::decodeLoop()
                                       dest,
                                       destStride);
 
-                            m_queue->pushImage(img);
+                            rgbQueue->pushImage(img);
                         }
                     }
                 }

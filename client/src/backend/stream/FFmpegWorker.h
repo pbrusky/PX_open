@@ -79,7 +79,7 @@ private:
     bool m_highQuality = false;
     bool m_usingHw = false;
 
-    FrameQueue* m_queue = nullptr;
+    std::atomic<FrameQueue*> m_queue{nullptr};
 
     QString m_resolution;
     double m_fps = 0.0;
