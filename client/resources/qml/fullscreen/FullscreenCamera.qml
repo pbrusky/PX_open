@@ -561,6 +561,9 @@ Item {
         if (id === "")
             return
 
+        if (timelineLoader.item)
+            timelineLoader.item.timelineLoading = true
+
         if (typeof frigateRef.getRecordingsForCamera === "function") {
             var cached = frigateRef.getRecordingsForCamera(id)
             if (cached && cached.length > 0)

@@ -11,6 +11,7 @@ Rectangle {
     property bool allowAutoReveal: false
     property bool pointerInside: false
     property bool calendarOpen: false
+    property bool timelineLoading: false
     property real minMotion: 15
 
     property real dataStartTs: 0
@@ -282,6 +283,7 @@ Rectangle {
         function onRecordingsLoaded(id, segments) {
             if (id !== cameraId && id !== cameraName)
                 return
+            timelineLoading = false
             recordings = segments || []
             if (recordings.length > 0) {
                 startTs = Number(recordings[0].start)
@@ -689,6 +691,7 @@ Rectangle {
         var dayStart = new Date(y, m - 1, d, 0, 0, 0).getTime() / 1000
         var dayEnd = dayStart + 86400
         _fixedDayMode = true
+        timelineLoading = true
         if (dayStart < dataStartBound())
             dataStartTs = dayStart
         if (dayEnd > dataEndBound())
@@ -712,6 +715,18 @@ Rectangle {
 
     Component.onCompleted: {
         Qt.callLater(updatePlayhead)
+    }
+
+    Text {
+        anchors.top: parent.top
+        anchors.topMargin: 4
+        anchors.horizontalCenter: parent.horizontalCenter
+        z: 100
+        visible: !collapsed && timelineLoading
+        text: "Timeline loading"
+        color: "#DDDDDD"
+        font.pixelSize: 12
+        font.bold: true
     }
 
     TimelineStatusBar {

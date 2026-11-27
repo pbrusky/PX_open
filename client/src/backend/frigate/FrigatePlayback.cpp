@@ -185,6 +185,9 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
     worker->setFrameQueue(queue);
     // Match fullscreen live: full resolution decode (up to 4K), not 720p cap
     worker->setHighQuality(true);
+    // CameraVideoItem consumes AVFrame directly; skip a duplicate QImage
+    // conversion for every recorded-clip frame.
+    worker->setEmitRgb(false);
 
     QThread* thread = new QThread();
 

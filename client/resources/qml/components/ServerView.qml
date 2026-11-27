@@ -285,6 +285,7 @@ Item {
         var id = root.timelineCameraId
         tl.cameraId = id; tl.cameraName = id
         if (id.length && !root.timelineCollapsed && !root.hideGridTimeline) {
+            tl.timelineLoading = true
             tl.allowAutoReveal = true; tl.collapsed = false
             clearGridTimelineTrack(tl)
             applyCachedTimeline(tl, id)

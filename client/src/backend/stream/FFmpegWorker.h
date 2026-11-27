@@ -34,6 +34,7 @@ public:
     void setTestMode(bool enabled);
     void setFrameQueue(FrameQueue* queue);
     void setHighQuality(bool enabled);
+    void setEmitRgb(bool enabled);
 
     QString resolution() const { return m_resolution; }
     double fps() const { return m_fps; }
@@ -77,6 +78,7 @@ private:
     std::atomic_bool m_abort{false};
     bool m_testMode = false;
     bool m_highQuality = false;
+    bool m_emitRgb = true;
     bool m_usingHw = false;
 
     std::atomic<FrameQueue*> m_queue{nullptr};

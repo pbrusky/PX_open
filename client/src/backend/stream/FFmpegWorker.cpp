@@ -56,6 +56,11 @@ void FFmpegWorker::setHighQuality(bool enabled)
     m_highQuality = enabled;
 }
 
+void FFmpegWorker::setEmitRgb(bool enabled)
+{
+    m_emitRgb = enabled;
+}
+
 void FFmpegWorker::clearHw()
 {
     if (m_hwDeviceCtx) {
@@ -403,8 +408,9 @@ void FFmpegWorker::decodeLoop()
                 }
             }
 
-            // Only do expensive RGB conversion for non-live streams
-            const bool needRgb = !isRtsp;
+            // Only do expensive RGB conversion for non-live streams when
+            // the consumer needs QImage output in addition to AVFrame.
+            const bool needRgb = !isRtsp && m_emitRgb;
 
             FrameQueue* rgbQueue = m_queue.load();
             if (needRgb && rgbQueue) {
