@@ -146,7 +146,7 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 16
+        spacing: 8
 
         //
         // Server name
@@ -187,16 +187,16 @@ Item {
             id: minimizeButton
             width: 28
             height: 28
-            radius: NxStyle.radius
+            radius: 1
             color: hovered ? NxStyle.hover : NxStyle.panelAlt
             property bool hovered: false
 
-            Text {
+            Image {
                 anchors.centerIn: parent
-                text: "—"
-                color: NxStyle.text
-                font.pixelSize: 20
-                font.bold: true
+                width: 16
+                height: 16
+                source: "qrc:/app/assets/icons/nx/minimize.svg"
+                fillMode: Image.PreserveAspectFit
             }
 
             MouseArea {
@@ -219,16 +219,18 @@ Item {
             id: maximizeRestoreButton
             width: 28
             height: 28
-            radius: NxStyle.radius
+            radius: 1
             color: hovered ? NxStyle.hover : NxStyle.panelAlt
             property bool hovered: false
 
-            Text {
+            Image {
                 anchors.centerIn: parent
-                text: topbarWrapper.isMaximized ? "▢" : "⬜"
-                color: NxStyle.text
-                font.pixelSize: 16
-                font.bold: true
+                width: 16
+                height: 16
+                source: topbarWrapper.isMaximized
+                        ? "qrc:/app/assets/icons/nx/restore.svg"
+                        : "qrc:/app/assets/icons/nx/maximize.svg"
+                fillMode: Image.PreserveAspectFit
             }
 
             MouseArea {
@@ -258,16 +260,16 @@ Item {
             id: exitButton
             width: 28
             height: 28
-            radius: NxStyle.radius
-            color: hovered ? NxStyle.hover : NxStyle.panelAlt
+            radius: 1
+            color: hovered ? "#5A1A1A" : NxStyle.panelAlt
             property bool hovered: false
 
-            Text {
+            Image {
                 anchors.centerIn: parent
-                text: "X"
-                color: NxStyle.text
-                font.pixelSize: 18
-                font.bold: true
+                width: 16
+                height: 16
+                source: "qrc:/app/assets/icons/nx/close.svg"
+                fillMode: Image.PreserveAspectFit
             }
 
             MouseArea {

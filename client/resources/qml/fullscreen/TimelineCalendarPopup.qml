@@ -105,11 +105,13 @@ Rectangle {
                 height: 28
                 radius: 4
                 color: "#444"
-                Text {
+                Image {
                     anchors.centerIn: parent
-                    text: "✕"
-                    color: "#FFCDD2"
-                    font.pixelSize: 12
+                    width: 14
+                    height: 14
+                    fillMode: Image.PreserveAspectFit
+                    source: "qrc:/app/assets/icons/nx/close.svg"
+                    opacity: 0.8
                 }
                 MouseArea {
                     anchors.fill: parent

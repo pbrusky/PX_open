@@ -1,4 +1,8 @@
 <RCC>
+    <qresource>
+        <file alias="qtquickcontrols2.conf">resources/qtquickcontrols2.conf</file>
+    </qresource>
+
     <qresource prefix="/app/">
 
         <!-- Main UI -->
@@ -128,6 +132,12 @@
         <file>assets/icons/nx/play.svg</file>
         <file>assets/icons/nx/pause.svg</file>
         <file>assets/icons/nx/calendar.svg</file>
+        <file>assets/icons/nx/star.svg</file>
+        <file>assets/icons/nx/star-outline.svg</file>
+        <file>assets/icons/nx/info.svg</file>
+        <file>assets/icons/nx/minimize.svg</file>
+        <file>assets/icons/nx/maximize.svg</file>
+        <file>assets/icons/nx/restore.svg</file>
 
     </qresource>
 </RCC>

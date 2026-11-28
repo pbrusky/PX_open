@@ -14,6 +14,8 @@
 #include <QProcess>
 #include <QLoggingCategory>
 #include <QFile>
+#include <QPalette>
+#include <QColor>
 
 #include "FrigateAPI.h"
 #include "FrigateCameraManager.h"
@@ -88,6 +90,26 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle("Fusion");
 
     QGuiApplication app(argc, argv);
+
+    // Dark application palette so QQC2 controls (buttons, menus, combo boxes,
+    // text fields, scrollbars) match the NX-style QML surfaces.
+    QPalette darkPalette;
+    darkPalette.setColor(QPalette::Window, QColor(QStringLiteral("#1b1e21")));
+    darkPalette.setColor(QPalette::WindowText, QColor(QStringLiteral("#f1f3f5")));
+    darkPalette.setColor(QPalette::Base, QColor(QStringLiteral("#111315")));
+    darkPalette.setColor(QPalette::AlternateBase, QColor(QStringLiteral("#22262a")));
+    darkPalette.setColor(QPalette::Text, QColor(QStringLiteral("#f1f3f5")));
+    darkPalette.setColor(QPalette::Button, QColor(QStringLiteral("#272c31")));
+    darkPalette.setColor(QPalette::ButtonText, QColor(QStringLiteral("#f1f3f5")));
+    darkPalette.setColor(QPalette::Highlight, QColor(QStringLiteral("#0c79c3")));
+    darkPalette.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#ffffff")));
+    darkPalette.setColor(QPalette::ToolTipBase, QColor(QStringLiteral("#272c31")));
+    darkPalette.setColor(QPalette::ToolTipText, QColor(QStringLiteral("#f1f3f5")));
+    darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, QColor(QStringLiteral("#7d858d")));
+    darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(QStringLiteral("#7d858d")));
+    darkPalette.setColor(QPalette::Disabled, QPalette::Text, QColor(QStringLiteral("#7d858d")));
+    app.setPalette(darkPalette);
+
     app.setOrganizationName(QStringLiteral("PXOpen"));
     app.setOrganizationDomain(QStringLiteral("pxopen.local"));
     app.setApplicationName(QStringLiteral("PX Open"));

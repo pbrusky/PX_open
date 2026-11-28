@@ -203,11 +203,13 @@ Rectangle {
             radius: 3
             visible: root.hasExportRange && !root.exportBusy
             color: "#333"
-            Text {
+            Image {
                 anchors.centerIn: parent
-                text: "✕"
-                color: "#ccc"
-                font.pixelSize: 12
+                width: 14
+                height: 14
+                fillMode: Image.PreserveAspectFit
+                source: "qrc:/app/assets/icons/nx/close.svg"
+                opacity: 0.7
             }
             MouseArea {
                 anchors.fill: parent

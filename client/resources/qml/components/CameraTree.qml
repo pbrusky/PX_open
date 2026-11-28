@@ -486,17 +486,21 @@ Item {
                 onTextChanged: searchText = text
             }
 
-            Text {
+            Image {
                 id: clearSearch
                 anchors.right: parent.right
                 anchors.rightMargin: 9
                 anchors.verticalCenter: parent.verticalCenter
-                text: searchText.length > 0 ? "×" : ""
-                color: nx.textMuted
-                font.pixelSize: 18
+                width: 12
+                height: 12
+                fillMode: Image.PreserveAspectFit
+                source: "qrc:/app/assets/icons/nx/close.svg"
+                opacity: searchText.length > 0 ? (clearArea.containsMouse ? 0.95 : 0.55) : 0.0
                 MouseArea {
+                    id: clearArea
                     anchors.fill: parent
                     anchors.margins: -6
+                    hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         searchField.text = ""
@@ -680,14 +684,18 @@ Item {
                         elide: Text.ElideRight
                     }
 
-                    Text {
+                    Image {
                         id: star
                         anchors.right: parent.right
-                        anchors.rightMargin: 10
+                        anchors.rightMargin: 9
                         anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.favorite ? "★" : "☆"
-                        color: modelData.favorite ? "#F5B82E" : nx.textMuted
-                        font.pixelSize: 16
+                        width: 16
+                        height: 16
+                        fillMode: Image.PreserveAspectFit
+                        source: modelData.favorite
+                                ? "qrc:/app/assets/icons/nx/star.svg"
+                                : "qrc:/app/assets/icons/nx/star-outline.svg"
+                        opacity: modelData.favorite ? 1.0 : (starArea.containsMouse ? 0.9 : 0.45)
                         MouseArea {
                             id: starArea
                             anchors.fill: parent

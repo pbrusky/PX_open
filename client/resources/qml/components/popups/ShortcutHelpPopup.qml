@@ -34,10 +34,12 @@ Popup {
                 font.bold: true
                 Layout.fillWidth: true
             }
-            Text {
-                text: "×"
-                color: closeArea.containsMouse ? NxStyle.accentHover : NxStyle.textMuted
-                font.pixelSize: 22
+            Image {
+                width: 14
+                height: 14
+                fillMode: Image.PreserveAspectFit
+                source: "qrc:/app/assets/icons/nx/close.svg"
+                opacity: closeArea.containsMouse ? 1.0 : 0.55
                 MouseArea {
                     id: closeArea
                     anchors.fill: parent

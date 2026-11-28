@@ -77,6 +77,14 @@ Item {
             bitrateKbps = br || 0
             codec = c || ""
         }
+        function onMotionActivityLoaded(camId, points) {
+            if (camId === cameraName && points && points.length)
+                tileOverlay.flashMotion()
+        }
+        function onEventsLoaded(camId, list) {
+            if (camId === cameraName && list && list.length)
+                tileOverlay.flashMotion()
+        }
     }
 
     Timer {
@@ -200,6 +208,7 @@ Item {
 
     // Overlay ABOVE drag — i / x get clicks
     CameraTileOverlay {
+        id: tileOverlay
         anchors.fill: parent
         z: 300
         visible: cameraName !== ""
@@ -208,6 +217,8 @@ Item {
         fps: tile.fps
         bitrateKbps: tile.bitrateKbps
         codec: tile.codec
+        isOnline: tile.isOnline
+        selected: mainWindow && mainWindow.selectedCameraId === tile.cameraName
         onInfoRequested: {
             infoPopup.open()
         }

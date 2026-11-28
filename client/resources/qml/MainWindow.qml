@@ -16,6 +16,26 @@ ApplicationWindow {
     visible: true
     color: NxStyle.background
 
+    // Propagate the NX palette to all QQC2 controls (buttons, popups, menus,
+    // text fields, combo boxes, scrollbars).
+    palette {
+        window: NxStyle.background
+        windowText: NxStyle.text
+        base: NxStyle.background
+        alternateBase: NxStyle.surfaceAlt
+        text: NxStyle.text
+        button: NxStyle.surface
+        buttonText: NxStyle.text
+        highlight: NxStyle.accent
+        highlightedText: "#ffffff"
+        light: NxStyle.surfaceHover
+        mid: NxStyle.surfaceAlt
+        dark: NxStyle.border
+        shadow: "#000000"
+        toolTipBase: NxStyle.surfaceAlt
+        toolTipText: NxStyle.text
+    }
+
     flags: Qt.Window | Qt.FramelessWindowHint
 
     property var frigateRef: frigate
