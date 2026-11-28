@@ -16,6 +16,7 @@ Rectangle {
 
     signal seekRequested(real tsMs)
     signal hoverTimeChanged(real tsMs)
+    signal refreshRequested()
 
     property bool panActive: false
 
@@ -57,6 +58,8 @@ Rectangle {
         viewStart: trackBg.viewStart
         viewEnd: trackBg.viewEnd
         contentWidth: trackBg.contentWidth
+        fillToNow: timeline ? (timeline.followLive && !timeline.isPlayback) : false
+        onRefreshRequested: trackBg.refreshRequested()
         z: 1
     }
 

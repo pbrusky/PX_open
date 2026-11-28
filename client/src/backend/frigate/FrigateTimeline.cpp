@@ -193,6 +193,78 @@ bool loadListFromDisk(const QString& server, const QString& kind, const QString&
     return !out->isEmpty() || root.contains(QStringLiteral("data"));
 }
 
+// One recordings cache file per camera. It holds a "live" range plus any
+// calendar-day ranges, so switching days never overwrites the live window.
+bool loadRecordingRangeFromDisk(const QString& server, const QString& cameraId,
+                                const QString& rangeKey, QVariantList* out, qint64* outSavedAt)
+{
+    if (!out || server.isEmpty())
+        return false;
+    QJsonObject root;
+    qint64 ignored = 0;
+    if (!readCacheFile(cacheFilePath(server, QStringLiteral("rec"), cameraId), &root, &ignored))
+        return false;
+
+    QJsonObject entry;
+    const QJsonObject ranges = root.value(QStringLiteral("ranges")).toObject();
+    if (ranges.contains(rangeKey)) {
+        entry = ranges.value(rangeKey).toObject();
+    } else if (rangeKey == QLatin1String("live") && root.contains(QStringLiteral("data"))) {
+        // Legacy single-range file.
+        entry.insert(QStringLiteral("data"), root.value(QStringLiteral("data")));
+        entry.insert(QStringLiteral("savedAt"), root.value(QStringLiteral("savedAt")));
+    } else {
+        return false;
+    }
+
+    *out = jsonArrayToList(entry.value(QStringLiteral("data")).toArray());
+    if (outSavedAt)
+        *outSavedAt = static_cast<qint64>(entry.value(QStringLiteral("savedAt")).toDouble(0));
+    return true;
+}
+
+bool recordingRangeFresh(const QString& server, const QString& cameraId, const QString& rangeKey)
+{
+    QVariantList ignored;
+    qint64 savedAt = 0;
+    if (!loadRecordingRangeFromDisk(server, cameraId, rangeKey, &ignored, &savedAt))
+        return false;
+    return cacheIsFresh(savedAt);
+}
+
+void saveRecordingRangeToDisk(const QString& server, const QString& cameraId,
+                              const QString& rangeKey, const QVariantList& segments)
+{
+    if (server.isEmpty())
+        return;
+    const QString path = cacheFilePath(server, QStringLiteral("rec"), cameraId);
+    QJsonObject root;
+    qint64 ignored = 0;
+    readCacheFile(path, &root, &ignored);
+
+    QJsonObject ranges = root.value(QStringLiteral("ranges")).toObject();
+    if (!ranges.contains(QLatin1String("live")) && root.contains(QStringLiteral("data"))) {
+        QJsonObject legacy;
+        legacy.insert(QStringLiteral("data"), root.value(QStringLiteral("data")));
+        legacy.insert(QStringLiteral("savedAt"), root.value(QStringLiteral("savedAt")));
+        ranges.insert(QStringLiteral("live"), legacy);
+    }
+    QJsonObject entry;
+    entry.insert(QStringLiteral("data"), listToJsonArray(segments));
+    entry.insert(QStringLiteral("savedAt"),
+                 static_cast<double>(QDateTime::currentMSecsSinceEpoch()));
+    ranges.insert(rangeKey, entry);
+    root.insert(QStringLiteral("ranges"), ranges);
+    root.remove(QStringLiteral("data"));
+    root.remove(QStringLiteral("savedAt"));
+
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    f.close();
+}
+
 bool loadStringListFromDisk(const QString& server, const QString& kind, const QString& key,
                             QStringList* out)
 {
@@ -278,7 +350,8 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
         emit recordingsLoaded(cameraId, m_recordingsByCamera.value(cameraId));
     } else {
         QVariantList fromDisk;
-        if (loadListFromDisk(m_server, QStringLiteral("rec"), cameraId, &fromDisk)) {
+        if (loadRecordingRangeFromDisk(m_server, cameraId, QLatin1String("live"),
+                                       &fromDisk, nullptr)) {
             m_recordingsByCamera[cameraId] = fromDisk;
             emit recordingsLoaded(cameraId, fromDisk);
         }
@@ -298,7 +371,7 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
     if (!diskCacheFresh(m_server, QStringLiteral("days"), cameraId))
         loadRecordingDays(cameraId);
 
-    if (diskCacheFresh(m_server, QStringLiteral("rec"), cameraId)) {
+    if (recordingRangeFresh(m_server, cameraId, QLatin1String("live"))) {
         emit recordingsRefreshFinished(cameraId);
         return;
     }
@@ -307,13 +380,39 @@ void FrigateTimeline::loadRecordings(const QString& cameraId)
     loadRecordingsRange(cameraId, nowSec - 6 * 3600, nowSec);
 }
 
-void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
+void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec,
+                                          bool dayRange)
 {
     if (m_server.isEmpty() || cameraId.isEmpty()) {
-        m_recordingsByCamera[cameraId] = QVariantList();
+        if (!dayRange)
+            m_recordingsByCamera[cameraId] = QVariantList();
         emit recordingsLoaded(cameraId, QVariantList());
         emit recordingsRefreshFinished(cameraId);
         return;
+    }
+
+    // All ranges live in the camera's single cache file. Only the in-memory
+    // key is composite so a day never replaces the recent/live window.
+    const QString rangeKey = dayRange ? QString::number(afterSec) : QLatin1String("live");
+    const QString cacheKey = dayRange
+            ? cameraId + QLatin1Char('|') + rangeKey
+            : cameraId;
+
+    if (dayRange) {
+        if (m_recordingsByCamera.contains(cacheKey)) {
+            emit recordingsLoaded(cameraId, m_recordingsByCamera.value(cacheKey));
+            emit recordingsRefreshFinished(cameraId);
+            return;
+        }
+        QVariantList fromDisk;
+        if (loadRecordingRangeFromDisk(m_server, cameraId, rangeKey, &fromDisk, nullptr)) {
+            m_recordingsByCamera[cacheKey] = fromDisk;
+            emit recordingsLoaded(cameraId, fromDisk);
+        }
+        if (recordingRangeFresh(m_server, cameraId, rangeKey)) {
+            emit recordingsRefreshFinished(cameraId);
+            return;
+        }
     }
 
     // Calendar selections can start overlapping requests. Only the newest
@@ -329,15 +428,20 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
     QNetworkRequest req(url);
     QNetworkReply* reply = m_net->get(req);
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, cameraId, requestId]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, cameraId, cacheKey, rangeKey, requestId]() {
         const QByteArray data = reply->readAll();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QNetworkReply::NetworkError networkError = reply->error();
         reply->deleteLater();
 
-        // Ignore a stale response from a previously selected day/range.
-        if (m_recordingsRequestSerial.value(cameraId) != requestId)
+        // Ignore a stale response from a previously selected day/range, but
+        // still report completion so the UI doesn't stay stuck on
+        // "Timeline loading" while a newer request is in flight.
+        if (m_recordingsRequestSerial.value(cameraId) != requestId) {
+            emit recordingsRefreshFinished(cameraId);
             return;
+        }
 
         // A failed/cancelled request has no authoritative day data. Do not
         // overwrite the cached timeline or emit an empty replacement for it.
@@ -368,8 +472,8 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
         }
 
         segments = mergeTouchingOnly(segments, 120.0);
-        m_recordingsByCamera[cameraId] = segments;
-        saveListToDisk(m_server, QStringLiteral("rec"), cameraId, segments);
+        m_recordingsByCamera[cacheKey] = segments;
+        saveRecordingRangeToDisk(m_server, cameraId, rangeKey, segments);
         emit recordingsLoaded(cameraId, segments);
         emit recordingsRefreshFinished(cameraId);
     });
@@ -718,7 +822,8 @@ QVariantList FrigateTimeline::getRecordings(const QString& cameraId) const
     // Hydrate from disk so QML can paint without waiting for load*()
     if (!m_server.isEmpty() && !cameraId.isEmpty()) {
         QVariantList fromDisk;
-        if (loadListFromDisk(m_server, QStringLiteral("rec"), cameraId, &fromDisk))
+        if (loadRecordingRangeFromDisk(m_server, cameraId, QLatin1String("live"),
+                                       &fromDisk, nullptr))
             return fromDisk;
     }
     return {};

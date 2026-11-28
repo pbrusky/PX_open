@@ -543,16 +543,30 @@ void FrigatePlayback::requestNextSegmentPart(SegmentClipState* clip)
                 if (delta > 0)
                     partsNeeded += int(std::ceil(qreal(delta) / 10.0));
             }
-            const qint64 clipLen = clip->endSec - clip->startSec;
+            // The local file starts at the first downloaded segment boundary,
+            // which can be well before clip->startSec. Clamp to the duration
+            // actually present in the file, not to the requested clip length.
+            qint64 fileLenSec = clip->endSec - clip->startSec;
+            if (!clip->durations.isEmpty() && clip->firstPart > 0) {
+                double fileLen = 0.0;
+                for (int i = clip->firstPart - 1; i < clip->maxParts && i < clip->durations.size(); ++i)
+                    fileLen += clip->durations.at(i);
+                if (fileLen > 0)
+                    fileLenSec = qint64(fileLen);
+            }
             if (offset < 0)
                 offset = 0;
-            if (offset > clipLen - 1)
-                offset = clipLen - 1;
+            if (offset > fileLenSec - 1)
+                offset = fileLenSec - 1;
 
             if (clip->nextPart > partsNeeded) {
                 clip->workerStarted = true;
                 m_clipStartWallMs.insert(clip->cameraId, QDateTime::currentMSecsSinceEpoch());
                 startLocalWorker(clip->cameraId, clip->gen, clip->path, offset);
+
+                // Start warming the next range as soon as this clip is decodable
+                // instead of waiting for the current clip to finish. VOD
+                // segments are slow to fetch, so the overlap matters.
             }
         }
 
@@ -694,23 +708,11 @@ void FrigatePlayback::startUrlWorker(const QString& cameraId, int gen, const QSt
     QThread* thread = new QThread();
 
     connect(worker, &FFmpegWorker::openInputOk, this,
-            [this, cameraId, gen]() {
+            [this, cameraId, gen, url]() {
         if (m_seekGen.value(cameraId, 0) != gen)
             return;
         emit cameraOnline(cameraId);
         emit playbackStarted(cameraId);
-
-        // Warm the next range only after this clip is open. Playback reads a
-        // local file, so this request cannot delay the clip being displayed.
-        QTimer::singleShot(kPrefetchDelayMs, this, [this, cameraId, gen]() {
-            if (m_seekGen.value(cameraId, 0) != gen)
-                return;
-            if (!m_playbackActiveByCamera.value(cameraId, false))
-                return;
-            const qint64 nextStart = m_playbackEndSecByCamera.value(cameraId, 0);
-            if (nextStart > 0)
-                prefetchNextClip(cameraId, gen, nextStart, nextStart + kClipContinueAfterSec);
-        });
     }, Qt::QueuedConnection);
 
     connect(worker, &FFmpegWorker::openInputFailed, this,
@@ -1056,14 +1058,35 @@ void FrigatePlayback::beginClip(const QString& cameraId, int gen, qint64 startSe
         prefetched->targetSec = targetSec > 0 ? targetSec : prefetched->targetSec;
         if (offset < 0)
             offset = 0;
-        if (offset > endSec - startSec - 1)
-            offset = endSec - startSec - 1;
+        qint64 fileLenSec = endSec - startSec;
+        if (!prefetched->durations.isEmpty() && prefetched->firstPart > 0) {
+            double fileLen = 0.0;
+            for (int i = prefetched->firstPart - 1;
+                 i < prefetched->maxParts && i < prefetched->durations.size(); ++i)
+                fileLen += prefetched->durations.at(i);
+            if (fileLen > 0)
+                fileLenSec = qint64(fileLen);
+        }
+        if (offset > fileLenSec - 1)
+            offset = fileLenSec - 1;
         m_clipStartWallMs[cameraId] = QDateTime::currentMSecsSinceEpoch();
         startLocalWorker(cameraId, gen, prefetched->path, offset);
         return;
     }
 
     startSegmentClip(cameraId, gen, startSec, endSec, targetSec, true, false, vodUrl, clipUrl);
+
+    // Warm the following range immediately so it is ready by the time this
+    // clip finishes. VOD segment downloads are the slow part of playback.
+    if (!m_prefetchClipKey.value(cameraId).isEmpty() || m_segmentClips.contains(clipKey(cameraId, endSec, endSec + kClipContinueAfterSec)))
+        return;
+    QTimer::singleShot(kPrefetchDelayMs, this, [this, cameraId, gen, endSec]() {
+        if (m_seekGen.value(cameraId, 0) != gen)
+            return;
+        if (!m_playbackActiveByCamera.value(cameraId, false))
+            return;
+        prefetchNextClip(cameraId, gen, endSec, endSec + kClipContinueAfterSec);
+    });
 }
 
 void FrigatePlayback::continuePlayback(const QString& cameraId, int gen)
@@ -1090,6 +1113,21 @@ void FrigatePlayback::continuePlayback(const QString& cameraId, int gen)
         endPlaybackSession(cameraId);
         emit playbackStopped(cameraId);
         return;
+    }
+
+    // If the next range is still being warmed, give it a short grace period
+    // instead of starting a competing download and dropping playback.
+    const QString nextKey = clipKey(cameraId, nextStart, nextEnd);
+    SegmentClipState* warming = m_segmentClips.value(nextKey, nullptr);
+    if (warming && !warming->ready && !warming->complete) {
+        const qint64 elapsed = QDateTime::currentMSecsSinceEpoch()
+                               - m_clipStartWallMs.value(cameraId, 0);
+        if (elapsed < 90000) {
+            QTimer::singleShot(3000, this, [this, cameraId, gen]() {
+                continuePlayback(cameraId, gen);
+            });
+            return;
+        }
     }
 
     beginClip(cameraId, gen, nextStart, nextEnd, false);

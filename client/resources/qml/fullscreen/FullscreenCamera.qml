@@ -229,7 +229,9 @@ Item {
                 stop()
                 return
             }
-            if (ticks > 200) {
+            // VOD segments can be slow to prepare on remote hosts; allow
+            // enough time for the first clip to download before giving up.
+            if (ticks > 1200) {
                 stop()
                 root.isPlayback = false
                 root.playbackReady = false
@@ -683,6 +685,13 @@ Item {
             frigateRef.loadRecordings(id)
         if (typeof frigateRef.loadRecordingDays === "function")
             frigateRef.loadRecordingDays(id)
+
+        // Playback shows real recorded data, so ask for a fresh range instead
+        // of relying on a possibly stale disk cache.
+        if (typeof frigateRef.loadRecordingsRange === "function") {
+            var nowSec = Math.floor(Date.now() / 1000)
+            frigateRef.loadRecordingsRange(id, nowSec - 6 * 3600, nowSec)
+        }
 
         if (typeof frigateRef.loadMotionActivity === "function")
             frigateRef.loadMotionActivity(id)

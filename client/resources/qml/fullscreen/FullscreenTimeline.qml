@@ -1,4 +1,4 @@
-﻿import QtQuick 2.15
+import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Dialogs
 import "qrc:/app/resources/qml/components"
@@ -36,6 +36,7 @@ Rectangle {
 
     signal seekRequested(real timestampMs)
     signal hoverActiveChanged(bool active)
+    signal refreshRequested()
 
     property real exportStartMs: -1
     property real exportEndMs: -1
@@ -202,6 +203,21 @@ Rectangle {
         refreshExportUiOpen()
     }
 
+    function requestRecordingsRefresh() {
+        if (!frigateRef)
+            return
+        var id = (cameraId && cameraId.length) ? cameraId : cameraName
+        if (!id || !id.length)
+            return
+        timelineLoading = true
+        refreshing = true
+        var nowSec = Math.floor(Date.now() / 1000)
+        if (typeof frigateRef.loadRecordingsRange === "function")
+            frigateRef.loadRecordingsRange(id, nowSec - 6 * 3600, nowSec)
+        else if (typeof frigateRef.loadRecordings === "function")
+            frigateRef.loadRecordings(id)
+    }
+
     function cancelExport() {
         if (!exportBusy)
             return
@@ -281,6 +297,20 @@ Rectangle {
         }
     }
 
+    // Safety net: a superseded or failed day request can leave the loading
+    // banner up indefinitely. Always clear it after a bounded wait.
+    Timer {
+        id: dayLoadWatchdog
+        interval: 20000
+        repeat: false
+        onTriggered: {
+            if (timelineLoading) {
+                timelineLoading = false
+                refreshing = false
+            }
+        }
+    }
+
     Timer {
         id: exportDoneClearTimer
         interval: 1800
@@ -342,12 +372,20 @@ Rectangle {
                     setDataRange(startTs, endTs)
                 else
                     clampView()
+            } else {
+                // Don't leave stale bounds behind when a camera has no data.
+                startTs = 0
+                endTs = 0
+                dataStartTs = 0
+                dataEndTs = 0
+                applyDefaultView()
             }
         }
 
         function onRecordingsRefreshFinished(id) {
             if (id !== cameraId && id !== cameraName)
                 return
+            dayLoadWatchdog.stop()
             timelineLoading = false
             refreshing = false
         }
@@ -756,6 +794,7 @@ Rectangle {
         followLive = false
         timelineLoading = true
         refreshing = true
+        dayLoadWatchdog.restart()
         if (dayStart < dataStartBound())
             dataStartTs = dayStart
         if (dayEnd > dataEndBound())
@@ -768,7 +807,9 @@ Rectangle {
 
         var id = cameraId !== "" ? cameraId : cameraName
         if (frigateRef && id !== "") {
-            if (typeof frigateRef.loadRecordingsRange === "function")
+            if (typeof frigateRef.loadRecordingsForDay === "function")
+                frigateRef.loadRecordingsForDay(id, Math.floor(dayStart), Math.floor(dayEnd))
+            else if (typeof frigateRef.loadRecordingsRange === "function")
                 frigateRef.loadRecordingsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
             if (typeof frigateRef.loadEventsRange === "function")
                 frigateRef.loadEventsRange(id, Math.floor(dayStart), Math.floor(dayEnd))
@@ -852,6 +893,7 @@ Rectangle {
         onSeekRequested: function(tsMs) {
             timeline.seekRequested(tsMs)
         }
+        onRefreshRequested: timeline.requestRecordingsRefresh()
         onHoverTimeChanged: function(tsMs) {
             timeline.hoverTsMs = tsMs
             cursorLine.visible = tsMs > 0

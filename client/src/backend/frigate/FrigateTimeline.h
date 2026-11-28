@@ -22,7 +22,8 @@ public:
     void loadEvents(const QString& cameraId);
     void loadMotionActivity(const QString& cameraId);
 
-    void loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
+    void loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec,
+                             bool dayRange = false);
     void loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
     void loadMotionActivityRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
 

@@ -285,9 +285,15 @@ void FrigateAPI::loadMotionActivity(const QString& cameraId)
     m_timeline->loadMotionActivity(cameraId);
 }
 
-void FrigateAPI::loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
+void FrigateAPI::loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec,
+                                     bool dayRange)
 {
-    m_timeline->loadRecordingsRange(cameraId, afterSec, beforeSec);
+    m_timeline->loadRecordingsRange(cameraId, afterSec, beforeSec, dayRange);
+}
+
+void FrigateAPI::loadRecordingsForDay(const QString& cameraId, qint64 afterSec, qint64 beforeSec)
+{
+    m_timeline->loadRecordingsRange(cameraId, afterSec, beforeSec, true);
 }
 
 void FrigateAPI::loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec)

@@ -304,6 +304,13 @@ Item {
             Qt.callLater(function() {
                 if (root.timelineCameraId !== id) return
                 root.loadGridTimelineData()
+                // Force a fresh range for the newly selected camera so the
+                // recording bar reaches the live edge instead of stopping at
+                // the last cached segment.
+                if (root.frigateRef && typeof root.frigateRef.loadRecordingsRange === "function") {
+                    var nowSec = Math.floor(Date.now() / 1000)
+                    root.frigateRef.loadRecordingsRange(id, nowSec - 6 * 3600, nowSec)
+                }
                 Qt.callLater(function() { if (root.timelineCameraId === id && gridTimelineLoader.item) root.applyCachedTimeline(gridTimelineLoader.item, id) })
             })
         } else {

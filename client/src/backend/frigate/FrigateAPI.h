@@ -67,7 +67,9 @@ public:
     Q_INVOKABLE void loadEvents(const QString& cameraId);
     Q_INVOKABLE void loadMotionActivity(const QString& cameraId);
 
-    Q_INVOKABLE void loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
+    Q_INVOKABLE void loadRecordingsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec,
+                                         bool dayRange = false);
+    Q_INVOKABLE void loadRecordingsForDay(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
     Q_INVOKABLE void loadEventsRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
     Q_INVOKABLE void loadMotionActivityRange(const QString& cameraId, qint64 afterSec, qint64 beforeSec);
 

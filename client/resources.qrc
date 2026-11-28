@@ -138,6 +138,7 @@
         <file>assets/icons/nx/minimize.svg</file>
         <file>assets/icons/nx/maximize.svg</file>
         <file>assets/icons/nx/restore.svg</file>
+        <file>assets/icons/nx/refresh.svg</file>
 
     </qresource>
 </RCC>
