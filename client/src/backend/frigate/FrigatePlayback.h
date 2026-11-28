@@ -88,6 +88,9 @@ private:
     void continuePlayback(const QString& cameraId, int gen);
     static QString clipKey(const QString& cameraId, qint64 startSec, qint64 endSec);
     void cancelOtherHourManifests(const QString& cameraId, qint64 hourStart);
+    void ensureHourManifest(const QString& cameraId, qint64 hourStart);
+    void warmAdjacentHours(const QString& cameraId, qint64 fromSec, qint64 toSec);
+    static qint64 hourFloor(qint64 sec) { return (sec / 3600) * 3600; }
     void requestHourManifest(const QString& cameraId, qint64 hourStart, const QString& key);
     void prepareHourWindow(SegmentClipState* clip);
     void startSegmentDownload(SegmentClipState* clip);

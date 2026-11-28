@@ -25,6 +25,10 @@ constexpr qint64 kClipMinLenSec = 10;
 // cannot compete with playback. Give the UI a moment to settle, then start
 // preparing the next clip immediately.
 constexpr int kPrefetchDelayMs = 1000;
+
+// When the playhead/clip end is within this many seconds of an hour boundary,
+// also warm the next hour's HLS manifest so continuous play does not stall.
+constexpr qint64 kHourPrefetchLeadSec = 120; // 2 minutes
 }
 
 FrigatePlayback::FrigatePlayback(QObject* parent)
@@ -193,12 +197,14 @@ void FrigatePlayback::cancelPrefetch(const QString& cameraId)
 void FrigatePlayback::cancelOtherHourManifests(const QString& cameraId, qint64 hourStart)
 {
     const QString prefix = cameraId + QLatin1Char('|');
+    const qint64 keepA = hourStart;
+    const qint64 keepB = hourStart + 3600; // next hour — needed for boundary continuity
     const QStringList keys = m_hourManifestReplies.keys();
     for (const QString& key : keys) {
         if (!key.startsWith(prefix))
             continue;
         const qint64 otherHour = key.mid(prefix.length()).toLongLong();
-        if (otherHour == hourStart)
+        if (otherHour == keepA || otherHour == keepB)
             continue;
         QNetworkReply* reply = m_hourManifestReplies.take(key);
         if (reply) {
@@ -207,6 +213,37 @@ void FrigatePlayback::cancelOtherHourManifests(const QString& cameraId, qint64 h
             reply->deleteLater();
         }
     }
+}
+
+void FrigatePlayback::ensureHourManifest(const QString& cameraId, qint64 hourStart)
+{
+    if (cameraId.trimmed().isEmpty() || m_server.isEmpty() || hourStart <= 0)
+        return;
+    const QString key = QStringLiteral("%1|%2").arg(cameraId).arg(hourStart);
+    if (m_hourManifestCache.contains(key) || m_hourManifestReplies.contains(key))
+        return;
+    requestHourManifest(cameraId, hourStart, key);
+}
+
+void FrigatePlayback::warmAdjacentHours(const QString& cameraId, qint64 fromSec, qint64 toSec)
+{
+    if (cameraId.trimmed().isEmpty() || fromSec <= 0)
+        return;
+    if (toSec < fromSec)
+        toSec = fromSec;
+
+    const qint64 h0 = hourFloor(fromSec);
+    ensureHourManifest(cameraId, h0);
+
+    // Always warm next hour if the range reaches it, or we are close to the boundary.
+    const qint64 hourEnd = h0 + 3600;
+    if (toSec >= hourEnd - kHourPrefetchLeadSec)
+        ensureHourManifest(cameraId, h0 + 3600);
+
+    // If the requested range already spans a second hour, warm that hour too.
+    const qint64 h1 = hourFloor(toSec);
+    if (h1 > h0)
+        ensureHourManifest(cameraId, h1);
 }
 
 void FrigatePlayback::requestHourManifest(const QString& cameraId, qint64 hourStart, const QString& key)
@@ -294,9 +331,7 @@ void FrigatePlayback::warmRecordings(const QString& cameraId, qint64 timestampMs
     if (cameraId.trimmed().isEmpty() || m_server.isEmpty())
         return;
     const qint64 sec = timestampMs > 10000000000LL ? timestampMs / 1000 : timestampMs;
-    const qint64 hourStart = (sec / 3600) * 3600;
-    const QString key = QStringLiteral("%1|%2").arg(cameraId).arg(hourStart);
-    requestHourManifest(cameraId, hourStart, key);
+    warmAdjacentHours(cameraId, sec, sec + kClipContinueAfterSec);
 }
 
 void FrigatePlayback::prepareHourWindow(SegmentClipState* clip)
@@ -304,12 +339,16 @@ void FrigatePlayback::prepareHourWindow(SegmentClipState* clip)
     if (!clip)
         return;
 
-    const qint64 hourStart = (clip->targetSec / 3600) * 3600;
+    const qint64 hourStart = hourFloor(clip->targetSec);
     const QString key = QStringLiteral("%1|%2").arg(clip->cameraId).arg(hourStart);
 
     clip->windowKey = key;
     clip->windowStartSec = hourStart;
     clip->windowEndSec = hourStart + 3600;
+
+    // Continuous play: if this clip runs near/over the hour end, cache the
+    // next hour now.
+    warmAdjacentHours(clip->cameraId, clip->startSec, clip->endSec);
 
     if (m_hourManifestCache.contains(key)) {
         clip->durations = m_hourDurationsCache.value(key);
@@ -588,6 +627,8 @@ void FrigatePlayback::prefetchNextClip(const QString& cameraId, int gen, qint64 
         return;
     if (m_seekGen.value(cameraId, 0) != gen || !m_playbackActiveByCamera.value(cameraId, false))
         return;
+
+    warmAdjacentHours(cameraId, startSec, endSec);
 
     const qint64 nowSec = QDateTime::currentSecsSinceEpoch();
     if (endSec > nowSec - 2)
@@ -1011,6 +1052,31 @@ void FrigatePlayback::beginClip(const QString& cameraId, int gen, qint64 startSe
         }
         return;
     }
+
+    // Segment VOD is hour-scoped. Cap this clip at the hour boundary so
+    // continuePlayback() / prefetch owns the next hour instead of a black gap.
+    const qint64 targetHint = m_pendingTargetSec.value(cameraId, startSec);
+    const qint64 hourStart = hourFloor(targetHint > 0 ? targetHint : startSec);
+    const qint64 hourEnd = hourStart + 3600;
+    if (endSec > hourEnd)
+        endSec = hourEnd;
+    if (endSec <= startSec) {
+        // Request was entirely past this hour (or empty); advance into next hour.
+        startSec = hourEnd;
+        endSec = hourEnd + kClipContinueAfterSec;
+        const qint64 nowSec2 = QDateTime::currentSecsSinceEpoch();
+        if (endSec > nowSec2 - 2)
+            endSec = nowSec2 - 2;
+        if (endSec <= startSec) {
+            if (!resetQueue) {
+                endPlaybackSession(cameraId);
+                emit playbackStopped(cameraId);
+            }
+            return;
+        }
+    }
+
+    warmAdjacentHours(cameraId, startSec, endSec + kClipContinueAfterSec);
 
     m_playbackEndSecByCamera[cameraId] = endSec;
 
