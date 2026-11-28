@@ -301,7 +301,7 @@ Rectangle {
     // banner up indefinitely. Always clear it after a bounded wait.
     Timer {
         id: dayLoadWatchdog
-        interval: 20000
+        interval: 90000
         repeat: false
         onTriggered: {
             if (timelineLoading) {
@@ -363,8 +363,30 @@ Rectangle {
         function onRecordingsLoaded(id, segments) {
             if (id !== cameraId && id !== cameraName)
                 return
+            var list = segments || []
+
+            // Live and day views share one backend. Ignore data belonging to
+            // the other mode so a late response cannot erase the current view.
+            if (_fixedDayMode && list.length > 0) {
+                var overlaps = false
+                for (var i = 0; i < list.length; i++) {
+                    var s = Number(list[i].start)
+                    var e = Number(list[i].end)
+                    if (e > viewStartTs && s < viewEndTs) {
+                        overlaps = true
+                        break
+                    }
+                }
+                if (!overlaps)
+                    return
+            } else if (!_fixedDayMode && list.length > 0) {
+                var lastEnd = Number(list[list.length - 1].end)
+                if (lastEnd < Date.now() / 1000 - 6 * 3600)
+                    return
+            }
+
             timelineLoading = false
-            recordings = segments || []
+            recordings = list
             if (recordings.length > 0) {
                 startTs = Number(recordings[0].start)
                 endTs = Number(recordings[recordings.length - 1].end)
@@ -372,6 +394,9 @@ Rectangle {
                     setDataRange(startTs, endTs)
                 else
                     clampView()
+            } else if (_fixedDayMode) {
+                // No recordings for the chosen day: keep the day view empty.
+                recordings = []
             } else {
                 // Don't leave stale bounds behind when a camera has no data.
                 startTs = 0
@@ -385,9 +410,13 @@ Rectangle {
         function onRecordingsRefreshFinished(id) {
             if (id !== cameraId && id !== cameraName)
                 return
+            refreshing = false
+            // A stale live response must not clear a pending day load. The
+            // day's own recordingsLoaded (or the watchdog) clears the banner.
+            if (_fixedDayMode && timelineLoading)
+                return
             dayLoadWatchdog.stop()
             timelineLoading = false
-            refreshing = false
         }
 
         function onEventsLoaded(id, list) {

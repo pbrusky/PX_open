@@ -58,6 +58,7 @@
         <file>resources/qml/components/popups/OnvifDiscoveryPopup.qml</file>
         <file>resources/qml/components/popups/RestartPopup.qml</file>
         <file>resources/qml/components/popups/AboutPopup.qml</file>
+        <file>resources/qml/components/popups/SettingsPopup.qml</file>
         <file>resources/qml/components/popups/ConfigEditorPopup.qml</file>
         <file>resources/qml/components/popups/ShortcutHelpPopup.qml</file>
 

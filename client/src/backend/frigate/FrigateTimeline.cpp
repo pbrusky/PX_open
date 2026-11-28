@@ -415,9 +415,9 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
         }
     }
 
-    // Calendar selections can start overlapping requests. Only the newest
-    // request for this camera is allowed to replace the timeline.
-    const quint64 requestId = ++m_recordingsRequestSerial[cameraId];
+    // Serialise per range, not per camera: a live refresh must not discard a
+    // calendar-day response (or vice versa).
+    const quint64 requestId = ++m_recordingsRequestSerial[cacheKey];
 
     QUrl url(QStringLiteral("%1/api/%2/recordings").arg(m_server, cameraId));
     QUrlQuery query;
@@ -438,7 +438,7 @@ void FrigateTimeline::loadRecordingsRange(const QString& cameraId, qint64 afterS
         // Ignore a stale response from a previously selected day/range, but
         // still report completion so the UI doesn't stay stuck on
         // "Timeline loading" while a newer request is in flight.
-        if (m_recordingsRequestSerial.value(cameraId) != requestId) {
+        if (m_recordingsRequestSerial.value(cacheKey) != requestId) {
             emit recordingsRefreshFinished(cameraId);
             return;
         }
